@@ -1721,13 +1721,7 @@ app.listen(PORT, () => console.log(`RefineCalc running on port ${PORT}`));
             }
 
             if (updatedAny) {
-              populateCalculatorSelects();
-              renderRefineriesTable();
-              renderTransportersTable();
-              renderPriceListTable();
-              renderLocationsGrid();
-              computeBestRoutes();
-              updateStatCounts();
+              refreshEntireApp();
             } else {
               // First time connecting to fresh Neon DB -> seed current master arrays & brand to cloud!
               const initialBrand = loadStorage('brand_settings', null);
@@ -1963,6 +1957,31 @@ app.listen(PORT, () => console.log(`RefineCalc running on port ${PORT}`));
           } else {
             refFilterSelect.value = 'ALL';
           }
+        }
+
+        // Also keep price-list modal refinery dropdown in sync
+        const modalRefSelect = document.getElementById('price-refinery-select');
+        if (modalRefSelect) {
+          const curModalRef = modalRefSelect.value;
+          modalRefSelect.innerHTML = refineries.map(r => `<option value="${r.code}">${r.name} (${r.city})</option>`).join('');
+          if (curModalRef && refineries.some(r => r.code === curModalRef)) {
+            modalRefSelect.value = curModalRef;
+          }
+        }
+      }
+
+      // Unified Whole-App Reactivity Helper: refreshes every dropdown, table, card, quote & counter
+      function refreshEntireApp() {
+        populateCalculatorSelects();
+        renderRefineriesTable();
+        renderTransportersTable();
+        renderPriceListTable();
+        renderLocationsGrid();
+        computeBestRoutes();
+        updateStatCounts();
+        const quoteModal = document.getElementById('quote-modal');
+        if (quoteModal && !quoteModal.classList.contains('hidden') && activeQuotation) {
+          openQuoteModal();
         }
       }
 
@@ -2823,39 +2842,85 @@ Validity: 15-Day Revision Cycle`;
         const reader = new FileReader();
         reader.onload = function(evt) {
           try {
-            const lines = evt.target.result.split('\n');
+            const lines = evt.target.result.split(/\r?\n/);
             let added = 0;
+            let updated = 0;
+            let newRefsAdded = false;
             for (let i = 1; i < lines.length; i++) {
               const line = lines[i].trim();
               if (!line) continue;
               const cols = line.split(',').map(c => c.replace(/^"|"$/g, '').trim());
               if (cols.length >= 4) {
                 const prod = cols[0];
-                const refCode = cols[1];
+                const refCode = cols[1].toUpperCase();
                 const basic = parseFloat(cols[2]) || 0;
                 const disc = parseFloat(cols[3]) || 0;
                 const cStart = cols[4] || '2026-10-16';
                 const cEnd = cols[5] || '2026-10-31';
-                priceLists.push({
-                  id: 'p_csv_' + Date.now() + '_' + i,
-                  product: prod,
-                  refineryCode: refCode,
-                  basicPrice: basic,
-                  discount: disc,
-                  cycleStart: cStart,
-                  cycleEnd: cEnd,
-                  cycleTag: 'current'
-                });
-                added++;
+                const cTag = cols[6] || 'current';
+                if (!prod || !refCode) continue;
+
+                // Ensure refinery exists in refineries master so it immediately appears across Calculator & Route Cards
+                if (!refineries.some(r => r.code.toUpperCase() === refCode)) {
+                  const readableName = refCode.replace(/_/g, ' ') + ' Refinery';
+                  refineries.push({
+                    id: 'ref_auto_' + Date.now() + '_' + i,
+                    code: refCode,
+                    name: readableName,
+                    city: refCode.split('_').slice(1).join(' ') || 'Refinery Hub',
+                    state: 'India',
+                    lat: 21.1458,
+                    lng: 79.0882,
+                    cap: '1,000 MT/day',
+                    active: true
+                  });
+                  newRefsAdded = true;
+                }
+
+                // Upsert existing (product + refineryCode + cycleTag) or push new entry
+                const existingIdx = priceLists.findIndex(p =>
+                  p.product.toLowerCase() === prod.toLowerCase() &&
+                  p.refineryCode.toUpperCase() === refCode &&
+                  (p.cycleTag || 'current') === cTag
+                );
+
+                if (existingIdx !== -1) {
+                  priceLists[existingIdx] = {
+                    ...priceLists[existingIdx],
+                    product: prod,
+                    refineryCode: refCode,
+                    basicPrice: basic,
+                    discount: disc,
+                    cycleStart: cStart,
+                    cycleEnd: cEnd,
+                    cycleTag: cTag
+                  };
+                  updated++;
+                } else {
+                  priceLists.push({
+                    id: 'p_csv_' + Date.now() + '_' + i,
+                    product: prod,
+                    refineryCode: refCode,
+                    basicPrice: basic,
+                    discount: disc,
+                    cycleStart: cStart,
+                    cycleEnd: cEnd,
+                    cycleTag: cTag
+                  });
+                  added++;
+                }
               }
             }
+            if (newRefsAdded) {
+              saveStorage('refineries', refineries);
+            }
             saveStorage('pricelists', priceLists);
-            renderPriceListTable();
-            populateCalculatorSelects();
-            computeBestRoutes();
-            showToast(`Imported ${added} price list entries successfully!`, 'success');
+            refreshEntireApp();
+            showToast(`Price List synced across app (${added} added, ${updated} updated)!`, 'success');
           } catch (err) {
             showToast('Error parsing CSV file', 'error');
+          } finally {
+            e.target.value = '';
           }
         };
         reader.readAsText(file);
@@ -2876,34 +2941,46 @@ Validity: 15-Day Revision Cycle`;
         const reader = new FileReader();
         reader.onload = function(evt) {
           try {
-            const lines = evt.target.result.split('\n');
+            const lines = evt.target.result.split(/\r?\n/);
             let added = 0;
+            let updated = 0;
             for (let i = 1; i < lines.length; i++) {
               const line = lines[i].trim();
               if (!line) continue;
               const cols = line.split(',').map(c => c.replace(/^"|"$/g, '').trim());
               if (cols.length >= 6) {
-                refineries.push({
-                  id: 'ref_csv_' + Date.now() + '_' + i,
-                  code: cols[0].toUpperCase(),
-                  name: cols[1],
-                  city: cols[2],
-                  state: cols[3],
+                const code = cols[0].toUpperCase();
+                if (!code) continue;
+                const refObj = {
+                  code,
+                  name: cols[1] || code,
+                  city: cols[2] || '',
+                  state: cols[3] || '',
                   lat: parseFloat(cols[4]) || 21.14,
                   lng: parseFloat(cols[5]) || 79.08,
                   cap: cols[6] || '1,000 MT/day',
                   active: true
-                });
-                added++;
+                };
+                const existingIdx = refineries.findIndex(r => r.code.toUpperCase() === code);
+                if (existingIdx !== -1) {
+                  refineries[existingIdx] = { ...refineries[existingIdx], ...refObj };
+                  updated++;
+                } else {
+                  refineries.push({
+                    id: 'ref_csv_' + Date.now() + '_' + i,
+                    ...refObj
+                  });
+                  added++;
+                }
               }
             }
             saveStorage('refineries', refineries);
-            renderRefineriesTable();
-            populateCalculatorSelects();
-            computeBestRoutes();
-            showToast(`Imported ${added} refineries successfully!`, 'success');
+            refreshEntireApp();
+            showToast(`Refineries synced across app (${added} added, ${updated} updated)!`, 'success');
           } catch (err) {
             showToast('Error parsing Refineries CSV', 'error');
+          } finally {
+            e.target.value = '';
           }
         };
         reader.readAsText(file);
@@ -2924,32 +3001,45 @@ Validity: 15-Day Revision Cycle`;
         const reader = new FileReader();
         reader.onload = function(evt) {
           try {
-            const lines = evt.target.result.split('\n');
+            const lines = evt.target.result.split(/\r?\n/);
             let added = 0;
+            let updated = 0;
             for (let i = 1; i < lines.length; i++) {
               const line = lines[i].trim();
               if (!line) continue;
               const cols = line.split(',').map(c => c.replace(/^"|"$/g, '').trim());
               if (cols.length >= 4) {
-                transporters.push({
-                  id: 'tr_csv_' + Date.now() + '_' + i,
-                  name: cols[0],
-                  hub: cols[1],
+                const name = cols[0];
+                if (!name) continue;
+                const trObj = {
+                  name,
+                  hub: cols[1] || '',
                   ratePerKmPerMt: parseFloat(cols[2]) || 2.25,
                   minFreight: parseFloat(cols[3]) || 3500,
                   fleet: cols[4] || 'Standard Tanker Fleet',
                   contact: cols[5] || '',
                   active: true
-                });
-                added++;
+                };
+                const existingIdx = transporters.findIndex(t => t.name.toLowerCase() === name.toLowerCase());
+                if (existingIdx !== -1) {
+                  transporters[existingIdx] = { ...transporters[existingIdx], ...trObj };
+                  updated++;
+                } else {
+                  transporters.push({
+                    id: 'tr_csv_' + Date.now() + '_' + i,
+                    ...trObj
+                  });
+                  added++;
+                }
               }
             }
             saveStorage('transporters', transporters);
-            renderTransportersTable();
-            computeBestRoutes();
-            showToast(`Imported ${added} transporters successfully!`, 'success');
+            refreshEntireApp();
+            showToast(`Transporters synced across app (${added} added, ${updated} updated)!`, 'success');
           } catch (err) {
             showToast('Error parsing Transporters CSV', 'error');
+          } finally {
+            e.target.value = '';
           }
         };
         reader.readAsText(file);
@@ -2994,21 +3084,37 @@ Validity: 15-Day Revision Cycle`;
         if (id) {
           const idx = refineries.findIndex(r => r.id === id);
           if (idx !== -1) {
+            const oldCode = refineries[idx].code;
             refineries[idx] = { ...refineries[idx], code, name, city, state, lat, lng, cap };
+            // Cascade refinery code rename to priceLists so linked prices stay intact across the app
+            if (oldCode && oldCode !== code) {
+              let updatedPrices = false;
+              priceLists = priceLists.map(p => {
+                if (p.refineryCode === oldCode) {
+                  updatedPrices = true;
+                  return { ...p, refineryCode: code };
+                }
+                return p;
+              });
+              if (updatedPrices) saveStorage('pricelists', priceLists);
+            }
           }
         } else {
-          refineries.push({
-            id: 'ref_' + Date.now(),
-            code, name, city, state, lat, lng, cap,
-            active: true
-          });
+          const existingIdx = refineries.findIndex(r => r.code.toUpperCase() === code);
+          if (existingIdx !== -1) {
+            refineries[existingIdx] = { ...refineries[existingIdx], code, name, city, state, lat, lng, cap, active: true };
+          } else {
+            refineries.push({
+              id: 'ref_' + Date.now(),
+              code, name, city, state, lat, lng, cap,
+              active: true
+            });
+          }
         }
         saveStorage('refineries', refineries);
-        renderRefineriesTable();
-        populateCalculatorSelects();
-        computeBestRoutes();
+        refreshEntireApp();
         document.getElementById('modal-refinery').classList.add('hidden');
-        showToast('Refinery saved successfully!', 'success');
+        showToast('Refinery saved & synced across app!', 'success');
       });
 
       document.getElementById('btn-add-refinery')?.addEventListener('click', () => openRefineryModal());
@@ -3039,10 +3145,9 @@ Validity: 15-Day Revision Cycle`;
           });
         }
         saveStorage('transporters', transporters);
-        renderTransportersTable();
-        computeBestRoutes();
+        refreshEntireApp();
         document.getElementById('modal-transporter').classList.add('hidden');
-        showToast('Transporter saved successfully!', 'success');
+        showToast('Transporter saved & synced across app!', 'success');
       });
 
       document.getElementById('btn-add-transporter')?.addEventListener('click', () => openTransporterModal());
@@ -3066,18 +3171,26 @@ Validity: 15-Day Revision Cycle`;
             priceLists[idx] = { ...priceLists[idx], cycleStart, cycleEnd, product, refineryCode, basicPrice, discount };
           }
         } else {
-          priceLists.push({
-            id: 'p_' + Date.now(),
-            cycleStart, cycleEnd, product, refineryCode, basicPrice, discount,
-            cycleTag: 'current'
-          });
+          // Upsert if an active entry for the same product & refineryCode already exists
+          const existingIdx = priceLists.findIndex(p =>
+            p.product.toLowerCase() === product.toLowerCase() &&
+            p.refineryCode === refineryCode &&
+            (p.cycleTag || 'current') === 'current'
+          );
+          if (existingIdx !== -1) {
+            priceLists[existingIdx] = { ...priceLists[existingIdx], cycleStart, cycleEnd, product, refineryCode, basicPrice, discount, cycleTag: 'current' };
+          } else {
+            priceLists.push({
+              id: 'p_' + Date.now(),
+              cycleStart, cycleEnd, product, refineryCode, basicPrice, discount,
+              cycleTag: 'current'
+            });
+          }
         }
         saveStorage('pricelists', priceLists);
-        renderPriceListTable();
-        populateCalculatorSelects();
-        computeBestRoutes();
+        refreshEntireApp();
         document.getElementById('modal-pricelist').classList.add('hidden');
-        showToast('Price entry saved successfully!', 'success');
+        showToast('Price entry saved & synced across app!', 'success');
       });
 
       document.getElementById('btn-add-pricelist-item')?.addEventListener('click', () => openPriceListModal());
@@ -3093,16 +3206,19 @@ Validity: 15-Day Revision Cycle`;
         const lat = parseFloat(document.getElementById('loc-lat').value);
         const lng = parseFloat(document.getElementById('loc-lng').value);
 
-        locations.push({
-          id: 'loc_' + Date.now(),
-          name, state, lat, lng
-        });
+        const existingIdx = locations.findIndex(l => l.name.toLowerCase() === name.toLowerCase());
+        if (existingIdx !== -1) {
+          locations[existingIdx] = { ...locations[existingIdx], name, state, lat, lng };
+        } else {
+          locations.push({
+            id: 'loc_' + Date.now(),
+            name, state, lat, lng
+          });
+        }
         saveStorage('locations', locations);
-        renderLocationsGrid();
-        populateCalculatorSelects();
-        computeBestRoutes();
+        refreshEntireApp();
         document.getElementById('modal-location').classList.add('hidden');
-        showToast('Delivery hub added successfully!', 'success');
+        showToast('Delivery hub saved & synced across app!', 'success');
       });
 
       document.getElementById('btn-add-location')?.addEventListener('click', () => {
@@ -3188,25 +3304,18 @@ Validity: 15-Day Revision Cycle`;
         showToast('Node.js server.js code copied to clipboard!', 'success');
       });
 
-      // Reset Demo Data
+      // Reset Demo Data (also pushes clean defaults to Neon DB so all PCs reset together)
       document.getElementById('btn-quick-reset-demo')?.addEventListener('click', () => {
-        try {
-          localStorage.removeItem('refinecalc_refineries');
-          localStorage.removeItem('refinecalc_transporters');
-          localStorage.removeItem('refinecalc_locations');
-          localStorage.removeItem('refinecalc_pricelists');
-        } catch (e) {}
         refineries = [...DEFAULT_REFINERIES];
         transporters = [...DEFAULT_TRANSPORTERS];
         locations = [...DEFAULT_LOCATIONS];
         priceLists = [...DEFAULT_PRICES];
-        populateCalculatorSelects();
-        renderRefineriesTable();
-        renderTransportersTable();
-        renderPriceListTable();
-        renderLocationsGrid();
-        computeBestRoutes();
-        showToast('Reset to default master data and price lists!', 'success');
+        saveStorage('refineries', refineries);
+        saveStorage('transporters', transporters);
+        saveStorage('locations', locations);
+        saveStorage('pricelists', priceLists);
+        refreshEntireApp();
+        showToast('Reset to default master data across the entire app & cloud!', 'success');
       });
 
       // =========================================================================
@@ -3437,7 +3546,19 @@ Validity: 15-Day Revision Cycle`;
       // Automatically connect and sync with Neon PostgreSQL on Render if available
       syncFromNeonCloud(false);
 
-      // Keep other open PCs/tabs automatically in sync when switching tabs or every 25s
+      // Instant cross-tab sync within the same browser
+      window.addEventListener('storage', (e) => {
+        if (!e.key || !e.key.startsWith('refinecalc_')) return;
+        refineries = loadStorage('refineries', DEFAULT_REFINERIES);
+        transporters = loadStorage('transporters', DEFAULT_TRANSPORTERS);
+        locations = loadStorage('locations', DEFAULT_LOCATIONS);
+        priceLists = loadStorage('pricelists', DEFAULT_PRICES);
+        const latestBrand = loadStorage('brand_settings', null);
+        if (latestBrand) applyBrandToUI(latestBrand);
+        refreshEntireApp();
+      });
+
+      // Keep other open PCs/tabs automatically in sync when switching tabs or every 6s
       document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'visible') {
           syncFromNeonCloud(false);
@@ -3447,7 +3568,7 @@ Validity: 15-Day Revision Cycle`;
         if (document.visibilityState === 'visible') {
           syncFromNeonCloud(false);
         }
-      }, 25000);
+      }, 6000);
 
     })();
   </script>

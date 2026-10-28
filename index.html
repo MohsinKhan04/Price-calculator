@@ -1716,6 +1716,7 @@ app.listen(PORT, () => console.log(`RefineCalc running on port ${PORT}`));
               if (data.brand_settings && typeof data.brand_settings === 'object') {
                 saveStorage('brand_settings', data.brand_settings, true);
                 if (typeof applyBrandToUI === 'function') applyBrandToUI(data.brand_settings);
+                updatedAny = true;
               }
             }
 
@@ -1728,13 +1729,16 @@ app.listen(PORT, () => console.log(`RefineCalc running on port ${PORT}`));
               computeBestRoutes();
               updateStatCounts();
             } else {
-              // First time connecting to fresh Neon DB -> seed current master arrays to cloud!
-              await Promise.all([
+              // First time connecting to fresh Neon DB -> seed current master arrays & brand to cloud!
+              const initialBrand = loadStorage('brand_settings', null);
+              const seedTasks = [
                 pushToNeonCloud('refineries', refineries),
                 pushToNeonCloud('transporters', transporters),
                 pushToNeonCloud('locations', locations),
                 pushToNeonCloud('pricelists', priceLists)
-              ]);
+              ];
+              if (initialBrand) seedTasks.push(pushToNeonCloud('brand_settings', initialBrand));
+              await Promise.all(seedTasks);
             }
 
             const nowStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -3405,17 +3409,23 @@ Validity: 15-Day Revision Cycle`;
       });
 
       document.getElementById('btn-tab-push-cloud')?.addEventListener('click', async () => {
-        updateCloudStatusUI('syncing', 'Pushing all master data to Neon DB...');
+        updateCloudStatusUI('syncing', 'Pushing all master data & logo to Neon DB...');
+        const currentBrand = loadStorage('brand_settings', {
+          name: document.getElementById('brand-company-name')?.textContent?.trim() || 'RefineCalc Pro',
+          tagline: document.getElementById('brand-company-tagline')?.textContent?.trim() || 'Refinery & Transporter Price Optimizer',
+          logoDataUrl: document.getElementById('company-logo-img')?.getAttribute('src') || ''
+        });
         const results = await Promise.all([
           pushToNeonCloud('refineries', refineries),
           pushToNeonCloud('transporters', transporters),
           pushToNeonCloud('locations', locations),
-          pushToNeonCloud('pricelists', priceLists)
+          pushToNeonCloud('pricelists', priceLists),
+          pushToNeonCloud('brand_settings', currentBrand)
         ]);
         if (results.some(Boolean)) {
-          showToast('All Refineries, Transporters, Hubs & Price Lists pushed to Neon DB!', 'success');
+          showToast('All Master Data & Company Logo pushed to Neon DB for all PCs!', 'success');
         } else {
-          showToast('Saved locally. Deploy server.js on Render to enable cloud push.', 'info');
+          showToast('Saved locally. Make sure server.js is updated on GitHub/Render.', 'info');
         }
       });
 
@@ -3426,6 +3436,18 @@ Validity: 15-Day Revision Cycle`;
 
       // Automatically connect and sync with Neon PostgreSQL on Render if available
       syncFromNeonCloud(false);
+
+      // Keep other open PCs/tabs automatically in sync when switching tabs or every 25s
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+          syncFromNeonCloud(false);
+        }
+      });
+      setInterval(() => {
+        if (document.visibilityState === 'visible') {
+          syncFromNeonCloud(false);
+        }
+      }, 25000);
 
     })();
   </script>

@@ -1422,36 +1422,24 @@ app.listen(PORT, () => console.log(`RefineCalc running on port ${PORT}`));
         { id: 'p_prev_2', cycleStart: '2026-10-01', cycleEnd: '2026-10-15', cycleTag: 'prev', product: 'Bitumen VG-30', refineryCode: 'BPCL_MUMBAI', basicPrice: 38900, discount: 1200 }
       ];
 
-      // Sync from Neon API
-async function syncWithNeon() {
-  try {
-    const [refRes, transRes, priceRes] = await Promise.all([
-      fetch('/api/refineries'),
-      fetch('/api/transporters'),
-      fetch('/api/prices')
-    ]);
+      // Safe LocalStorage Load / Save
+      function loadStorage(key, defaultVal) {
+        try {
+          const val = localStorage.getItem('refinecalc_' + key);
+          return val ? JSON.parse(val) : defaultVal;
+        } catch (e) {
+          console.warn('LocalStorage error:', e);
+          return defaultVal;
+        }
+      }
 
-    if (refRes.ok && transRes.ok && priceRes.ok) {
-      window.refineries = await refRes.json();
-      window.transporters = await transRes.json();
-      window.priceList = await priceRes.json();
-      
-      // Update UI tables and dropdowns
-      renderRefineryTable();
-      renderTransporterTable();
-      renderPriceTable();
-      populateDropdowns();
-      console.log('Successfully synced data with Neon PostgreSQL!');
-    }
-  } catch (err) {
-    console.warn('Running offline or on Live Server without backend, using local fallback:', err);
-  }
-}
-
-// Call on startup
-document.addEventListener('DOMContentLoaded', () => {
-  syncWithNeon();
-});
+      function saveStorage(key, val) {
+        try {
+          localStorage.setItem('refinecalc_' + key, JSON.stringify(val));
+        } catch (e) {
+          console.warn('LocalStorage save error:', e);
+        }
+      }
 
       // App Master State
       let refineries = loadStorage('refineries', DEFAULT_REFINERIES);

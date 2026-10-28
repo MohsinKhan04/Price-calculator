@@ -223,6 +223,22 @@
         </button>
       </div>
 
+      <!-- Multi-PC Cloud Sync Status Widget -->
+      <div class="p-3 rounded-xl bg-slate-50 border border-slate-200/90 space-y-2">
+        <div class="flex items-center justify-between">
+          <span class="text-[10px] font-extrabold uppercase tracking-wider text-slate-400">Multi-PC Sync</span>
+          <span id="cloud-sync-dot" class="inline-flex items-center gap-1 text-[10px] font-bold text-amber-600">
+            <span class="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
+            <span id="cloud-sync-label">Checking DB...</span>
+          </span>
+        </div>
+        <p id="cloud-sync-subtext" class="text-[10px] text-slate-500 leading-snug">Auto-syncs with Neon Postgres on Render with safe LocalStorage fallback.</p>
+        <button id="btn-sidebar-sync-now" type="button" class="w-full py-1.5 px-2.5 rounded-lg bg-indigo-50 hover:bg-indigo-600 text-indigo-700 hover:text-white border border-indigo-200 text-[11px] font-bold transition-colors flex items-center justify-center gap-1.5">
+          <span>🔄</span>
+          <span>Sync with Neon DB Now</span>
+        </button>
+      </div>
+
       <!-- White Mode / Dark Mode Switcher -->
       <div class="space-y-2 pt-2 border-t border-slate-200">
         <div class="px-3 text-[10px] font-extrabold uppercase tracking-wider text-slate-400">Appearance Mode</div>
@@ -1002,34 +1018,111 @@ CREATE TABLE IF NOT EXISTS quote_logs (
             </pre>
           </div>
 
+          <!-- Live Cloud Sync Controls & Optional API Endpoint Config -->
+          <div class="mt-6 p-4 rounded-xl border border-indigo-200 bg-indigo-50/40 space-y-3">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h3 class="text-sm font-bold text-slate-900 flex items-center gap-2">
+                  <span>🔄</span> Built-In Hybrid Cloud Storage Engine (Already Active in this HTML)
+                </h3>
+                <p class="text-xs text-slate-600">This <code class="px-1 py-0.5 rounded bg-white border border-slate-200">index.html</code> already includes the complete Neon PostgreSQL + LocalStorage sync engine. You do not need to manually edit any storage code!</p>
+              </div>
+              <div class="flex items-center gap-2">
+                <button id="btn-tab-pull-cloud" type="button" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold shadow-sm transition-colors">
+                  ⬇️ Pull Latest from Neon
+                </button>
+                <button id="btn-tab-push-cloud" type="button" class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold shadow-sm transition-colors">
+                  ⬆️ Push Current Data to Neon
+                </button>
+              </div>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-3 pt-2 border-t border-indigo-200/60 items-end">
+              <div class="md:col-span-2">
+                <label class="block text-[11px] font-bold text-slate-700">Optional Custom Render Backend URL (Leave blank if <code class="font-mono">index.html</code> &amp; <code class="font-mono">server.js</code> run on the same Render Web Service)</label>
+                <input type="text" id="input-custom-api-url" placeholder="e.g. https://your-service.onrender.com (leave empty for same-origin /api)" class="w-full mt-1 px-3 py-1.5 border border-slate-300 rounded-lg text-xs font-mono bg-white">
+              </div>
+              <div>
+                <button id="btn-save-api-url" type="button" class="w-full py-1.5 px-3 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-xs font-bold transition-colors">
+                  Save API Endpoint &amp; Test
+                </button>
+              </div>
+            </div>
+          </div>
+
           <!-- Render Backend API Boilerplate -->
           <div class="mt-6 space-y-3">
             <div class="flex items-center justify-between">
               <h3 class="text-sm font-bold text-slate-900 flex items-center gap-2">
-                <span>⚡</span> Lightweight Render Backend Server (<code class="text-xs bg-slate-100 px-1 py-0.5 rounded text-indigo-700">server.js</code> for Node.js)
+                <span>⚡</span> Render Backend Server (<code class="text-xs bg-slate-100 px-1 py-0.5 rounded text-indigo-700">server.js</code> for Node.js — Full Multi-PC Sync)
               </h3>
               <button id="btn-copy-backend" class="px-3 py-1 bg-slate-800 hover:bg-slate-700 text-white rounded text-xs font-medium flex items-center gap-1">
                 <span>📋</span> Copy Server Code
               </button>
             </div>
             <pre class="bg-slate-900 text-sky-300 p-4 rounded-xl text-xs font-mono overflow-x-auto max-h-64 border border-slate-800" id="backend-code-block">
-// server.js - Node.js Express backend to connect to Neon PostgreSQL on Render
+// server.js - Node.js Express backend connecting index.html to Neon PostgreSQL on Render
 const express = require('express');
 const { Pool } = require('pg');
 const cors = require('cors');
+const path = require('path');
 
 const app = express();
 app.use(cors());
-app.use(express.json());
-app.use(express.static('.')); // Serves index.html directly!
+app.use(express.json({ limit: '15mb' }));
+app.use(express.static(__dirname));
 
-// Neon Database Connection String (set in Render Environment Variables)
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: { rejectUnauthorized: false }
 });
 
-// GET active price list & master data
+// Auto-create sync table & relational tables on startup
+async function initDb() {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS app_kv_store (
+        key VARCHAR(64) PRIMARY KEY,
+        value JSONB NOT NULL,
+        updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+    console.log('Neon PostgreSQL app_kv_store ready');
+  } catch (err) {
+    console.error('DB init warning:', err.message);
+  }
+}
+initDb();
+
+// 1. Unified Multi-PC Storage Sync GET (loads all masters across PCs)
+app.get('/api/storage', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT key, value FROM app_kv_store');
+    const data = {};
+    result.rows.forEach(r => { data[r.key] = r.value; });
+    res.json({ synced: true, data });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 2. Unified Multi-PC Storage Sync POST (saves any master edit/upload immediately)
+app.post('/api/storage/:key', async (req, res) => {
+  try {
+    const { key } = req.params;
+    const { value } = req.body;
+    await pool.query(
+      `INSERT INTO app_kv_store (key, value, updated_at)
+       VALUES ($1, $2::jsonb, CURRENT_TIMESTAMP)
+       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = CURRENT_TIMESTAMP`,
+      [key, JSON.stringify(value)]
+    );
+    res.json({ success: true, key });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 3. Legacy / Relational Masters endpoint (backward compatible)
 app.get('/api/masters', async (req, res) => {
   try {
     const refineries = await pool.query('SELECT * FROM refineries WHERE is_active = true');
@@ -1038,28 +1131,6 @@ app.get('/api/masters', async (req, res) => {
     res.json({ refineries: refineries.rows, transporters: transporters.rows, prices: prices.rows });
   } catch (err) {
     res.status(500).json({ error: err.message });
-  }
-});
-
-// POST new 15-day price list batch
-app.post('/api/pricelist/batch', async (req, res) => {
-  const { items } = req.body;
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    for (const item of items) {
-      await client.query(
-        'INSERT INTO price_lists (cycle_start, cycle_end, product_name, refinery_code, basic_price, discount) VALUES ($1, $2, $3, $4, $5, $6)',
-        [item.cycle_start, item.cycle_end, item.product_name, item.refinery_code, item.basic_price, item.discount]
-      );
-    }
-    await client.query('COMMIT');
-    res.json({ success: true, count: items.length });
-  } catch (err) {
-    await client.query('ROLLBACK');
-    res.status(500).json({ error: err.message });
-  } finally {
-    client.release();
   }
 });
 
@@ -1422,26 +1493,308 @@ app.listen(PORT, () => console.log(`RefineCalc running on port ${PORT}`));
         { id: 'p_prev_2', cycleStart: '2026-10-01', cycleEnd: '2026-10-15', cycleTag: 'prev', product: 'Bitumen VG-30', refineryCode: 'BPCL_MUMBAI', basicPrice: 38900, discount: 1200 }
       ];
 
-      // Safe LocalStorage Load / Save
-      function loadStorage(key, defaultVal) {
+      // =========================================================================
+      // HYBRID NEON POSTGRESQL CLOUD + SAFE LOCALSTORAGE ENGINE
+      // =========================================================================
+      // Keeps loadStorage() 100% synchronous so arrays are never Promises on boot,
+      // while automatically syncing changes across PCs via Render/Neon API endpoints.
+
+      const ARRAY_KEYS = ['refineries', 'transporters', 'locations', 'pricelists'];
+      const CLOUD_SYNC_KEYS = ['refineries', 'transporters', 'locations', 'pricelists', 'brand_settings'];
+
+      function getApiBase() {
         try {
-          const val = localStorage.getItem('refinecalc_' + key);
-          return val ? JSON.parse(val) : defaultVal;
+          const custom = localStorage.getItem('refinecalc_api_base_url');
+          return custom ? custom.replace(/\/+$/, '') : '';
         } catch (e) {
-          console.warn('LocalStorage error:', e);
-          return defaultVal;
+          return '';
         }
       }
 
-      function saveStorage(key, val) {
+      async function apiRequest(apiPath, options) {
+        const endpoint = getApiBase() + apiPath;
+        return fetch(endpoint, options);
+      }
+
+      function updateCloudStatusUI(state, message) {
+        const dotEl = document.getElementById('cloud-sync-dot');
+        const labelEl = document.getElementById('cloud-sync-label');
+        const subEl = document.getElementById('cloud-sync-subtext');
+        if (!dotEl || !labelEl) return;
+
+        if (state === 'connected') {
+          dotEl.className = 'inline-flex items-center gap-1 text-[10px] font-bold text-emerald-600';
+          dotEl.innerHTML = '<span class="w-2 h-2 rounded-full bg-emerald-500"></span><span id="cloud-sync-label">Neon DB Live</span>';
+        } else if (state === 'syncing') {
+          dotEl.className = 'inline-flex items-center gap-1 text-[10px] font-bold text-indigo-600';
+          dotEl.innerHTML = '<span class="w-2 h-2 rounded-full bg-indigo-500 animate-ping"></span><span id="cloud-sync-label">Syncing...</span>';
+        } else {
+          dotEl.className = 'inline-flex items-center gap-1 text-[10px] font-bold text-amber-600';
+          dotEl.innerHTML = '<span class="w-2 h-2 rounded-full bg-amber-500"></span><span id="cloud-sync-label">Local / Static Mode</span>';
+        }
+        if (subEl && message) {
+          subEl.textContent = message;
+        }
+      }
+
+      // Row normalizers so snake_case SQL columns or string DECIMALs from Neon never break calculations
+      function normalizeRefineryRow(r, idx = 0) {
+        if (!r || typeof r !== 'object') return null;
+        return {
+          id: String(r.id || ('ref_' + (r.code || idx))),
+          code: String(r.code || ('REF_' + idx)).trim().toUpperCase(),
+          name: String(r.name || r.code || 'Refinery'),
+          city: String(r.city || ''),
+          state: String(r.state || ''),
+          lat: parseFloat(r.lat !== undefined ? r.lat : r.latitude) || 21.1458,
+          lng: parseFloat(r.lng !== undefined ? r.lng : r.longitude) || 79.0882,
+          cap: String(r.cap || r.loading_capacity || '1,000 MT/day'),
+          active: r.active !== undefined ? Boolean(r.active) : (r.is_active !== false)
+        };
+      }
+
+      function normalizeTransporterRow(t, idx = 0) {
+        if (!t || typeof t !== 'object') return null;
+        return {
+          id: String(t.id || ('tr_' + idx)),
+          name: String(t.name || 'Transporter'),
+          hub: String(t.hub || t.base_city || 'India'),
+          ratePerKmPerMt: parseFloat(t.ratePerKmPerMt !== undefined ? t.ratePerKmPerMt : t.rate_per_mt_per_km) || 2.25,
+          minFreight: parseFloat(t.minFreight !== undefined ? t.minFreight : t.min_freight) || 3500,
+          fleet: String(t.fleet || t.fleet_details || 'Standard Tanker Fleet'),
+          contact: String(t.contact || t.contact_phone || ''),
+          active: t.active !== undefined ? Boolean(t.active) : (t.is_active !== false)
+        };
+      }
+
+      function normalizeLocationRow(l, idx = 0) {
+        if (!l || typeof l !== 'object') return null;
+        return {
+          id: String(l.id || ('loc_' + idx)),
+          name: String(l.name || l.city || 'Delivery Hub'),
+          state: String(l.state || ''),
+          lat: parseFloat(l.lat !== undefined ? l.lat : l.latitude) || 21.1458,
+          lng: parseFloat(l.lng !== undefined ? l.lng : l.longitude) || 79.0882
+        };
+      }
+
+      function normalizePriceRow(p, idx = 0) {
+        if (!p || typeof p !== 'object') return null;
+        const cStart = p.cycleStart || (p.cycle_start ? String(p.cycle_start).slice(0, 10) : '2026-10-16');
+        const cEnd = p.cycleEnd || (p.cycle_end ? String(p.cycle_end).slice(0, 10) : '2026-10-31');
+        return {
+          id: String(p.id || ('p_' + idx + '_' + Date.now())),
+          cycleStart: cStart,
+          cycleEnd: cEnd,
+          cycleTag: p.cycleTag || (cStart.startsWith('2026-10-01') ? 'prev' : 'current'),
+          product: String(p.product || p.product_name || 'Bitumen VG-30'),
+          refineryCode: String(p.refineryCode || p.refinery_code || '').trim().toUpperCase(),
+          basicPrice: parseFloat(p.basicPrice !== undefined ? p.basicPrice : p.basic_price) || 0,
+          discount: parseFloat(p.discount !== undefined ? p.discount : 0) || 0
+        };
+      }
+
+      // Synchronous LocalStorage reader with strict array validation
+      function loadStorage(key, defaultVal) {
+        try {
+          const raw = localStorage.getItem('refinecalc_' + key);
+          if (!raw) {
+            return Array.isArray(defaultVal) ? [...defaultVal] : defaultVal;
+          }
+          const parsed = JSON.parse(raw);
+          if (ARRAY_KEYS.includes(key)) {
+            if (!Array.isArray(parsed) || parsed.length === 0) {
+              return Array.isArray(defaultVal) ? [...defaultVal] : defaultVal;
+            }
+            if (key === 'refineries') return parsed.map(normalizeRefineryRow).filter(Boolean);
+            if (key === 'transporters') return parsed.map(normalizeTransporterRow).filter(Boolean);
+            if (key === 'locations') return parsed.map(normalizeLocationRow).filter(Boolean);
+            if (key === 'pricelists') return parsed.map(normalizePriceRow).filter(Boolean);
+          }
+          return parsed;
+        } catch (e) {
+          console.warn('LocalStorage load fallback for', key, e);
+          return Array.isArray(defaultVal) ? [...defaultVal] : defaultVal;
+        }
+      }
+
+      // Asynchronous background push to Render / Neon PostgreSQL
+      async function pushToNeonCloud(key, val) {
+        if (!CLOUD_SYNC_KEYS.includes(key)) return false;
+        const base = getApiBase();
+        try {
+          updateCloudStatusUI('syncing', `Saving ${key} to Neon PostgreSQL...`);
+          const res = await apiRequest(`/api/storage/${encodeURIComponent(key)}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ key, value: val })
+          });
+
+          if (res.ok) {
+            const nowStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+            updateCloudStatusUI('connected', `Synced "${key}" to Neon DB at ${nowStr}`);
+            return true;
+          }
+
+          // Fallback if user's Render server is running the older server.js with /api/pricelist/batch
+          if (res.status === 404 && key === 'pricelists' && Array.isArray(val)) {
+            const batchItems = val.map(item => ({
+              cycle_start: item.cycleStart || '2026-10-16',
+              cycle_end: item.cycleEnd || '2026-10-31',
+              product_name: item.product,
+              refinery_code: item.refineryCode,
+              basic_price: Number(item.basicPrice) || 0,
+              discount: Number(item.discount) || 0
+            }));
+            const batchRes = await apiRequest('/api/pricelist/batch', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ items: batchItems })
+            });
+            if (batchRes.ok) {
+              updateCloudStatusUI('connected', 'Synced price list batch to Neon DB');
+              return true;
+            }
+          }
+          updateCloudStatusUI('local', 'Saved in browser (Render API endpoint not reachable)');
+          return false;
+        } catch (err) {
+          updateCloudStatusUI('local', 'Saved locally (Static / Offline Mode active)');
+          return false;
+        }
+      }
+
+      // Save to LocalStorage synchronously + push to Neon Cloud asynchronously
+      function saveStorage(key, val, skipCloud = false) {
         try {
           localStorage.setItem('refinecalc_' + key, JSON.stringify(val));
         } catch (e) {
           console.warn('LocalStorage save error:', e);
         }
+        if (!skipCloud && CLOUD_SYNC_KEYS.includes(key)) {
+          pushToNeonCloud(key, val);
+        }
       }
 
-      // App Master State
+      // Pull latest shared state from Render / Neon PostgreSQL on startup or manual click
+      async function syncFromNeonCloud(notifyUser = false) {
+        const base = getApiBase();
+        updateCloudStatusUI('syncing', 'Connecting to Neon PostgreSQL...');
+        try {
+          // 1. Try unified /api/storage endpoint first
+          const res = await apiRequest('/api/storage', {
+            method: 'GET',
+            headers: { 'Accept': 'application/json' }
+          });
+
+          if (res.ok) {
+            const payload = await res.json();
+            const data = (payload && payload.data) ? payload.data : payload;
+            let updatedAny = false;
+
+            if (data && typeof data === 'object') {
+              if (Array.isArray(data.refineries) && data.refineries.length > 0) {
+                refineries = data.refineries.map(normalizeRefineryRow).filter(Boolean);
+                saveStorage('refineries', refineries, true);
+                updatedAny = true;
+              }
+              if (Array.isArray(data.transporters) && data.transporters.length > 0) {
+                transporters = data.transporters.map(normalizeTransporterRow).filter(Boolean);
+                saveStorage('transporters', transporters, true);
+                updatedAny = true;
+              }
+              if (Array.isArray(data.locations) && data.locations.length > 0) {
+                locations = data.locations.map(normalizeLocationRow).filter(Boolean);
+                saveStorage('locations', locations, true);
+                updatedAny = true;
+              }
+              if (Array.isArray(data.pricelists) && data.pricelists.length > 0) {
+                priceLists = data.pricelists.map(normalizePriceRow).filter(Boolean);
+                saveStorage('pricelists', priceLists, true);
+                updatedAny = true;
+              }
+              if (data.brand_settings && typeof data.brand_settings === 'object') {
+                saveStorage('brand_settings', data.brand_settings, true);
+                if (typeof applyBrandToUI === 'function') applyBrandToUI(data.brand_settings);
+              }
+            }
+
+            if (updatedAny) {
+              populateCalculatorSelects();
+              renderRefineriesTable();
+              renderTransportersTable();
+              renderPriceListTable();
+              renderLocationsGrid();
+              computeBestRoutes();
+              updateStatCounts();
+            } else {
+              // First time connecting to fresh Neon DB -> seed current master arrays to cloud!
+              await Promise.all([
+                pushToNeonCloud('refineries', refineries),
+                pushToNeonCloud('transporters', transporters),
+                pushToNeonCloud('locations', locations),
+                pushToNeonCloud('pricelists', priceLists)
+              ]);
+            }
+
+            const nowStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            updateCloudStatusUI('connected', `Multi-PC Neon Sync active (${nowStr})`);
+            if (notifyUser) showToast('Synced latest master data from Neon PostgreSQL!', 'success');
+            return true;
+          }
+
+          // 2. Fallback: Try /api/masters (if running initial server.js on Render)
+          const legacyRes = await apiRequest('/api/masters', {
+            method: 'GET',
+            headers: { 'Accept': 'application/json' }
+          });
+
+          if (legacyRes.ok) {
+            const legacyData = await legacyRes.json();
+            let updatedLegacy = false;
+
+            if (Array.isArray(legacyData.refineries) && legacyData.refineries.length > 0) {
+              refineries = legacyData.refineries.map(normalizeRefineryRow).filter(Boolean);
+              saveStorage('refineries', refineries, true);
+              updatedLegacy = true;
+            }
+            if (Array.isArray(legacyData.transporters) && legacyData.transporters.length > 0) {
+              transporters = legacyData.transporters.map(normalizeTransporterRow).filter(Boolean);
+              saveStorage('transporters', transporters, true);
+              updatedLegacy = true;
+            }
+            if (Array.isArray(legacyData.prices) && legacyData.prices.length > 0) {
+              priceLists = legacyData.prices.map(normalizePriceRow).filter(Boolean);
+              saveStorage('pricelists', priceLists, true);
+              updatedLegacy = true;
+            }
+
+            if (updatedLegacy) {
+              populateCalculatorSelects();
+              renderRefineriesTable();
+              renderTransportersTable();
+              renderPriceListTable();
+              renderLocationsGrid();
+              computeBestRoutes();
+              updateStatCounts();
+            }
+
+            updateCloudStatusUI('connected', 'Connected to Neon DB (/api/masters active)');
+            if (notifyUser) showToast('Synced master tables from Neon PostgreSQL!', 'success');
+            return true;
+          }
+
+          updateCloudStatusUI('local', 'Local Browser Storage Mode (Deploy server.js on Render for Multi-PC DB)');
+          if (notifyUser) showToast('Running in Local Browser Storage Mode (No backend API detected at ' + (base || '/api') + ')', 'info');
+          return false;
+        } catch (err) {
+          updateCloudStatusUI('local', 'Local Browser Storage Mode (Ready for Render + Neon)');
+          if (notifyUser) showToast('Using Local Browser Storage (Backend API not reachable in preview)', 'info');
+          return false;
+        }
+      }
+
+      // App Master State (Always synchronous arrays at boot)
       let refineries = loadStorage('refineries', DEFAULT_REFINERIES);
       let transporters = loadStorage('transporters', DEFAULT_TRANSPORTERS);
       let locations = loadStorage('locations', DEFAULT_LOCATIONS);
@@ -3026,13 +3379,53 @@ Validity: 15-Day Revision Cycle`;
       });
 
       // =========================================================================
-      // 10. INITIALIZATION
+      // 10. CLOUD SYNC BUTTON WIRING & INITIALIZATION
       // =========================================================================
+
+      const apiUrlInput = document.getElementById('input-custom-api-url');
+      if (apiUrlInput) {
+        apiUrlInput.value = getApiBase();
+      }
+
+      document.getElementById('btn-save-api-url')?.addEventListener('click', () => {
+        const val = (document.getElementById('input-custom-api-url')?.value || '').trim().replace(/\/+$/, '');
+        try {
+          localStorage.setItem('refinecalc_api_base_url', val);
+        } catch (e) {}
+        showToast(val ? `Set API base URL to ${val}` : 'Using default same-origin /api endpoint', 'info');
+        syncFromNeonCloud(true);
+      });
+
+      document.getElementById('btn-sidebar-sync-now')?.addEventListener('click', () => {
+        syncFromNeonCloud(true);
+      });
+
+      document.getElementById('btn-tab-pull-cloud')?.addEventListener('click', () => {
+        syncFromNeonCloud(true);
+      });
+
+      document.getElementById('btn-tab-push-cloud')?.addEventListener('click', async () => {
+        updateCloudStatusUI('syncing', 'Pushing all master data to Neon DB...');
+        const results = await Promise.all([
+          pushToNeonCloud('refineries', refineries),
+          pushToNeonCloud('transporters', transporters),
+          pushToNeonCloud('locations', locations),
+          pushToNeonCloud('pricelists', priceLists)
+        ]);
+        if (results.some(Boolean)) {
+          showToast('All Refineries, Transporters, Hubs & Price Lists pushed to Neon DB!', 'success');
+        } else {
+          showToast('Saved locally. Deploy server.js on Render to enable cloud push.', 'info');
+        }
+      });
 
       initNavigation();
       populateCalculatorSelects();
       computeBestRoutes();
       updateStatCounts();
+
+      // Automatically connect and sync with Neon PostgreSQL on Render if available
+      syncFromNeonCloud(false);
 
     })();
   </script>

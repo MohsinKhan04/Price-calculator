@@ -1059,25 +1059,27 @@ CREATE TABLE IF NOT EXISTS quote_logs (
                 <span>📋</span> Copy Server Code
               </button>
             </div>
-            <pre class="bg-slate-900 text-sky-300 p-4 rounded-xl text-xs font-mono overflow-x-auto max-h-64 border border-slate-800" id="backend-code-block">
-// server.js - Node.js Express backend connecting index.html to Neon PostgreSQL on Render
+            <pre class="bg-slate-900 text-sky-300 p-4 rounded-xl text-xs font-mono overflow-x-auto max-h-64 border border-slate-800" id="backend-code-block">// server.js - Node.js Express server with Neon PostgreSQL integration &amp; Multi-PC Sync
 const express = require('express');
 const { Pool } = require('pg');
 const cors = require('cors');
 const path = require('path');
+require('dotenv').config();
 
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: '15mb' }));
-app.use(express.static(__dirname));
+app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.static(__dirname)); // Serves index.html directly
 
+// Neon Postgres Connection Pool
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: { rejectUnauthorized: false }
 });
 
-// Auto-create sync table & relational tables on startup
-async function initDb() {
+// Auto-initialize tables on startup so Render deployments never fail with missing relation errors
+async function initDatabase() {
   try {
     await pool.query(`
       CREATE TABLE IF NOT EXISTS app_kv_store (
@@ -1085,58 +1087,191 @@ async function initDb() {
         value JSONB NOT NULL,
         updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
       );
+      CREATE TABLE IF NOT EXISTS refineries (
+        id SERIAL PRIMARY KEY,
+        code VARCHAR(30) UNIQUE NOT NULL,
+        name VARCHAR(150) NOT NULL,
+        city VARCHAR(100) NOT NULL,
+        state VARCHAR(100) NOT NULL,
+        latitude DECIMAL(9, 6) NOT NULL,
+        longitude DECIMAL(9, 6) NOT NULL,
+        loading_capacity VARCHAR(100),
+        is_active BOOLEAN DEFAULT TRUE,
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE TABLE IF NOT EXISTS transporters (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(150) NOT NULL,
+        base_city VARCHAR(100) NOT NULL,
+        rate_per_mt_per_km DECIMAL(6, 2) NOT NULL,
+        min_freight DECIMAL(10, 2) DEFAULT 0,
+        fleet_details VARCHAR(255),
+        contact_phone VARCHAR(50),
+        is_active BOOLEAN DEFAULT TRUE,
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE TABLE IF NOT EXISTS price_lists (
+        id SERIAL PRIMARY KEY,
+        cycle_start DATE NOT NULL,
+        cycle_end DATE NOT NULL,
+        product_name VARCHAR(100) NOT NULL,
+        refinery_code VARCHAR(30),
+        basic_price DECIMAL(10, 2) NOT NULL,
+        discount DECIMAL(10, 2) DEFAULT 0,
+        net_price DECIMAL(10, 2) GENERATED ALWAYS AS (basic_price - discount) STORED,
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      );
     `);
-    console.log('Neon PostgreSQL app_kv_store ready');
+    // Version counter per key -&gt; lets clients detect changes and avoid overwriting each other
+    await pool.query(`ALTER TABLE app_kv_store ADD COLUMN IF NOT EXISTS version INT NOT NULL DEFAULT 1`);
+    console.log('Neon PostgreSQL tables verified and ready.');
   } catch (err) {
-    console.error('DB init warning:', err.message);
+    console.error('Database initialization warning:', err.message);
   }
 }
-initDb();
+initDatabase();
 
-// 1. Unified Multi-PC Storage Sync GET (loads all masters across PCs)
-app.get('/api/storage', async (req, res) => {
+// Health check
+app.get('/health', (req, res) =&gt; res.json({ status: 'ok', service: 'RefineCalc Pro' }));
+
+// 1. Unified Multi-PC Storage Sync GET (returns data + version of every key)
+app.get('/api/storage', async (req, res) =&gt; {
   try {
-    const result = await pool.query('SELECT key, value FROM app_kv_store');
+    res.set('Cache-Control', 'no-store');
+    const result = await pool.query('SELECT key, value, version FROM app_kv_store');
     const data = {};
-    result.rows.forEach(r => { data[r.key] = r.value; });
-    res.json({ synced: true, data });
+    const versions = {};
+    result.rows.forEach(r =&gt; { data[r.key] = r.value; versions[r.key] = r.version; });
+    res.json({ synced: true, data, versions });
+  } catch (err) {
+    console.error('Error in GET /api/storage:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 1b. Lightweight change-check used by every PC every few seconds (no payload, just versions)
+app.get('/api/storage-versions', async (req, res) =&gt; {
+  try {
+    res.set('Cache-Control', 'no-store');
+    const result = await pool.query('SELECT key, version FROM app_kv_store');
+    const versions = {};
+    result.rows.forEach(r =&gt; { versions[r.key] = r.version; });
+    res.json({ versions });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// 2. Unified Multi-PC Storage Sync POST (saves any master edit/upload immediately)
-app.post('/api/storage/:key', async (req, res) => {
+// 2. Unified Multi-PC Storage Sync POST with conflict detection.
+//    Client sends baseVersion = the version it last saw (0 = key did not exist).
+//    If someone else saved in between, we answer 409 with the latest data instead of overwriting it.
+app.post('/api/storage/:key', async (req, res) =&gt; {
   try {
     const { key } = req.params;
-    const { value } = req.body;
-    await pool.query(
-      `INSERT INTO app_kv_store (key, value, updated_at)
-       VALUES ($1, $2::jsonb, CURRENT_TIMESTAMP)
-       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = CURRENT_TIMESTAMP`,
-      [key, JSON.stringify(value)]
-    );
-    res.json({ success: true, key });
+    const { value, baseVersion } = req.body;
+    const json = JSON.stringify(value);
+
+    if (baseVersion === undefined || baseVersion === null) {
+      // Old clients: plain overwrite
+      const r = await pool.query(
+        `INSERT INTO app_kv_store (key, value, version, updated_at)
+         VALUES ($1, $2::jsonb, 1, CURRENT_TIMESTAMP)
+         ON CONFLICT (key) DO UPDATE
+           SET value = EXCLUDED.value, version = app_kv_store.version + 1, updated_at = CURRENT_TIMESTAMP
+         RETURNING version`,
+        [key, json]
+      );
+      return res.json({ success: true, key, version: r.rows[0].version });
+    }
+
+    let r;
+    if (Number(baseVersion) === 0) {
+      r = await pool.query(
+        `INSERT INTO app_kv_store (key, value, version, updated_at)
+         VALUES ($1, $2::jsonb, 1, CURRENT_TIMESTAMP)
+         ON CONFLICT (key) DO NOTHING
+         RETURNING version`,
+        [key, json]
+      );
+    } else {
+      r = await pool.query(
+        `UPDATE app_kv_store
+            SET value = $2::jsonb, version = version + 1, updated_at = CURRENT_TIMESTAMP
+          WHERE key = $1 AND version = $3
+          RETURNING version`,
+        [key, json, Number(baseVersion)]
+      );
+    }
+
+    if (r.rowCount === 1) {
+      return res.json({ success: true, key, version: r.rows[0].version });
+    }
+
+    // Someone else saved first -&gt; hand back the latest copy
+    const cur = await pool.query('SELECT value, version FROM app_kv_store WHERE key = $1', [key]);
+    return res.status(409).json({
+      conflict: true,
+      key,
+      version: cur.rows[0]?.version || 0,
+      value: cur.rows[0]?.value ?? null
+    });
   } catch (err) {
+    console.error('Error in POST /api/storage:', err);
     res.status(500).json({ error: err.message });
   }
 });
 
-// 3. Legacy / Relational Masters endpoint (backward compatible)
-app.get('/api/masters', async (req, res) => {
+// 3. Legacy / Relational Fetch Masters &amp; Active 15-day Price List
+app.get('/api/masters', async (req, res) =&gt; {
   try {
-    const refineries = await pool.query('SELECT * FROM refineries WHERE is_active = true');
-    const transporters = await pool.query('SELECT * FROM transporters WHERE is_active = true');
+    const refineries = await pool.query('SELECT * FROM refineries WHERE is_active = true ORDER BY name ASC');
+    const transporters = await pool.query('SELECT * FROM transporters WHERE is_active = true ORDER BY name ASC');
     const prices = await pool.query('SELECT * FROM price_lists ORDER BY cycle_start DESC');
-    res.json({ refineries: refineries.rows, transporters: transporters.rows, prices: prices.rows });
+    res.json({
+      refineries: refineries.rows,
+      transporters: transporters.rows,
+      prices: prices.rows
+    });
   } catch (err) {
+    console.error('Error fetching masters:', err);
     res.status(500).json({ error: err.message });
+  }
+});
+
+// 4. Batch Upload 15-day Price List
+app.post('/api/pricelist/batch', async (req, res) =&gt; {
+  const { items } = req.body;
+  if (!items || !Array.isArray(items)) {
+    return res.status(400).json({ error: 'items array is required' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    for (const item of items) {
+      await client.query(
+        `INSERT INTO price_lists 
+          (cycle_start, cycle_end, product_name, refinery_code, basic_price, discount) 
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [item.cycle_start, item.cycle_end, item.product_name, item.refinery_code, item.basic_price, item.discount]
+      );
+    }
+    await client.query('COMMIT');
+    res.json({ success: true, count: items.length });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Batch price upload failed:', err);
+    res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
   }
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`RefineCalc running on port ${PORT}`));
-            </pre>
+app.listen(PORT, () =&gt; {
+  console.log(`RefineCalc backend listening on port ${PORT}`);
+});
+</pre>
           </div>
 
         </div>
@@ -1618,22 +1753,84 @@ app.listen(PORT, () => console.log(`RefineCalc running on port ${PORT}`));
         }
       }
 
+      // ---- Multi-PC sync state -------------------------------------------------
+      // remoteVersions[key] = the version of that key we last saw on the server.
+      // It is sent with every save so the server can detect "someone else saved first".
+      const remoteVersions = {};
+      const pushChains = {};     // per-key queue so quick successive edits never conflict with ourselves
+      let pendingPushes = 0;     // while > 0 we skip background refreshes
+
+      function refreshAllViews() {
+        populateCalculatorSelects();
+        renderRefineriesTable();
+        renderTransportersTable();
+        renderPriceListTable();
+        renderLocationsGrid();
+        computeBestRoutes();
+        updateStatCounts();
+      }
+
+      // Put a value received from the server into memory + localStorage (no push back)
+      function applyRemoteKey(key, value) {
+        if (key === 'refineries' && Array.isArray(value)) {
+          refineries = value.map(normalizeRefineryRow).filter(Boolean);
+          saveStorage('refineries', refineries, true);
+        } else if (key === 'transporters' && Array.isArray(value)) {
+          transporters = value.map(normalizeTransporterRow).filter(Boolean);
+          saveStorage('transporters', transporters, true);
+        } else if (key === 'locations' && Array.isArray(value)) {
+          locations = value.map(normalizeLocationRow).filter(Boolean);
+          saveStorage('locations', locations, true);
+        } else if (key === 'pricelists' && Array.isArray(value)) {
+          priceLists = value.map(normalizePriceRow).filter(Boolean);
+          saveStorage('pricelists', priceLists, true);
+        } else if (key === 'brand_settings' && value && typeof value === 'object') {
+          saveStorage('brand_settings', value, true);
+          if (typeof applyBrandToUI === 'function') applyBrandToUI(value);
+        } else {
+          return false;
+        }
+        return true;
+      }
+
+      function pushToNeonCloud(key, val) {
+        if (!CLOUD_SYNC_KEYS.includes(key)) return Promise.resolve(false);
+        pendingPushes++;
+        const run = () => doPushToNeon(key, val);
+        pushChains[key] = (pushChains[key] || Promise.resolve()).then(run, run)
+          .finally(() => { pendingPushes--; });
+        return pushChains[key];
+      }
+
       // Asynchronous background push to Render / Neon PostgreSQL
-      async function pushToNeonCloud(key, val) {
-        if (!CLOUD_SYNC_KEYS.includes(key)) return false;
-        const base = getApiBase();
+      async function doPushToNeon(key, val) {
         try {
           updateCloudStatusUI('syncing', `Saving ${key} to Neon PostgreSQL...`);
           const res = await apiRequest(`/api/storage/${encodeURIComponent(key)}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ key, value: val })
+            body: JSON.stringify({ key, value: val, baseVersion: remoteVersions[key] || 0 })
           });
 
           if (res.ok) {
+            const body = await res.json().catch(() => ({}));
+            if (body && body.version !== undefined) remoteVersions[key] = body.version;
             const nowStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
             updateCloudStatusUI('connected', `Synced "${key}" to Neon DB at ${nowStr}`);
             return true;
+          }
+
+          // Someone else saved this list first -> load their version instead of overwriting it
+          if (res.status === 409) {
+            const body = await res.json().catch(() => ({}));
+            if (body && body.value !== undefined && body.value !== null) {
+              applyRemoteKey(key, body.value);
+              remoteVersions[key] = body.version;
+              refreshAllViews();
+            }
+            updateCloudStatusUI('connected', 'Loaded newer data from another user');
+            showToast(`Another user changed "${key}" just before you. Their latest version was loaded - please repeat your change.`, 'info');
+            return false;
           }
 
           // Fallback if user's Render server is running the older server.js with /api/pricelist/batch
@@ -1677,9 +1874,9 @@ app.listen(PORT, () => console.log(`RefineCalc running on port ${PORT}`));
       }
 
       // Pull latest shared state from Render / Neon PostgreSQL on startup or manual click
-      async function syncFromNeonCloud(notifyUser = false) {
+      async function syncFromNeonCloud(notifyUser = false, silent = false) {
         const base = getApiBase();
-        updateCloudStatusUI('syncing', 'Connecting to Neon PostgreSQL...');
+        if (!silent) updateCloudStatusUI('syncing', 'Connecting to Neon PostgreSQL...');
         try {
           // 1. Try unified /api/storage endpoint first
           const res = await apiRequest('/api/storage', {
@@ -1690,54 +1887,36 @@ app.listen(PORT, () => console.log(`RefineCalc running on port ${PORT}`));
           if (res.ok) {
             const payload = await res.json();
             const data = (payload && payload.data) ? payload.data : payload;
+            const versions = (payload && payload.versions) ? payload.versions : {};
             let updatedAny = false;
+            const missingInCloud = [];
 
             if (data && typeof data === 'object') {
-              if (Array.isArray(data.refineries) && data.refineries.length > 0) {
-                refineries = data.refineries.map(normalizeRefineryRow).filter(Boolean);
-                saveStorage('refineries', refineries, true);
-                updatedAny = true;
-              }
-              if (Array.isArray(data.transporters) && data.transporters.length > 0) {
-                transporters = data.transporters.map(normalizeTransporterRow).filter(Boolean);
-                saveStorage('transporters', transporters, true);
-                updatedAny = true;
-              }
-              if (Array.isArray(data.locations) && data.locations.length > 0) {
-                locations = data.locations.map(normalizeLocationRow).filter(Boolean);
-                saveStorage('locations', locations, true);
-                updatedAny = true;
-              }
-              if (Array.isArray(data.pricelists) && data.pricelists.length > 0) {
-                priceLists = data.pricelists.map(normalizePriceRow).filter(Boolean);
-                saveStorage('pricelists', priceLists, true);
-                updatedAny = true;
-              }
-              if (data.brand_settings && typeof data.brand_settings === 'object') {
-                saveStorage('brand_settings', data.brand_settings, true);
-                if (typeof applyBrandToUI === 'function') applyBrandToUI(data.brand_settings);
-                updatedAny = true;
+              for (const key of CLOUD_SYNC_KEYS) {
+                if (data[key] === undefined || data[key] === null) {
+                  if (key !== 'brand_settings') missingInCloud.push(key);
+                  continue;
+                }
+                // Only touch keys that actually changed on the server (or on first load / manual pull)
+                if (!silent || versions[key] !== remoteVersions[key]) {
+                  if (applyRemoteKey(key, data[key])) updatedAny = true;
+                }
+                if (versions[key] !== undefined) remoteVersions[key] = versions[key];
               }
             }
 
-            if (updatedAny) {
-              refreshEntireApp();
-            } else {
-              // First time connecting to fresh Neon DB -> seed current master arrays & brand to cloud!
-              const initialBrand = loadStorage('brand_settings', null);
-              const seedTasks = [
-                pushToNeonCloud('refineries', refineries),
-                pushToNeonCloud('transporters', transporters),
-                pushToNeonCloud('locations', locations),
-                pushToNeonCloud('pricelists', priceLists)
-              ];
-              if (initialBrand) seedTasks.push(pushToNeonCloud('brand_settings', initialBrand));
-              await Promise.all(seedTasks);
+            if (updatedAny) refreshAllViews();
+
+            // Anything the cloud has never seen yet (fresh Neon DB) is seeded from this PC
+            if (missingInCloud.length) {
+              const localByKey = { refineries, transporters, locations, pricelists: priceLists };
+              await Promise.all(missingInCloud.map(k => pushToNeonCloud(k, localByKey[k])));
             }
 
             const nowStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
             updateCloudStatusUI('connected', `Multi-PC Neon Sync active (${nowStr})`);
             if (notifyUser) showToast('Synced latest master data from Neon PostgreSQL!', 'success');
+            if (silent && updatedAny) showToast('Data updated by another user - refreshed automatically', 'info');
             return true;
           }
 
@@ -1957,31 +2136,6 @@ app.listen(PORT, () => console.log(`RefineCalc running on port ${PORT}`));
           } else {
             refFilterSelect.value = 'ALL';
           }
-        }
-
-        // Also keep price-list modal refinery dropdown in sync
-        const modalRefSelect = document.getElementById('price-refinery-select');
-        if (modalRefSelect) {
-          const curModalRef = modalRefSelect.value;
-          modalRefSelect.innerHTML = refineries.map(r => `<option value="${r.code}">${r.name} (${r.city})</option>`).join('');
-          if (curModalRef && refineries.some(r => r.code === curModalRef)) {
-            modalRefSelect.value = curModalRef;
-          }
-        }
-      }
-
-      // Unified Whole-App Reactivity Helper: refreshes every dropdown, table, card, quote & counter
-      function refreshEntireApp() {
-        populateCalculatorSelects();
-        renderRefineriesTable();
-        renderTransportersTable();
-        renderPriceListTable();
-        renderLocationsGrid();
-        computeBestRoutes();
-        updateStatCounts();
-        const quoteModal = document.getElementById('quote-modal');
-        if (quoteModal && !quoteModal.classList.contains('hidden') && activeQuotation) {
-          openQuoteModal();
         }
       }
 
@@ -2842,85 +2996,39 @@ Validity: 15-Day Revision Cycle`;
         const reader = new FileReader();
         reader.onload = function(evt) {
           try {
-            const lines = evt.target.result.split(/\r?\n/);
+            const lines = evt.target.result.split('\n');
             let added = 0;
-            let updated = 0;
-            let newRefsAdded = false;
             for (let i = 1; i < lines.length; i++) {
               const line = lines[i].trim();
               if (!line) continue;
               const cols = line.split(',').map(c => c.replace(/^"|"$/g, '').trim());
               if (cols.length >= 4) {
                 const prod = cols[0];
-                const refCode = cols[1].toUpperCase();
+                const refCode = cols[1];
                 const basic = parseFloat(cols[2]) || 0;
                 const disc = parseFloat(cols[3]) || 0;
                 const cStart = cols[4] || '2026-10-16';
                 const cEnd = cols[5] || '2026-10-31';
-                const cTag = cols[6] || 'current';
-                if (!prod || !refCode) continue;
-
-                // Ensure refinery exists in refineries master so it immediately appears across Calculator & Route Cards
-                if (!refineries.some(r => r.code.toUpperCase() === refCode)) {
-                  const readableName = refCode.replace(/_/g, ' ') + ' Refinery';
-                  refineries.push({
-                    id: 'ref_auto_' + Date.now() + '_' + i,
-                    code: refCode,
-                    name: readableName,
-                    city: refCode.split('_').slice(1).join(' ') || 'Refinery Hub',
-                    state: 'India',
-                    lat: 21.1458,
-                    lng: 79.0882,
-                    cap: '1,000 MT/day',
-                    active: true
-                  });
-                  newRefsAdded = true;
-                }
-
-                // Upsert existing (product + refineryCode + cycleTag) or push new entry
-                const existingIdx = priceLists.findIndex(p =>
-                  p.product.toLowerCase() === prod.toLowerCase() &&
-                  p.refineryCode.toUpperCase() === refCode &&
-                  (p.cycleTag || 'current') === cTag
-                );
-
-                if (existingIdx !== -1) {
-                  priceLists[existingIdx] = {
-                    ...priceLists[existingIdx],
-                    product: prod,
-                    refineryCode: refCode,
-                    basicPrice: basic,
-                    discount: disc,
-                    cycleStart: cStart,
-                    cycleEnd: cEnd,
-                    cycleTag: cTag
-                  };
-                  updated++;
-                } else {
-                  priceLists.push({
-                    id: 'p_csv_' + Date.now() + '_' + i,
-                    product: prod,
-                    refineryCode: refCode,
-                    basicPrice: basic,
-                    discount: disc,
-                    cycleStart: cStart,
-                    cycleEnd: cEnd,
-                    cycleTag: cTag
-                  });
-                  added++;
-                }
+                priceLists.push({
+                  id: 'p_csv_' + Date.now() + '_' + i,
+                  product: prod,
+                  refineryCode: refCode,
+                  basicPrice: basic,
+                  discount: disc,
+                  cycleStart: cStart,
+                  cycleEnd: cEnd,
+                  cycleTag: 'current'
+                });
+                added++;
               }
             }
-            if (newRefsAdded) {
-              saveStorage('refineries', refineries);
-            }
             saveStorage('pricelists', priceLists);
-            refreshEntireApp();
-            showToast(`Price List synced across app (${added} added, ${updated} updated)!`, 'success');
+            renderPriceListTable();
+            populateCalculatorSelects();
+            computeBestRoutes();
+            showToast(`Imported ${added} price list entries successfully!`, 'success');
           } catch (err) {
             showToast('Error parsing CSV file', 'error');
-          } finally {
-            e.target.value = '';
           }
         };
         reader.readAsText(file);
@@ -2941,46 +3049,34 @@ Validity: 15-Day Revision Cycle`;
         const reader = new FileReader();
         reader.onload = function(evt) {
           try {
-            const lines = evt.target.result.split(/\r?\n/);
+            const lines = evt.target.result.split('\n');
             let added = 0;
-            let updated = 0;
             for (let i = 1; i < lines.length; i++) {
               const line = lines[i].trim();
               if (!line) continue;
               const cols = line.split(',').map(c => c.replace(/^"|"$/g, '').trim());
               if (cols.length >= 6) {
-                const code = cols[0].toUpperCase();
-                if (!code) continue;
-                const refObj = {
-                  code,
-                  name: cols[1] || code,
-                  city: cols[2] || '',
-                  state: cols[3] || '',
+                refineries.push({
+                  id: 'ref_csv_' + Date.now() + '_' + i,
+                  code: cols[0].toUpperCase(),
+                  name: cols[1],
+                  city: cols[2],
+                  state: cols[3],
                   lat: parseFloat(cols[4]) || 21.14,
                   lng: parseFloat(cols[5]) || 79.08,
                   cap: cols[6] || '1,000 MT/day',
                   active: true
-                };
-                const existingIdx = refineries.findIndex(r => r.code.toUpperCase() === code);
-                if (existingIdx !== -1) {
-                  refineries[existingIdx] = { ...refineries[existingIdx], ...refObj };
-                  updated++;
-                } else {
-                  refineries.push({
-                    id: 'ref_csv_' + Date.now() + '_' + i,
-                    ...refObj
-                  });
-                  added++;
-                }
+                });
+                added++;
               }
             }
             saveStorage('refineries', refineries);
-            refreshEntireApp();
-            showToast(`Refineries synced across app (${added} added, ${updated} updated)!`, 'success');
+            renderRefineriesTable();
+            populateCalculatorSelects();
+            computeBestRoutes();
+            showToast(`Imported ${added} refineries successfully!`, 'success');
           } catch (err) {
             showToast('Error parsing Refineries CSV', 'error');
-          } finally {
-            e.target.value = '';
           }
         };
         reader.readAsText(file);
@@ -3001,45 +3097,32 @@ Validity: 15-Day Revision Cycle`;
         const reader = new FileReader();
         reader.onload = function(evt) {
           try {
-            const lines = evt.target.result.split(/\r?\n/);
+            const lines = evt.target.result.split('\n');
             let added = 0;
-            let updated = 0;
             for (let i = 1; i < lines.length; i++) {
               const line = lines[i].trim();
               if (!line) continue;
               const cols = line.split(',').map(c => c.replace(/^"|"$/g, '').trim());
               if (cols.length >= 4) {
-                const name = cols[0];
-                if (!name) continue;
-                const trObj = {
-                  name,
-                  hub: cols[1] || '',
+                transporters.push({
+                  id: 'tr_csv_' + Date.now() + '_' + i,
+                  name: cols[0],
+                  hub: cols[1],
                   ratePerKmPerMt: parseFloat(cols[2]) || 2.25,
                   minFreight: parseFloat(cols[3]) || 3500,
                   fleet: cols[4] || 'Standard Tanker Fleet',
                   contact: cols[5] || '',
                   active: true
-                };
-                const existingIdx = transporters.findIndex(t => t.name.toLowerCase() === name.toLowerCase());
-                if (existingIdx !== -1) {
-                  transporters[existingIdx] = { ...transporters[existingIdx], ...trObj };
-                  updated++;
-                } else {
-                  transporters.push({
-                    id: 'tr_csv_' + Date.now() + '_' + i,
-                    ...trObj
-                  });
-                  added++;
-                }
+                });
+                added++;
               }
             }
             saveStorage('transporters', transporters);
-            refreshEntireApp();
-            showToast(`Transporters synced across app (${added} added, ${updated} updated)!`, 'success');
+            renderTransportersTable();
+            computeBestRoutes();
+            showToast(`Imported ${added} transporters successfully!`, 'success');
           } catch (err) {
             showToast('Error parsing Transporters CSV', 'error');
-          } finally {
-            e.target.value = '';
           }
         };
         reader.readAsText(file);
@@ -3084,37 +3167,21 @@ Validity: 15-Day Revision Cycle`;
         if (id) {
           const idx = refineries.findIndex(r => r.id === id);
           if (idx !== -1) {
-            const oldCode = refineries[idx].code;
             refineries[idx] = { ...refineries[idx], code, name, city, state, lat, lng, cap };
-            // Cascade refinery code rename to priceLists so linked prices stay intact across the app
-            if (oldCode && oldCode !== code) {
-              let updatedPrices = false;
-              priceLists = priceLists.map(p => {
-                if (p.refineryCode === oldCode) {
-                  updatedPrices = true;
-                  return { ...p, refineryCode: code };
-                }
-                return p;
-              });
-              if (updatedPrices) saveStorage('pricelists', priceLists);
-            }
           }
         } else {
-          const existingIdx = refineries.findIndex(r => r.code.toUpperCase() === code);
-          if (existingIdx !== -1) {
-            refineries[existingIdx] = { ...refineries[existingIdx], code, name, city, state, lat, lng, cap, active: true };
-          } else {
-            refineries.push({
-              id: 'ref_' + Date.now(),
-              code, name, city, state, lat, lng, cap,
-              active: true
-            });
-          }
+          refineries.push({
+            id: 'ref_' + Date.now(),
+            code, name, city, state, lat, lng, cap,
+            active: true
+          });
         }
         saveStorage('refineries', refineries);
-        refreshEntireApp();
+        renderRefineriesTable();
+        populateCalculatorSelects();
+        computeBestRoutes();
         document.getElementById('modal-refinery').classList.add('hidden');
-        showToast('Refinery saved & synced across app!', 'success');
+        showToast('Refinery saved successfully!', 'success');
       });
 
       document.getElementById('btn-add-refinery')?.addEventListener('click', () => openRefineryModal());
@@ -3145,9 +3212,10 @@ Validity: 15-Day Revision Cycle`;
           });
         }
         saveStorage('transporters', transporters);
-        refreshEntireApp();
+        renderTransportersTable();
+        computeBestRoutes();
         document.getElementById('modal-transporter').classList.add('hidden');
-        showToast('Transporter saved & synced across app!', 'success');
+        showToast('Transporter saved successfully!', 'success');
       });
 
       document.getElementById('btn-add-transporter')?.addEventListener('click', () => openTransporterModal());
@@ -3171,26 +3239,18 @@ Validity: 15-Day Revision Cycle`;
             priceLists[idx] = { ...priceLists[idx], cycleStart, cycleEnd, product, refineryCode, basicPrice, discount };
           }
         } else {
-          // Upsert if an active entry for the same product & refineryCode already exists
-          const existingIdx = priceLists.findIndex(p =>
-            p.product.toLowerCase() === product.toLowerCase() &&
-            p.refineryCode === refineryCode &&
-            (p.cycleTag || 'current') === 'current'
-          );
-          if (existingIdx !== -1) {
-            priceLists[existingIdx] = { ...priceLists[existingIdx], cycleStart, cycleEnd, product, refineryCode, basicPrice, discount, cycleTag: 'current' };
-          } else {
-            priceLists.push({
-              id: 'p_' + Date.now(),
-              cycleStart, cycleEnd, product, refineryCode, basicPrice, discount,
-              cycleTag: 'current'
-            });
-          }
+          priceLists.push({
+            id: 'p_' + Date.now(),
+            cycleStart, cycleEnd, product, refineryCode, basicPrice, discount,
+            cycleTag: 'current'
+          });
         }
         saveStorage('pricelists', priceLists);
-        refreshEntireApp();
+        renderPriceListTable();
+        populateCalculatorSelects();
+        computeBestRoutes();
         document.getElementById('modal-pricelist').classList.add('hidden');
-        showToast('Price entry saved & synced across app!', 'success');
+        showToast('Price entry saved successfully!', 'success');
       });
 
       document.getElementById('btn-add-pricelist-item')?.addEventListener('click', () => openPriceListModal());
@@ -3206,19 +3266,16 @@ Validity: 15-Day Revision Cycle`;
         const lat = parseFloat(document.getElementById('loc-lat').value);
         const lng = parseFloat(document.getElementById('loc-lng').value);
 
-        const existingIdx = locations.findIndex(l => l.name.toLowerCase() === name.toLowerCase());
-        if (existingIdx !== -1) {
-          locations[existingIdx] = { ...locations[existingIdx], name, state, lat, lng };
-        } else {
-          locations.push({
-            id: 'loc_' + Date.now(),
-            name, state, lat, lng
-          });
-        }
+        locations.push({
+          id: 'loc_' + Date.now(),
+          name, state, lat, lng
+        });
         saveStorage('locations', locations);
-        refreshEntireApp();
+        renderLocationsGrid();
+        populateCalculatorSelects();
+        computeBestRoutes();
         document.getElementById('modal-location').classList.add('hidden');
-        showToast('Delivery hub saved & synced across app!', 'success');
+        showToast('Delivery hub added successfully!', 'success');
       });
 
       document.getElementById('btn-add-location')?.addEventListener('click', () => {
@@ -3304,18 +3361,25 @@ Validity: 15-Day Revision Cycle`;
         showToast('Node.js server.js code copied to clipboard!', 'success');
       });
 
-      // Reset Demo Data (also pushes clean defaults to Neon DB so all PCs reset together)
+      // Reset Demo Data
       document.getElementById('btn-quick-reset-demo')?.addEventListener('click', () => {
+        try {
+          localStorage.removeItem('refinecalc_refineries');
+          localStorage.removeItem('refinecalc_transporters');
+          localStorage.removeItem('refinecalc_locations');
+          localStorage.removeItem('refinecalc_pricelists');
+        } catch (e) {}
         refineries = [...DEFAULT_REFINERIES];
         transporters = [...DEFAULT_TRANSPORTERS];
         locations = [...DEFAULT_LOCATIONS];
         priceLists = [...DEFAULT_PRICES];
-        saveStorage('refineries', refineries);
-        saveStorage('transporters', transporters);
-        saveStorage('locations', locations);
-        saveStorage('pricelists', priceLists);
-        refreshEntireApp();
-        showToast('Reset to default master data across the entire app & cloud!', 'success');
+        populateCalculatorSelects();
+        renderRefineriesTable();
+        renderTransportersTable();
+        renderPriceListTable();
+        renderLocationsGrid();
+        computeBestRoutes();
+        showToast('Reset to default master data and price lists!', 'success');
       });
 
       // =========================================================================
@@ -3518,23 +3582,17 @@ Validity: 15-Day Revision Cycle`;
       });
 
       document.getElementById('btn-tab-push-cloud')?.addEventListener('click', async () => {
-        updateCloudStatusUI('syncing', 'Pushing all master data & logo to Neon DB...');
-        const currentBrand = loadStorage('brand_settings', {
-          name: document.getElementById('brand-company-name')?.textContent?.trim() || 'RefineCalc Pro',
-          tagline: document.getElementById('brand-company-tagline')?.textContent?.trim() || 'Refinery & Transporter Price Optimizer',
-          logoDataUrl: document.getElementById('company-logo-img')?.getAttribute('src') || ''
-        });
+        updateCloudStatusUI('syncing', 'Pushing all master data to Neon DB...');
         const results = await Promise.all([
           pushToNeonCloud('refineries', refineries),
           pushToNeonCloud('transporters', transporters),
           pushToNeonCloud('locations', locations),
-          pushToNeonCloud('pricelists', priceLists),
-          pushToNeonCloud('brand_settings', currentBrand)
+          pushToNeonCloud('pricelists', priceLists)
         ]);
         if (results.some(Boolean)) {
-          showToast('All Master Data & Company Logo pushed to Neon DB for all PCs!', 'success');
+          showToast('All Refineries, Transporters, Hubs & Price Lists pushed to Neon DB!', 'success');
         } else {
-          showToast('Saved locally. Make sure server.js is updated on GitHub/Render.', 'info');
+          showToast('Saved locally. Deploy server.js on Render to enable cloud push.', 'info');
         }
       });
 
@@ -3546,29 +3604,25 @@ Validity: 15-Day Revision Cycle`;
       // Automatically connect and sync with Neon PostgreSQL on Render if available
       syncFromNeonCloud(false);
 
-      // Instant cross-tab sync within the same browser
-      window.addEventListener('storage', (e) => {
-        if (!e.key || !e.key.startsWith('refinecalc_')) return;
-        refineries = loadStorage('refineries', DEFAULT_REFINERIES);
-        transporters = loadStorage('transporters', DEFAULT_TRANSPORTERS);
-        locations = loadStorage('locations', DEFAULT_LOCATIONS);
-        priceLists = loadStorage('pricelists', DEFAULT_PRICES);
-        const latestBrand = loadStorage('brand_settings', null);
-        if (latestBrand) applyBrandToUI(latestBrand);
-        refreshEntireApp();
-      });
-
-      // Keep other open PCs/tabs automatically in sync when switching tabs or every 6s
-      document.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'visible') {
-          syncFromNeonCloud(false);
-        }
-      });
-      setInterval(() => {
-        if (document.visibilityState === 'visible') {
-          syncFromNeonCloud(false);
-        }
-      }, 6000);
+      // LIVE MULTI-PC REFRESH: every few seconds ask the server (tiny request) whether anyone
+      // saved something new, and reload only if so. Also checks when the tab becomes visible again.
+      let pollBusy = false;
+      async function checkForRemoteChanges() {
+        if (pollBusy || pendingPushes > 0 || document.hidden) return;
+        pollBusy = true;
+        try {
+          const res = await apiRequest('/api/storage-versions', { headers: { 'Accept': 'application/json' }, cache: 'no-store' });
+          if (!res.ok) return;
+          const { versions } = await res.json();
+          const changed = Object.keys(versions || {}).some(k =>
+            CLOUD_SYNC_KEYS.includes(k) && versions[k] !== remoteVersions[k]);
+          if (changed) await syncFromNeonCloud(false, true);
+        } catch (e) { /* offline / server asleep - try again next tick */ }
+        finally { pollBusy = false; }
+      }
+      setInterval(checkForRemoteChanges, 8000);
+      document.addEventListener('visibilitychange', () => { if (!document.hidden) checkForRemoteChanges(); });
+      window.addEventListener('focus', checkForRemoteChanges);
 
     })();
   </script>

@@ -61,6 +61,8 @@ async function initDatabase() {
         created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
       );
     `);
+    // Version counter per key -> lets clients detect changes and avoid overwriting each other
+    await pool.query(`ALTER TABLE app_kv_store ADD COLUMN IF NOT EXISTS version INT NOT NULL DEFAULT 1`);
     console.log('Neon PostgreSQL tables verified and ready.');
   } catch (err) {
     console.error('Database initialization warning:', err.message);
@@ -71,31 +73,87 @@ initDatabase();
 // Health check
 app.get('/health', (req, res) => res.json({ status: 'ok', service: 'RefineCalc Pro' }));
 
-// 1. Unified Multi-PC Storage Sync GET
+// 1. Unified Multi-PC Storage Sync GET (returns data + version of every key)
 app.get('/api/storage', async (req, res) => {
   try {
-    const result = await pool.query('SELECT key, value FROM app_kv_store');
+    res.set('Cache-Control', 'no-store');
+    const result = await pool.query('SELECT key, value, version FROM app_kv_store');
     const data = {};
-    result.rows.forEach(r => { data[r.key] = r.value; });
-    res.json({ synced: true, data });
+    const versions = {};
+    result.rows.forEach(r => { data[r.key] = r.value; versions[r.key] = r.version; });
+    res.json({ synced: true, data, versions });
   } catch (err) {
     console.error('Error in GET /api/storage:', err);
     res.status(500).json({ error: err.message });
   }
 });
 
-// 2. Unified Multi-PC Storage Sync POST
+// 1b. Lightweight change-check used by every PC every few seconds (no payload, just versions)
+app.get('/api/storage-versions', async (req, res) => {
+  try {
+    res.set('Cache-Control', 'no-store');
+    const result = await pool.query('SELECT key, version FROM app_kv_store');
+    const versions = {};
+    result.rows.forEach(r => { versions[r.key] = r.version; });
+    res.json({ versions });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 2. Unified Multi-PC Storage Sync POST with conflict detection.
+//    Client sends baseVersion = the version it last saw (0 = key did not exist).
+//    If someone else saved in between, we answer 409 with the latest data instead of overwriting it.
 app.post('/api/storage/:key', async (req, res) => {
   try {
     const { key } = req.params;
-    const { value } = req.body;
-    await pool.query(
-      `INSERT INTO app_kv_store (key, value, updated_at)
-       VALUES ($1, $2::jsonb, CURRENT_TIMESTAMP)
-       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = CURRENT_TIMESTAMP`,
-      [key, JSON.stringify(value)]
-    );
-    res.json({ success: true, key });
+    const { value, baseVersion } = req.body;
+    const json = JSON.stringify(value);
+
+    if (baseVersion === undefined || baseVersion === null) {
+      // Old clients: plain overwrite
+      const r = await pool.query(
+        `INSERT INTO app_kv_store (key, value, version, updated_at)
+         VALUES ($1, $2::jsonb, 1, CURRENT_TIMESTAMP)
+         ON CONFLICT (key) DO UPDATE
+           SET value = EXCLUDED.value, version = app_kv_store.version + 1, updated_at = CURRENT_TIMESTAMP
+         RETURNING version`,
+        [key, json]
+      );
+      return res.json({ success: true, key, version: r.rows[0].version });
+    }
+
+    let r;
+    if (Number(baseVersion) === 0) {
+      r = await pool.query(
+        `INSERT INTO app_kv_store (key, value, version, updated_at)
+         VALUES ($1, $2::jsonb, 1, CURRENT_TIMESTAMP)
+         ON CONFLICT (key) DO NOTHING
+         RETURNING version`,
+        [key, json]
+      );
+    } else {
+      r = await pool.query(
+        `UPDATE app_kv_store
+            SET value = $2::jsonb, version = version + 1, updated_at = CURRENT_TIMESTAMP
+          WHERE key = $1 AND version = $3
+          RETURNING version`,
+        [key, json, Number(baseVersion)]
+      );
+    }
+
+    if (r.rowCount === 1) {
+      return res.json({ success: true, key, version: r.rows[0].version });
+    }
+
+    // Someone else saved first -> hand back the latest copy
+    const cur = await pool.query('SELECT value, version FROM app_kv_store WHERE key = $1', [key]);
+    return res.status(409).json({
+      conflict: true,
+      key,
+      version: cur.rows[0]?.version || 0,
+      value: cur.rows[0]?.value ?? null
+    });
   } catch (err) {
     console.error('Error in POST /api/storage:', err);
     res.status(500).json({ error: err.message });

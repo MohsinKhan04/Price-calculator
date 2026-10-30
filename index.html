@@ -194,7 +194,7 @@
   <!-- ========================================== -->
   <!-- TOP HEADER: COMPANY LOGO, NAME, HOME BUTTON & USER/ADMIN SIGN-IN -->
   <!-- ========================================== -->
-  <header class="bg-slate-900 border-b border-slate-800 text-white relative z-40 shadow-md">
+  <header class="bg-slate-900 border-b border-slate-800 text-white sticky top-0 z-40 shadow-md">
     <div class="max-w-[1600px] mx-auto px-3 sm:px-6">
       <div class="flex items-center justify-between h-16 gap-2 sm:gap-3">
         <!-- Left: Hamburger Button (Mobile) + Brand / Logo (Clicks Go Home) -->
@@ -1548,9 +1548,21 @@ function prevCycleOf(c) {
   const i = a.findIndex(x => x.id === c?.id);
   return i > 0 ? a[i - 1] : null;
 }
+function getRefineryLocations(s) {
+  if (!s) return [];
+  if (Array.isArray(s.locations) && s.locations.length) {
+    return s.locations.map(x => String(x || "").trim()).filter(Boolean);
+  }
+  if (s.loading) {
+    return String(s.loading).split(",").map(x => x.trim()).filter(Boolean);
+  }
+  return [];
+}
+
 function routeOptions(src, prodId, loc, qty) {
   const P = prodMap(), pr = P[prodId], st = settings();
-  const base = (S.routes?.rows || []).filter(r => norm(r.loading) === norm(src.loading) && norm(r.delivery) === norm(loc) && (!r.company || r.company === src.company));
+  const srcLocs = getRefineryLocations(src).map(norm);
+  const base = (S.routes?.rows || []).filter(r => srcLocs.includes(norm(r.loading)) && norm(r.delivery) === norm(loc) && (!r.company || norm(r.company) === norm(src.company) || norm(r.company) === norm(src.name)));
   const ok = r => num(r.rate) !== null && (!num(r.minQty) || qty >= num(r.minQty));
   const exact = base.filter(r => r.productId === prodId);
   const pend = exact.filter(r => num(r.rate) === null);
@@ -1584,6 +1596,7 @@ function computeQuote(q) {
   const rows = [], noprice = [];
   for (const s of S.catalog?.sources || []) {
     if (s.active === false) continue;
+    if (Array.isArray(s.products) && s.products.length > 0 && !s.products.includes(q.product)) continue;
     const p = idx[s.id + "|" + q.product];
     if (!p) continue;
     if (!(num(p.basic) > 0)) { noprice.push({ s, p }); continue; }
@@ -2614,10 +2627,12 @@ function viewCredit() {
 
 /* ================= VIEW 7: MASTER FILE — REFINERIES & PRODUCTS ================= */
 function getRefineryProducts(s) {
-  if (Array.isArray(s.products)) return s.products;
-  // Initialize from any priced products in cycles for this source, or default to all current products
-  const fromCycles = [...new Set((S.cycles || []).flatMap(c => (c.prices || []).filter(p => p.sourceId === s.id && num(p.basic) > 0).map(p => p.productId)))];
-  s.products = fromCycles.length ? fromCycles : (S.catalog?.products || []).map(p => p.id);
+  const validIds = new Set((S.catalog?.products || []).filter(p => (p.name || "").trim()).map(p => p.id));
+  if (Array.isArray(s.products)) {
+    return s.products.filter(id => validIds.has(id));
+  }
+  const fromCycles = [...new Set((S.cycles || []).flatMap(c => (c.prices || []).filter(p => p.sourceId === s.id && num(p.basic) > 0 && validIds.has(p.productId)).map(p => p.productId)))];
+  s.products = fromCycles.length ? fromCycles : [...validIds];
   return s.products;
 }
 
@@ -2636,18 +2651,73 @@ function syncRefineryProductsToLatestCycle(sourceId, productIds) {
   }
 }
 
+function addInlineLocationToRefinery(si, rawLoc) {
+  if (!S.canWrite) return;
+  const loc = String(rawLoc || "").trim();
+  if (!loc) { toast("Type a location name first"); return; }
+  const row = S.catalog.sources[si];
+  if (!row) return;
+  const locs = getRefineryLocations(row);
+  if (!locs.some(x => norm(x) === norm(loc))) {
+    locs.push(loc);
+  }
+  row.locations = locs;
+  row.loading = locs.join(", ");
+  saveDoc("master/catalog", S.catalog, 0);
+  viewRefineries();
+  toast(`Added location "${loc}" to ${row.name || "refinery"}`);
+}
+
+function addInlineProductToRefinery(si, rawProdName) {
+  if (!S.canWrite) return;
+  const pName = String(rawProdName || "").trim();
+  if (!pName) { toast("Type a product name first (e.g. MTO, LDO)"); return; }
+  const row = S.catalog.sources[si];
+  if (!row) return;
+
+  // Check if product already exists in catalog (or reuse an empty placeholder row if one exists)
+  let prod = (S.catalog.products || []).find(p => norm(p.name) === norm(pName) || norm(p.id) === norm(pName));
+  if (!prod) {
+    // Check if there is an unnamed placeholder product row we can populate
+    const emptyProd = (S.catalog.products || []).find(p => !(p.name || "").trim());
+    const newId = productIdFor(pName, "");
+    if (emptyProd) {
+      emptyProd.id = newId;
+      emptyProd.name = pName;
+      emptyProd.unit = emptyProd.unit || "MT";
+      emptyProd.cls = emptyProd.cls || "White liquid";
+      emptyProd.aliases = [pName.toUpperCase()];
+      delete emptyProd._autoCode;
+      prod = emptyProd;
+    } else {
+      prod = { id: newId, name: pName, unit: "MT", cls: "White liquid", aliases: [pName.toUpperCase()] };
+      S.catalog.products.push(prod);
+    }
+  }
+
+  const sold = getRefineryProducts(row);
+  if (!sold.includes(prod.id)) {
+    sold.push(prod.id);
+  }
+  row.products = sold;
+  syncRefineryProductsToLatestCycle(row.id, [prod.id]);
+  saveDoc("master/catalog", S.catalog, 0);
+  viewRefineries();
+  toast(`Added product "${prod.name}" to ${row.name || "refinery"}`);
+}
+
 function viewRefineries() {
   S.catalog = S.catalog || { sources: [], products: [] };
   const saveC = (delay = 500) => saveDoc("master/catalog", S.catalog, delay);
   const dis = S.canWrite ? "" : "disabled";
-  const allProds = S.catalog.products || [];
+  const namedProds = (S.catalog.products || []).filter(p => (p.name || "").trim());
 
   V().innerHTML = `<div class="stack">
    <section class="stack" style="gap:8px">
      <div class="sechead">
        <div>
          <h3>Refineries and supply points</h3>
-         <p class="tiny" style="margin:2px 0 0">Enter each refinery/source, its loading point, and click the products it sells (one refinery can sell multiple products like MTO, LDO, FO, etc.).</p>
+         <p class="tiny" style="margin:2px 0 0">Enter each refinery/source once, then add multiple <b>Locations</b> and multiple <b>Products</b> directly inside its row.</p>
        </div>
        <button class="btn small primary" id="adds" type="button" ${dis}>＋ Add refinery / source</button>
      </div>
@@ -2655,44 +2725,71 @@ function viewRefineries() {
        <table>
          <thead>
            <tr>
-             <th>Refinery / Source</th>
-             <th>Loading point</th>
-             <th>Products sold (click to select multiple)</th>
+             <th style="min-width:190px">Refinery / Source</th>
+             <th style="min-width:260px">Location (multiple allowed)</th>
+             <th style="min-width:320px">Products sold (select or add multiple)</th>
              <th>In use</th>
              <th></th>
            </tr>
          </thead>
          <tbody>
          ${(S.catalog.sources || []).map((s, i) => {
+           const locs = getRefineryLocations(s);
            const sold = getRefineryProducts(s);
            return `<tr>
-             <td><input type="text" data-s="${i}" data-f="name" value="${esc(s.name)}" placeholder="e.g. Nayara Vadinar or IOCL Koyali" style="min-width:210px" ${dis}></td>
-             <td><input type="text" data-s="${i}" data-f="loading" value="${esc(s.loading)}" placeholder="e.g. Vadinar" style="min-width:130px" ${dis}></td>
-             <td style="min-width:260px">
-               <div class="chips" style="gap:5px">
-                 ${allProds.map(p => {
-                   const on = sold.includes(p.id);
-                   return `<button type="button" data-sprod="${i}|${esc(p.id)}" aria-pressed="${on}" class="chip" style="padding:3px 9px;font-size:11.5px" ${dis}>
-                     <span class="dot" style="background:${clsDotColor(p.cls)}"></span>
-                     <span>${esc(shortName(p))}</span>
-                   </button>`;
-                 }).join("") || `<span class="tiny">Add products below first</span>`}
+             <td style="vertical-align:top">
+               <input type="text" data-s="${i}" data-f="name" value="${esc(s.name)}" placeholder="e.g. CPCL, Nayara, IOCL" style="min-width:180px;font-weight:700" ${dis}>
+             </td>
+             <td style="vertical-align:top">
+               <div class="stack" style="gap:6px">
+                 <div class="chips" style="gap:5px">
+                   ${locs.map((loc, li) => `
+                     <span class="chip" style="padding:3px 9px;font-size:11.5px;background:var(--accent-soft);border-color:var(--accent);color:var(--ink)">
+                       <span>📍 ${esc(loc)}</span>
+                       ${S.canWrite ? `<button type="button" data-rmloc="${i}|${li}" class="ml-1 text-rose-600 hover:text-rose-800 font-extrabold" title="Remove location">×</button>` : ""}
+                     </span>
+                   `).join("") || `<span class="tiny">No location added yet</span>`}
+                 </div>
+                 ${S.canWrite ? `
+                 <div class="flex items-center gap-1">
+                   <input type="text" data-addloc-in="${i}" list="dl-all-locs" placeholder="+ Add location (e.g. Chennai)" style="padding:4px 8px;font-size:12px;min-width:140px">
+                   <button type="button" data-addloc-btn="${i}" class="btn small primary" style="padding:4px 9px">+ Add</button>
+                 </div>` : ""}
                </div>
              </td>
-             <td><input type="checkbox" data-s="${i}" data-f="active" ${s.active !== false ? "checked" : ""} aria-label="In use" ${dis}></td>
-             <td><button class="btn small danger" type="button" data-sdel="${i}" ${dis}>✕</button></td>
+             <td style="vertical-align:top">
+               <div class="stack" style="gap:6px">
+                 <div class="chips" style="gap:5px">
+                   ${namedProds.map(p => {
+                     const on = sold.includes(p.id);
+                     return `<button type="button" data-sprod="${i}|${esc(p.id)}" aria-pressed="${on}" class="chip" style="padding:3px 9px;font-size:11.5px" ${dis}>
+                       <span class="dot" style="background:${clsDotColor(p.cls)}"></span>
+                       <span>${esc(shortName(p))}</span>
+                     </button>`;
+                   }).join("") || `<span class="tiny">Type a product below to add</span>`}
+                 </div>
+                 ${S.canWrite ? `
+                 <div class="flex items-center gap-1">
+                   <input type="text" data-addprod-in="${i}" placeholder="+ Add product (e.g. MTO, LDO)" style="padding:4px 8px;font-size:12px;min-width:150px">
+                   <button type="button" data-addprod-btn="${i}" class="btn small primary" style="padding:4px 9px">+ Add</button>
+                 </div>` : ""}
+               </div>
+             </td>
+             <td style="vertical-align:top"><input type="checkbox" data-s="${i}" data-f="active" ${s.active !== false ? "checked" : ""} aria-label="In use" ${dis}></td>
+             <td style="vertical-align:top"><button class="btn small danger" type="button" data-sdel="${i}" ${dis}>✕</button></td>
            </tr>`;
          }).join("")}
          </tbody>
        </table>
      </div>
+     <datalist id="dl-all-locs">${loadingPoints().map(l => `<option value="${esc(l)}">`).join("")}</datalist>
    </section>
 
    <section class="stack" style="gap:8px">
      <div class="sechead">
        <div>
          <h3>Products</h3>
-         <p class="tiny" style="margin:2px 0 0">Add products (e.g. MTO, LDO, FO), choose unit (MT or KL), and write the product type (e.g. White liquid, Yellow, Black).</p>
+         <p class="tiny" style="margin:2px 0 0">Manage all products, their unit (MT or KL), and write their type (e.g. White liquid, Yellow, Black).</p>
        </div>
        <button class="btn small primary" id="addp" type="button" ${dis}>＋ Add product</button>
      </div>
@@ -2727,6 +2824,7 @@ function viewRefineries() {
    </section>
   </div>`;
 
+  // Refinery Name & Active listeners
   document.querySelectorAll("[data-s]").forEach(inp => inp.addEventListener(inp.type === "checkbox" ? "change" : "input", e => {
     if (!S.canWrite) return;
     const row = S.catalog.sources[+inp.dataset.s];
@@ -2741,12 +2839,38 @@ function viewRefineries() {
       if (row.id.startsWith("s_new_") && e.target.value.trim()) {
         row.id = sourceIdFor(e.target.value.trim());
       }
-    } else {
-      row[f] = e.target.value;
     }
     saveC(500);
   }));
 
+  // Remove a location pill from a refinery
+  document.querySelectorAll("[data-rmloc]").forEach(btn => btn.onclick = () => {
+    if (!S.canWrite) return;
+    const [siStr, liStr] = btn.getAttribute("data-rmloc").split("|");
+    const row = S.catalog.sources[+siStr];
+    if (!row) return;
+    const locs = getRefineryLocations(row);
+    locs.splice(+liStr, 1);
+    row.locations = locs;
+    row.loading = locs.join(", ");
+    saveC(0);
+    viewRefineries();
+  });
+
+  // Inline "+ Add location" inside a refinery row (via button click or Enter key)
+  document.querySelectorAll("[data-addloc-btn]").forEach(btn => btn.onclick = () => {
+    const si = +btn.getAttribute("data-addloc-btn");
+    const inp = document.querySelector(`input[data-addloc-in="${si}"]`);
+    if (inp) addInlineLocationToRefinery(si, inp.value);
+  });
+  document.querySelectorAll("[data-addloc-in]").forEach(inp => inp.addEventListener("keydown", e => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      addInlineLocationToRefinery(+inp.getAttribute("data-addloc-in"), inp.value);
+    }
+  }));
+
+  // Toggle existing product chip on a refinery
   document.querySelectorAll("[data-sprod]").forEach(btn => btn.onclick = () => {
     if (!S.canWrite) return;
     const [siStr, pid] = btn.getAttribute("data-sprod").split("|");
@@ -2764,6 +2888,20 @@ function viewRefineries() {
     saveC(250);
   });
 
+  // Inline "+ Add product" inside a refinery row (via button click or Enter key)
+  document.querySelectorAll("[data-addprod-btn]").forEach(btn => btn.onclick = () => {
+    const si = +btn.getAttribute("data-addprod-btn");
+    const inp = document.querySelector(`input[data-addprod-in="${si}"]`);
+    if (inp) addInlineProductToRefinery(si, inp.value);
+  });
+  document.querySelectorAll("[data-addprod-in]").forEach(inp => inp.addEventListener("keydown", e => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      addInlineProductToRefinery(+inp.getAttribute("data-addprod-in"), inp.value);
+    }
+  }));
+
+  // Products table listeners
   document.querySelectorAll("[data-p]").forEach(inp => inp.addEventListener(inp.tagName === "SELECT" ? "change" : "input", e => {
     if (!S.canWrite) return;
     const idx = +inp.dataset.p;
@@ -2779,7 +2917,6 @@ function viewRefineries() {
           const newId = productIdFor(cleanName, "");
           const oldId = row.id;
           row.id = newId;
-          // Update references in sources.products if id changed while creating new product
           (S.catalog.sources || []).forEach(s => {
             if (Array.isArray(s.products)) {
               const pi = s.products.indexOf(oldId);
@@ -2810,8 +2947,8 @@ function viewRefineries() {
 
   $("#adds").onclick = () => {
     if (!S.canWrite) return;
-    const defaultProds = (S.catalog.products || []).map(p => p.id);
-    S.catalog.sources.push({ id: "s_new_" + uid(), company: "", name: "", loading: "", creditDays: 0, active: true, products: defaultProds, aliases: [] });
+    const defaultProds = (S.catalog.products || []).filter(p => (p.name || "").trim()).map(p => p.id);
+    S.catalog.sources.push({ id: "s_new_" + uid(), company: "", name: "", loading: "", locations: [], creditDays: 0, active: true, products: defaultProds, aliases: [] });
     saveC(0);
     viewRefineries();
     const lastInp = document.querySelector(`input[data-s="${S.catalog.sources.length - 1}"][data-f="name"]`);
@@ -3260,14 +3397,14 @@ function bindAddBar() {
 }
 function productIdFor(name, code) { let base = key(code || name.match(/\(([^)]+)\)/)?.[1] || name).slice(0, 10) || "P"; let id = base, i = 2; const ids = new Set(S.catalog.products.map(p => p.id)); while (ids.has(id)) id = base + i++; return id; }
 function sourceIdFor(name) { let base = String(name).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "src"; let id = base, i = 2; const ids = new Set(S.catalog.sources.map(s => s.id)); while (ids.has(id)) id = base + "-" + i++; return id; }
-const loadingPoints = () => [...new Set([...S.catalog.sources.map(s => s.loading), ...(S.routes?.rows || []).map(r => r.loading)].filter(Boolean))].sort();
+const loadingPoints = () => [...new Set([...(S.catalog?.sources || []).flatMap(s => getRefineryLocations(s)), ...(S.routes?.rows || []).map(r => r.loading)].filter(Boolean))].sort();
 const companies = () => [...new Set(S.catalog.sources.map(s => s.company).filter(Boolean))].sort();
 
 function refineryFields(pfx) {
   const allProds = S.catalog?.products || [];
   return `<div class="tgrid" style="grid-column:1/-1">
    <div class="field"><label class="lbl" for="${pfx}-nm">Refinery / Source</label><input type="text" id="${pfx}-nm" placeholder="e.g. Nayara Vadinar or BPCL Kochi"></div>
-   <div class="field"><label class="lbl" for="${pfx}-lp">Loading point (town)</label><input type="text" id="${pfx}-lp" list="dl-lp" placeholder="e.g. Vadinar"><datalist id="dl-lp">${loadingPoints().map(c => `<option value="${esc(c)}">`).join("")}</datalist></div>
+   <div class="field"><label class="lbl" for="${pfx}-lp">Location (comma-separated for multiple)</label><input type="text" id="${pfx}-lp" list="dl-lp" placeholder="e.g. Chennai, Manali"><datalist id="dl-lp">${loadingPoints().map(c => `<option value="${esc(c)}">`).join("")}</datalist></div>
    <div class="field"><label class="lbl" for="${pfx}-cd">Free credit days from refinery</label><input type="number" id="${pfx}-cd" value="0" min="0"></div>
    <div class="field" style="grid-column:1/-1">
      <label class="lbl">Products sold by this refinery (select multiple)</label>
@@ -3284,11 +3421,12 @@ function productFields(pfx) {
 }
 function readRefinery(pfx) {
   const name = $(`#${pfx}-nm`).value.trim(), loading = $(`#${pfx}-lp`).value.trim();
-  if (!name || !loading) { toast("Enter the refinery/source name and its loading point"); return null; }
+  if (!name || !loading) { toast("Enter the refinery/source name and its location"); return null; }
   if (S.catalog.sources.find(s => norm(s.name) === norm(name))) { toast(name + " already exists. Pick it from the list instead."); return null; }
+  const locations = loading.split(",").map(x => x.trim()).filter(Boolean);
   const checkedProds = [...document.querySelectorAll(`#${pfx}-prods input[type="checkbox"]:checked`)].map(c => c.value);
   const company = name.split(/\s+/)[0] || "Refinery";
-  return { id: sourceIdFor(name), company, name, loading, creditDays: num($(`#${pfx}-cd`).value) || 0, active: true, products: checkedProds, aliases: [] };
+  return { id: sourceIdFor(name), company, name, loading: locations.join(", "), locations, creditDays: num($(`#${pfx}-cd`).value) || 0, active: true, products: checkedProds, aliases: [] };
 }
 function readProduct(pfx) {
   const name = $(`#${pfx}-pn`).value.trim(); if (!name) { toast("Enter the product name"); return null; }

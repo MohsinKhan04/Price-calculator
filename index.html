@@ -224,16 +224,20 @@
             Loading price cycles…
           </div>
 
-          <!-- User / Admin Account Status & Sign-In Button -->
+          <!-- Gmail User Account / Sign-In Badge -->
           <div class="flex items-center gap-1.5 sm:gap-2 bg-slate-800/90 border border-slate-700 px-2 sm:px-2.5 py-1.5 rounded-xl">
-            <span id="header-role-badge" class="px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase bg-amber-400 text-slate-950">ADMIN</span>
-            <div class="hidden lg:block text-left leading-tight">
-              <div id="header-user-name" class="text-xs font-bold text-white">Admin Desk</div>
-              <div id="header-user-perm" class="text-[10px] text-emerald-400 font-medium">Full Edit &amp; Master Access</div>
+            <div class="w-6 h-6 rounded-full bg-white text-slate-900 font-extrabold text-[11px] flex items-center justify-center shrink-0 shadow-xs" title="Google Account">
+              <span class="text-indigo-600 font-bold">G</span>
             </div>
-            <button id="btn-open-auth-modal" type="button" class="px-2 sm:px-2.5 py-1 rounded-lg bg-slate-700 hover:bg-indigo-600 text-white text-[11px] font-bold transition-colors flex items-center gap-1" title="Sign In or Switch User / Admin Role">
-              <span>🔐</span>
-              <span id="btn-auth-label" class="hidden sm:inline">Sign In / Switch</span>
+            <div class="text-left leading-tight max-w-[130px] sm:max-w-[200px] truncate">
+              <div id="header-user-name" class="text-xs font-bold text-white truncate">Sign in with Gmail</div>
+              <div class="flex items-center gap-1">
+                <span id="header-role-badge" class="px-1.5 py-0.2 rounded-full text-[9px] font-extrabold uppercase bg-amber-400 text-slate-950">ADMIN</span>
+                <span id="header-user-email" class="text-[10px] text-slate-400 truncate hidden xs:inline">admin@goverdhanenergy.com</span>
+              </div>
+            </div>
+            <button id="btn-open-auth-modal" type="button" class="px-2 sm:px-2.5 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-bold transition-colors flex items-center gap-1" title="Sign In with your Gmail or Switch Account">
+              <span id="btn-auth-label">Gmail Sign In</span>
             </button>
           </div>
         </div>
@@ -412,14 +416,19 @@
   </div>
 
   <!-- ========================================== -->
-  <!-- SIGN-IN & ROLE SWITCHER MODAL -->
+  <!-- SIGN-IN WITH GMAIL & ROLE SWITCHER MODAL -->
   <!-- ========================================== -->
   <div id="modal-auth" hidden class="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4">
     <div class="surface-card bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-5">
       <div class="flex items-center justify-between border-b border-slate-100 pb-3">
-        <div>
-          <h3 class="text-base font-extrabold text-slate-900 flex items-center gap-2">🔐 Sign In / Switch Role</h3>
-          <p class="text-xs text-slate-500">Sign in with your User or Admin credentials</p>
+        <div class="flex items-center gap-2.5">
+          <div class="w-8 h-8 rounded-full bg-indigo-50 border border-indigo-200 flex items-center justify-center text-indigo-600 font-extrabold text-sm">
+            G
+          </div>
+          <div>
+            <h3 class="text-base font-extrabold text-slate-900 leading-tight">Sign In with Gmail</h3>
+            <p class="text-xs text-slate-500">Every user signs in with Gmail to log all quotes &amp; downloads</p>
+          </div>
         </div>
         <button id="btn-close-auth-modal" type="button" class="text-slate-400 hover:text-slate-700 text-xl font-bold">&times;</button>
       </div>
@@ -428,55 +437,58 @@
       <div class="p-3.5 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between">
         <div>
           <div class="text-[10px] font-extrabold uppercase text-slate-400">Currently Signed In As</div>
-          <div id="auth-modal-cur-user" class="text-sm font-bold text-slate-900 mt-0.5">Admin (Goverdhan Desk)</div>
-          <div id="auth-modal-cur-role" class="text-xs text-emerald-600 font-semibold">Role: Admin (Full Master &amp; Quote Access)</div>
+          <div id="auth-modal-cur-user" class="text-sm font-bold text-slate-900 mt-0.5">admin@goverdhanenergy.com</div>
+          <div id="auth-modal-cur-role" class="text-xs text-emerald-600 font-semibold">Role: Admin (Full Master &amp; Quoting Access)</div>
         </div>
         <button id="btn-manage-users-link" type="button" class="px-2.5 py-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-bold">Manage Users</button>
       </div>
 
-      <!-- Username & Password Login Form -->
-      <form id="form-login" class="space-y-3">
+      <!-- Gmail Sign-In Form -->
+      <form id="form-gmail-login" class="space-y-3.5">
         <div class="field">
-          <label class="lbl" for="login-username">Username or Email</label>
-          <input type="text" id="login-username" placeholder="e.g. admin or sales" required>
+          <label class="lbl flex items-center justify-between" for="login-gmail-address">
+            <span>Your Gmail / Google Account Address</span>
+            <span class="text-[10px] text-indigo-600 font-bold">Required</span>
+          </label>
+          <div class="relative">
+            <input type="email" id="login-gmail-address" placeholder="e.g. rajesh.patel@gmail.com" required class="font-medium pr-8">
+            <span class="absolute right-3 top-2.5 text-xs text-slate-400">✉️</span>
+          </div>
+          <p class="tiny" style="margin:2px 0 0">Sent quotations and downloads will be permanently logged under this Gmail.</p>
         </div>
+
         <div class="field">
-          <label class="lbl" for="login-password">Password</label>
-          <input type="password" id="login-password" placeholder="Enter password" required>
+          <label class="lbl" for="login-gmail-name">Your Full Name (Optional)</label>
+          <input type="text" id="login-gmail-name" placeholder="e.g. Rajesh Patel">
         </div>
-        <div id="login-error-msg" hidden class="text-xs text-rose-600 font-bold">Invalid username or password.</div>
-        <button type="submit" class="w-full py-2.5 px-4 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs shadow-sm transition-colors">
-          Sign In to Desk
+
+        <button type="submit" class="w-full py-2.5 px-4 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs shadow-sm transition-all flex items-center justify-center gap-2">
+          <span class="w-4 h-4 rounded-full bg-white text-indigo-600 text-[10px] inline-flex items-center justify-center font-black">G</span>
+          <span>Continue with Gmail</span>
         </button>
       </form>
 
-      <!-- Quick Role Switcher (For fast team/demo switching) -->
+      <!-- Quick Team Account Switcher -->
       <div id="quick-switch-container" class="pt-3 border-t border-slate-200 space-y-2">
         <div class="flex items-center justify-between">
-          <span class="text-[11px] font-bold text-slate-500">Quick Account Switch (Demo / Team):</span>
-          <span class="text-[10px] text-slate-400">Default Passwords</span>
+          <span class="text-[11px] font-bold text-slate-500">Quick Team Sign-In (Demo / Testing):</span>
+          <span class="text-[10px] text-slate-400">1-Click</span>
         </div>
-        <div class="grid grid-cols-3 gap-2">
-          <button type="button" data-quick-user="admin" class="p-2 rounded-xl border border-amber-300 bg-amber-50 hover:bg-amber-100 text-left transition-colors">
-            <div class="text-xs font-extrabold text-amber-950">👑 Admin</div>
-            <div class="text-[10px] text-amber-800 font-mono">admin / admin123</div>
-            <div class="text-[9px] text-emerald-700 font-bold mt-0.5">Full Master Edit</div>
+        <div class="grid grid-cols-2 gap-2">
+          <button type="button" data-quick-gmail="admin@goverdhanenergy.com" class="p-2.5 rounded-xl border border-amber-300 bg-amber-50 hover:bg-amber-100 text-left transition-colors">
+            <div class="text-xs font-extrabold text-amber-950 flex items-center gap-1"><span>👑</span><span>Admin Desk</span></div>
+            <div class="text-[10px] text-amber-800 font-mono truncate">admin@goverdhanenergy.com</div>
+            <div class="text-[9px] text-emerald-700 font-bold mt-0.5">Full Master &amp; Quoting</div>
           </button>
-          <button type="button" data-quick-user="sales" class="p-2 rounded-xl border border-indigo-200 bg-indigo-50 hover:bg-indigo-100 text-left transition-colors">
-            <div class="text-xs font-extrabold text-indigo-950">👤 Sales User</div>
-            <div class="text-[10px] text-indigo-700 font-mono">sales / sales123</div>
+          <button type="button" data-quick-gmail="sales@goverdhanenergy.com" class="p-2.5 rounded-xl border border-indigo-200 bg-indigo-50 hover:bg-indigo-100 text-left transition-colors">
+            <div class="text-xs font-extrabold text-indigo-950 flex items-center gap-1"><span>👤</span><span>Sales User</span></div>
+            <div class="text-[10px] text-indigo-700 font-mono truncate">sales@goverdhanenergy.com</div>
             <div class="text-[9px] text-indigo-600 font-bold mt-0.5">Quote &amp; PDF Only</div>
-          </button>
-          <button type="button" data-quick-user="viewer" class="p-2 rounded-xl border border-slate-200 bg-slate-100 hover:bg-slate-200 text-left transition-colors">
-            <div class="text-xs font-extrabold text-slate-800">👁️ Viewer</div>
-            <div class="text-[10px] text-slate-600 font-mono">viewer / viewer123</div>
-            <div class="text-[9px] text-slate-500 font-bold mt-0.5">Read-Only View</div>
           </button>
         </div>
       </div>
     </div>
   </div>
-
   <!-- ========================================== -->
   <!-- COMPANY LOGO & BRAND IDENTITY MODAL -->
   <!-- ========================================== -->
@@ -752,7 +764,7 @@ const S = {
   names: {}
 };
 
-const DEF_SETTINGS = { gstPct: 18, interestPct: 12, daysInYear: 365, creditBase: "invoice", defaultCreditDays: 30, defaultMargin: 300, applyDiscount: "max", fullTruckBilling: false, classFallback: true };
+const DEF_SETTINGS = { gstPct: 18, interestPct: 12, daysInYear: 365, creditBase: "invoice", defaultCreditDays: 30, defaultMargin: 0, applyDiscount: "none", fullTruckBilling: false, classFallback: true };
 const DEF_TEMPLATE = {
   companyName: "Goverdhan Energy & Petrochemicals Pvt. Ltd.",
   address: "Corporate Office: Central Avenue, Nagpur - 440008, Maharashtra",
@@ -783,7 +795,7 @@ const DEF_TEMPLATE = {
 
 const UI = {
   tab: "quote",
-  q: { loc: "Nagpur", product: "LDO", specificSource: "ALL", qty: "20", days: "", margin: "", disc: null, cycleId: "", manual: {}, discEdit: {}, routeSel: {}, sel: null, customer: "" },
+  q: { loc: "Nagpur", product: "LDO", specificSource: "ALL", qty: "20", days: "", margin: "", disc: "none", cycleId: "", manual: {}, discEdit: {}, routeSel: {}, sel: null, customer: "" },
   termsOpen: true,
   masterPreview: null,
   h: { product: "LDO", a: "", b: "" },
@@ -846,7 +858,7 @@ function revisionsSince(iso) { let n = 0, c = iso; const t = todayISO(); while (
 
 /* ================= HYBRID NEON POSTGRESQL + LOCALSTORAGE STORE ADAPTER ================= */
 const LS_PREFIX = "goverdhan_desk_";
-const CLOUD_KEYS = ["catalog", "routes", "transporters", "settings", "template", "cycles", "quotes", "quoteSeq", "users", "authSettings", "brand_settings", "workspaceState"];
+const CLOUD_KEYS = ["catalog", "routes", "transporters", "settings", "template", "cycles", "quotes", "quoteSeq", "users", "authSettings", "brand_settings", "workspaceState", "quoteLogs"];
 
 let inflight = 0;
 let cloudConnected = false;
@@ -1005,7 +1017,8 @@ async function pushAllToNeon(notify = false, replaceAll = true) {
       users: S.users,
       authSettings: S.authSettings,
       brand_settings: loadLocal("brand_settings", null),
-      workspaceState: getWorkspaceStateSnapshot()
+      workspaceState: getWorkspaceStateSnapshot(),
+      quoteLogs: S.quoteLogs || []
     };
     const res = await apiRequest("/api/storage", {
       method: "POST",
@@ -1027,7 +1040,7 @@ async function pushAllToNeon(notify = false, replaceAll = true) {
 
 async function pullFromNeon(notify = false, force = false) {
   // Never clobber active local edits or in-flight saves during background polling
-  if (!force && (inflight > 0 || Object.keys(pending).length > 0 || (Date.now() - lastLocalMutationAt < 2000))) {
+  if (!force && (inflight > 0 || Object.keys(pending).length > 0 || editing() || (Date.now() - lastLocalMutationAt < 5000))) {
     return false;
   }
   try {
@@ -1040,6 +1053,19 @@ async function pullFromNeon(notify = false, force = false) {
     const data = payload?.data || payload;
     if (!data || typeof data !== "object") return false;
     cloudConnected = true;
+
+    // Re-check after network await so typing that happened while GET was in-flight is NEVER overwritten!
+    if (!force && (inflight > 0 || Object.keys(pending).length > 0 || editing() || (Date.now() - lastLocalMutationAt < 5000))) {
+      setSync();
+      return false;
+    }
+
+    // If server stateRev is older than or equal to our own stateRev, ignore echo
+    const remoteRev = Number(data._meta?.stateRev) || 0;
+    if (!force && S.stateRev && remoteRev && remoteRev <= S.stateRev) {
+      setSync();
+      return true;
+    }
 
     // If Neon DB has never been initialized (zero keys in table), seed it once
     const keysPresent = Object.keys(data).filter(k => k !== "_meta");
@@ -1068,6 +1094,7 @@ async function pullFromNeon(notify = false, force = false) {
     applyKey("template", "template");
     if (Array.isArray(data.cycles)) applyKey("cycles", "cycles");
     if (Array.isArray(data.quotes)) applyKey("quotes", "quotes");
+    if (Array.isArray(data.quoteLogs)) applyKey("quoteLogs", "quoteLogs");
     if (data.quoteSeq) applyKey("quoteSeq", "quoteSeq");
     if (Array.isArray(data.users)) applyKey("users", "users");
     if (data.authSettings) applyKey("authSettings", "authSettings");
@@ -1184,7 +1211,6 @@ function createHybridDbAdapter() {
           if (res) {
             await pushKeyToNeon(res.key, res.val);
           }
-          dataChanged();
         },
         async delete() {
           markLocalMutation();
@@ -1199,7 +1225,6 @@ function createHybridDbAdapter() {
             saveLocal("quotes", S.quotes);
             await pushKeyToNeon("quotes", S.quotes);
           }
-          dataChanged();
         }
       };
     },
@@ -1213,7 +1238,6 @@ function createHybridDbAdapter() {
             saveLocal("quotes", S.quotes);
             await pushKeyToNeon("quotes", S.quotes);
           }
-          dataChanged();
           return newDoc;
         }
       };
@@ -1222,30 +1246,54 @@ function createHybridDbAdapter() {
 }
 
 const pending = {};
-function saveDoc(path, data, delay = 250) {
+
+// Clean saveDoc without snapshot overwrites:
+// 1. Live S[k] is already mutated in-place by the input listener.
+// 2. saveLocal saves S[k] immediately to localStorage.
+// 3. Debounces pushing the live S[k] to Neon DB (pushes current S[k], never an old snapshot!).
+// 4. Never triggers destructive DOM re-renders while typing.
+function saveDoc(path, data, delay = 500) {
   if (!S.canWrite) {
     toast("Read-only access: Sign in as Admin to modify master data.");
     return;
   }
   markLocalMutation();
-  // Immediately commit to in-memory state and localStorage so no edit is ever lost
-  applyDocToMemoryAndLocal(path, data);
+  let k = null;
+  if (path === "master/quoteSeq") k = "quoteSeq";
+  else if (path.startsWith("master/")) k = path.split("/")[1];
+  else if (path.startsWith("cycles/")) k = "cycles";
+  if (k && S[k]) {
+    saveLocal(k, S[k]);
+  }
   updateSidebarStats();
+
   clearTimeout(pending[path]?.t);
-  pending[path] = { data: JSON.parse(JSON.stringify(data)), t: setTimeout(() => flush(path), delay) };
+  pending[path] = {
+    path,
+    k,
+    t: setTimeout(() => flush(path), delay)
+  };
 }
 
 const chains = {};
-function flush(path) {
+async function flush(path) {
   const p = pending[path];
   if (!p) return;
   delete pending[path];
   inflight++;
   setSync();
-  chains[path] = (chains[path] || Promise.resolve())
-    .then(() => S.db.doc(path).set(JSON.parse(JSON.stringify(p.data))))
-    .catch(e => toast("Save failed: " + (e?.message || "error")))
-    .finally(() => { inflight = Math.max(0, inflight - 1); setSync(); });
+  try {
+    const k = p.k || (path.startsWith("master/") ? path.split("/")[1] : path.startsWith("cycles/") ? "cycles" : null);
+    if (k && S[k]) {
+      saveLocal(k, S[k]);
+      await pushKeyToNeon(k, S[k]);
+    }
+  } catch (e) {
+    console.error("Flush error for " + path + ":", e);
+  } finally {
+    inflight = Math.max(0, inflight - 1);
+    setSync();
+  }
 }
 
 async function delDoc(path) {
@@ -1253,6 +1301,7 @@ async function delDoc(path) {
     toast("Read-only access: Sign in with edit permissions to delete records.");
     return;
   }
+  markLocalMutation();
   try {
     inflight++;
     setSync();
@@ -1270,10 +1319,14 @@ async function writeDoc(path, data) {
     toast("Read-only access: Sign in as Admin to save master changes.");
     return false;
   }
+  markLocalMutation();
   inflight++;
   setSync();
   try {
-    await S.db.doc(path).set(JSON.parse(JSON.stringify(data)));
+    const res = applyDocToMemoryAndLocal(path, data);
+    if (res) {
+      await pushKeyToNeon(res.key, res.val);
+    }
     return true;
   } catch (e) {
     toast("Save failed: " + (e?.message || e?.code));
@@ -1284,19 +1337,127 @@ async function writeDoc(path, data) {
   }
 }
 
-let renderPending = false;
 function editing() {
   const a = document.activeElement;
-  return a && a.closest && a.closest("[data-live]") && /INPUT|SELECT|TEXTAREA/.test(a.tagName);
+  return a && /INPUT|SELECT|TEXTAREA/.test(a.tagName);
 }
+
 function dataChanged() {
   updateSidebarStats();
-  if (editing()) { renderPending = true; return; }
+  // Never re-render over an active table or form while editing or if local typing occurred recently
+  if (editing() || (Date.now() - lastLocalMutationAt < 6000)) return;
+  // If user is currently on an active master editing view, never clobber their DOM
+  if (UI.tab.startsWith("master")) return;
   render();
 }
-document.addEventListener("focusout", () => setTimeout(() => {
-  if (renderPending && !editing()) { renderPending = false; render(); }
-}, 0));
+
+/* ================= QUOTATION AUDIT & ACTIVITY LOG ENGINE ================= */
+async function logQuotationEvent(eventObj) {
+  const user = S.currentUser || { name: "Sales Desk", email: "sales@goverdhanenergy.com", role: "user" };
+  const entry = {
+    id: "log_" + uid(),
+    ts: new Date().toISOString(),
+    userEmail: user.email || (user.username ? user.username + "@goverdhanenergy.com" : "sales@goverdhanenergy.com"),
+    userName: user.name || "Sales User",
+    userRole: user.role || "user",
+    action: eventObj.action || "Generated Quotation",
+    actionType: eventObj.actionType || "quote",
+    quoteNumber: eventObj.quoteNumber || "Instant Quote",
+    customer: eventObj.customer || "Direct Enquiry",
+    location: eventObj.location || "—",
+    product: eventObj.product || "—",
+    qty: eventObj.qty ? `${eventObj.qty} ${eventObj.unit || "MT"}` : "Spot Rate",
+    unit: eventObj.unit || "MT",
+    refinery: eventObj.refinery || "—",
+    rate: eventObj.rate != null ? Math.round(Number(eventObj.rate)) : null,
+    rateGst: eventObj.rateGst != null ? Math.round(Number(eventObj.rateGst)) : null,
+    margin: eventObj.margin != null ? Number(eventObj.margin) : 0,
+    orderTotal: eventObj.orderTotal != null ? Math.round(Number(eventObj.orderTotal)) : null
+  };
+
+  S.quoteLogs = S.quoteLogs || [];
+  S.quoteLogs.unshift(entry);
+  if (S.quoteLogs.length > 500) S.quoteLogs.length = 500;
+  saveLocal("quoteLogs", S.quoteLogs);
+  await pushKeyToNeon("quoteLogs", S.quoteLogs);
+  updateSidebarStats();
+}
+
+function exportQuoteLogsCsv() {
+  const logs = S.quoteLogs || [];
+  if (!logs.length) { toast("No quotation logs recorded yet."); return; }
+  const headers = ["Timestamp", "Quoted By (Gmail)", "Name", "Role", "Action", "Quote No", "Customer", "Delivery Location", "Product", "Quantity", "Refinery", "Rate (₹/Unit)", "Margin (₹/Unit)", "Rate incl GST", "Order Total (₹)"];
+  const rows = logs.map(l => [
+    `"${l.ts}"`,
+    `"${l.userEmail || ""}"`,
+    `"${(l.userName || "").replace(/"/g, '""')}"`,
+    `"${l.userRole || ""}"`,
+    `"${(l.action || "").replace(/"/g, '""')}"`,
+    `"${l.quoteNumber || ""}"`,
+    `"${(l.customer || "").replace(/"/g, '""')}"`,
+    `"${(l.location || "").replace(/"/g, '""')}"`,
+    `"${(l.product || "").replace(/"/g, '""')}"`,
+    `"${l.qty || ""}"`,
+    `"${(l.refinery || "").replace(/"/g, '""')}"`,
+    l.rate ?? "",
+    l.margin ?? "",
+    l.rateGst ?? "",
+    l.orderTotal ?? ""
+  ]);
+  const csvContent = "\uFEFF" + [headers.join(","), ...rows.map(r => r.join(","))].join("\r\n");
+  const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+  const fname = `Quotation_Activity_Log_${new Date().toISOString().slice(0, 10)}.csv`;
+  triggerBlobDownload(fname, blob);
+  toast("Quotation audit log exported as CSV!");
+}
+
+/* ================= USER & GMAIL AUTHENTICATION ENGINE ================= */
+function formatNameFromEmail(email) {
+  const part = (email || "").split("@")[0] || "User";
+  return part
+    .replace(/[._-]+/g, " ")
+    .replace(/\b\w/g, c => c.toUpperCase())
+    .trim();
+}
+
+function signInWithGmail(email, customName = "") {
+  const normEmail = (email || "").trim().toLowerCase();
+  if (!normEmail || !normEmail.includes("@")) {
+    toast("Please enter a valid Gmail address (e.g. yourname@gmail.com)");
+    return false;
+  }
+  const adminList = (S.authSettings?.adminEmails || ["admin@goverdhanenergy.com", "goverdhanenergy@gmail.com", "admin@gmail.com"]).map(x => x.toLowerCase());
+  const isAdmin = adminList.includes(normEmail) || normEmail.startsWith("admin@") || normEmail.includes("goverdhanenergy");
+  const role = isAdmin ? "admin" : "user";
+  const name = customName.trim() || formatNameFromEmail(normEmail);
+
+  let existing = (S.users || []).find(u => (u.email && u.email.toLowerCase() === normEmail) || u.username.toLowerCase() === normEmail);
+  if (existing) {
+    existing.email = normEmail;
+    if (customName.trim()) existing.name = customName.trim();
+    if (isAdmin) existing.role = "admin";
+  } else {
+    existing = {
+      id: "u_" + uid(),
+      username: normEmail.split("@")[0],
+      email: normEmail,
+      name,
+      role,
+      canEditMaster: isAdmin,
+      canQuote: true,
+      active: true,
+      createdAt: new Date().toISOString()
+    };
+    S.users.push(existing);
+    saveLocal("users", S.users);
+    pushKeyToNeon("users", S.users);
+  }
+  syncUserNamesMap();
+  applyUserSession(existing);
+  $("#modal-auth").hidden = true;
+  toast(`Signed in with Gmail as ${existing.name} (${existing.role.toUpperCase()})`);
+  return true;
+}
 
 /* ================= USER & ADMIN AUTHENTICATION ENGINE ================= */
 function syncUserNamesMap() {
@@ -1325,7 +1486,8 @@ function applyUserSession(userObj) {
     badge.className = "px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase " +
       (isAdmin ? "bg-amber-400 text-slate-950" : userObj.role === "user" ? "bg-indigo-500 text-white" : "bg-slate-600 text-slate-200");
   }
-  if (nameEl) nameEl.textContent = userObj.name;
+  if (nameEl) nameEl.textContent = userObj.name || formatNameFromEmail(userObj.email || userObj.username);
+  const emailEl = $("#header-user-email"); if (emailEl) emailEl.textContent = userObj.email || (userObj.username ? userObj.username + "@goverdhanenergy.com" : "");
   if (permEl) {
     permEl.textContent = S.canWrite ? "Full Master & Quote Access" : S.canQuote ? "Quote & PDF Access (Master Read-Only)" : "Read-Only Viewer";
     permEl.className = "text-[10px] font-medium " + (S.canWrite ? "text-emerald-400" : S.canQuote ? "text-sky-300" : "text-slate-400");
@@ -1340,7 +1502,7 @@ function applyUserSession(userObj) {
   }
   const mUser = $("#auth-modal-cur-user");
   const mRole = $("#auth-modal-cur-role");
-  if (mUser) mUser.textContent = `${userObj.name} (@${userObj.username})`;
+  if (mUser) mUser.textContent = `${userObj.name} (${userObj.email || userObj.username})`;
   if (mRole) mRole.textContent = `Role: ${userObj.role.toUpperCase()} · ${S.canWrite ? "Full Master & Quote Edit" : S.canQuote ? "Can Quote & Save PDFs (Master Read-Only)" : "Read-Only"}`;
 
   // Strictly hide Admin-only sections (Neon/Render panel, Multi-PC Sync card, Brand/Logo customizer, User Management, Master Upload) from non-admins
@@ -1417,8 +1579,8 @@ function computeQuote(q) {
   const cyc = S.cycles.find(c => c.id === q.cycleId) || latestCycle();
   const idx = priceIndex(cyc), prevIdx = priceIndex(prevCycleOf(cyc));
   const qty = Math.max(num(q.qty) || 0, 0), days = Math.max(num(q.days) ?? num(st.defaultCreditDays) ?? 30, 0);
-  const margin = num(q.margin) ?? num(st.defaultMargin) ?? 0;
-  const discMode = q.disc || st.applyDiscount || "max";
+  const margin = num(q.margin) ?? 0;
+  const discMode = q.disc || "none";
   const rows = [], noprice = [];
   for (const s of S.catalog?.sources || []) {
     if (s.active === false) continue;
@@ -1709,16 +1871,19 @@ function viewQuote() {
         </div>
       </div>
 
-      <!-- Card 5: Margin & Refinery Discount Mode -->
+      <!-- Card 5: Margin & Refinery Discount Mode (User specifies margin; No Discount by default) -->
       <div class="input-box-card p-3.5 rounded-2xl bg-gradient-to-b from-amber-50/80 to-white border border-amber-200/90 border-t-4 border-t-amber-500 shadow-xs space-y-2">
-        <label class="block text-[11px] font-extrabold text-amber-950 uppercase tracking-wider" for="q-margin">5. Margin &amp; Discount</label>
+        <div class="flex items-center justify-between">
+          <label class="block text-[11px] font-extrabold text-amber-950 uppercase tracking-wider" for="q-margin">5. Margin &amp; Discount</label>
+          <span class="text-[10px] text-amber-700 font-bold">${q.margin ? `+₹${q.margin}` : "User specified"}</span>
+        </div>
         <div class="unit-in">
-          <input type="number" id="q-margin" step="any" value="${esc(q.margin ?? "")}" placeholder="${esc(st.defaultMargin ?? 0)} (default)">
+          <input type="number" id="q-margin" step="any" value="${esc(q.margin ?? "")}" placeholder="Enter your margin (₹/${unit})">
           <span>₹/${unit}</span>
         </div>
         <div class="seg" role="group" aria-label="Refinery discount">
+          <button type="button" data-disc="none" aria-pressed="${(q.disc || st.applyDiscount || "none") === "none"}">No Discount</button>
           <button type="button" data-disc="max" aria-pressed="${(q.disc || st.applyDiscount) === "max"}">Max Discount</button>
-          <button type="button" data-disc="none" aria-pressed="${(q.disc || st.applyDiscount) === "none"}">No Discount</button>
         </div>
       </div>
     </div>
@@ -1916,7 +2081,10 @@ function renderQuoteResults() {
   const cp = box.querySelector("#copymsg");
   if (cp) cp.onclick = () => {
     const t = box.querySelector("#msgtext").textContent;
-    navigator.clipboard?.writeText(t).then(() => toast("Quote text copied to clipboard"), () => { selectText(box.querySelector("#msgtext")); toast("Text selected. Press Ctrl+C to copy."); });
+    navigator.clipboard?.writeText(t).then(() => {
+      toast("Quote text copied to clipboard!");
+      logQuotationEvent({ action: "Copied Quote (WhatsApp/Email)", actionType: "copy", quoteNumber: "Instant Quote", customer: q.customer || "Direct Customer", location: q.loc, product: R.pr?.name, qty: q.qty, unit, refinery: sel?.s?.name, rate: sel?.sell, rateGst: sel?.sellGst, margin: R.margin, orderTotal: sel?.orderValue });
+    }, () => { selectText(box.querySelector("#msgtext")); toast("Text selected. Press Ctrl+C to copy."); });
   };
   const sq = box.querySelector("#savequickquote");
   if (sq) sq.onclick = () => saveQuote(sel, R);
@@ -1999,6 +2167,7 @@ async function saveQuote(r, R) {
   try {
     await S.db.collection("quotes").add(doc);
     toast("Quick quote saved to Saved Quotes log!");
+    await logQuotationEvent({ action: "Saved Quick Quote", actionType: "save", quoteNumber: "Quick Quote", customer: q.customer || "Direct Customer", location: q.loc, product: R.pr?.name, qty: q.qty, unit: R.pr?.unit, refinery: r.s.name, rate: r.sell, rateGst: r.sellGst, margin: R.margin, orderTotal: Math.round(r.sell * (Number(q.qty) || 1)) });
   } catch (e) {
     toast("Couldn't save the quote: " + (e?.message || e?.code));
   }
@@ -2321,14 +2490,19 @@ function viewTransporters() {
    </div>`).join("")}</div>` : `<div class="panel empty"><strong>No transporters yet</strong>Add each transporter with their tanker categories and capacities.</div>`}`;
   document.querySelectorAll("[data-t]").forEach(inp => inp.addEventListener(inp.tagName === "SELECT" ? "change" : "input", e => {
     if (!S.canWrite) return;
-    const t = T[+inp.dataset.t]; const k = inp.dataset.f; const val = k === "capacity" ? num(e.target.value) : e.target.value;
-    if (inp.dataset.v !== undefined) t.vehicles[+inp.dataset.v][k] = val; else t[k] = val;
-    save();
+    const list = (S.transporters = S.transporters || { list: [] }).list;
+    const t = list[+inp.dataset.t];
+    if (!t) return;
+    const k = inp.dataset.f;
+    const val = k === "capacity" ? num(e.target.value) : e.target.value;
+    if (inp.dataset.v !== undefined) t.vehicles[+inp.dataset.v][k] = val;
+    else t[k] = val;
+    saveDoc("master/transporters", S.transporters, 500);
   }));
-  document.querySelectorAll("[data-vadd]").forEach(b => b.onclick = () => { if (!S.canWrite) return; const t = T[+b.dataset.vadd]; (t.vehicles = t.vehicles || []).push({ category: "", capacity: null, unit: "KL" }); save(); viewTransporters(); });
-  document.querySelectorAll("[data-vdel]").forEach(b => b.onclick = () => { if (!S.canWrite) return; const [a, c] = b.dataset.vdel.split(":").map(Number); T[a].vehicles.splice(c, 1); save(); viewTransporters(); });
-  document.querySelectorAll("[data-tdel]").forEach(b => b.onclick = () => { if (!S.canWrite) return; if (!b.dataset.armed) { b.dataset.armed = 1; b.textContent = "Confirm remove"; return; } T.splice(+b.dataset.tdel, 1); save(); viewTransporters(); });
-  $("#addt").onclick = () => { if (!S.canWrite) return; T.push({ id: "t" + uid(), name: "New transporter", phone: "", notes: "", vehicles: [{ category: "20 KL Tanker", capacity: 20, unit: "KL" }] }); save(); viewTransporters(); };
+  document.querySelectorAll("[data-vadd]").forEach(b => b.onclick = () => { if (!S.canWrite) return; const list = (S.transporters = S.transporters || { list: [] }).list; const t = list[+b.dataset.vadd]; if (!t) return; (t.vehicles = t.vehicles || []).push({ category: "", capacity: null, unit: "KL" }); saveDoc("master/transporters", S.transporters, 0); viewTransporters(); });
+  document.querySelectorAll("[data-vdel]").forEach(b => b.onclick = () => { if (!S.canWrite) return; const list = (S.transporters = S.transporters || { list: [] }).list; const [a, c] = b.dataset.vdel.split(":").map(Number); list[a]?.vehicles?.splice(c, 1); saveDoc("master/transporters", S.transporters, 0); viewTransporters(); });
+  document.querySelectorAll("[data-tdel]").forEach(b => b.onclick = () => { if (!S.canWrite) return; if (!b.dataset.armed) { b.dataset.armed = 1; b.textContent = "Confirm remove"; return; } const list = (S.transporters = S.transporters || { list: [] }).list; list.splice(+b.dataset.tdel, 1); saveDoc("master/transporters", S.transporters, 0); viewTransporters(); });
+  $("#addt").onclick = () => { if (!S.canWrite) return; const list = (S.transporters = S.transporters || { list: [] }).list; list.push({ id: "t" + uid(), name: "", phone: "", notes: "", vehicles: [{ category: "20 KL Tanker", capacity: 20, unit: "KL" }] }); saveDoc("master/transporters", S.transporters, 0); viewTransporters(); };
 }
 
 /* ================= MASTER FILE BAR & NAVIGATION ================= */
@@ -2413,25 +2587,89 @@ function viewCredit() {
 
 /* ================= VIEW 7: MASTER FILE — REFINERIES & PRODUCTS ================= */
 function viewRefineries() {
-  const C = S.catalog; const saveC = () => saveDoc("master/catalog", S.catalog, 500);
+  S.catalog = S.catalog || { sources: [], products: [] };
+  const saveC = (delay = 500) => saveDoc("master/catalog", S.catalog, delay);
   const dis = S.canWrite ? "" : "disabled";
   V().innerHTML = `<div class="stack">
-   <section class="stack" style="gap:8px"><div class="sechead"><h3>Refineries and supply points</h3><button class="btn small primary" id="adds" ${dis}>＋ Add supply point</button></div>
+   <section class="stack" style="gap:8px"><div class="sechead"><h3>Refineries and supply points</h3><button class="btn small primary" id="adds" type="button" ${dis}>＋ Add supply point</button></div>
      <p class="tiny" style="margin:0">The loading point links a refinery to its transport routes. "Names in sheets" are aliases matched during Excel uploads.</p>
      <div class="tw tbl-edit" data-live><table><thead><tr><th>Company</th><th>Name</th><th>Loading point</th><th>In use</th><th>Names in sheets (comma-separated)</th><th></th></tr></thead><tbody>
-     ${C.sources.map((s, i) => `<tr><td><input type="text" data-s="${i}" data-f="company" value="${esc(s.company)}" style="width:90px" ${dis}></td><td><input type="text" data-s="${i}" data-f="name" value="${esc(s.name)}" style="min-width:150px" ${dis}></td><td><input type="text" data-s="${i}" data-f="loading" value="${esc(s.loading)}" style="min-width:110px" ${dis}></td><td><input type="checkbox" data-s="${i}" data-f="active" ${s.active !== false ? "checked" : ""} aria-label="In use" ${dis}></td><td><input type="text" data-s="${i}" data-f="aliases" value="${esc((s.aliases || []).join(", "))}" style="min-width:200px" ${dis}></td><td><button class="btn small danger" data-sdel="${i}" ${dis}>✕</button></td></tr>`).join("")}
+     ${(S.catalog.sources || []).map((s, i) => `<tr><td><input type="text" data-s="${i}" data-f="company" value="${esc(s.company)}" placeholder="e.g. IOCL" style="width:95px" ${dis}></td><td><input type="text" data-s="${i}" data-f="name" value="${esc(s.name)}" placeholder="e.g. IOCL Koyali" style="min-width:160px" ${dis}></td><td><input type="text" data-s="${i}" data-f="loading" value="${esc(s.loading)}" placeholder="e.g. Vadodara" style="min-width:120px" ${dis}></td><td><input type="checkbox" data-s="${i}" data-f="active" ${s.active !== false ? "checked" : ""} aria-label="In use" ${dis}></td><td><input type="text" data-s="${i}" data-f="aliases" value="${esc((s.aliases || []).join(", "))}" placeholder="Comma-separated sheet names" style="min-width:200px" ${dis}></td><td><button class="btn small danger" type="button" data-sdel="${i}" ${dis}>✕</button></td></tr>`).join("")}
      </tbody></table></div></section>
-   <section class="stack" style="gap:8px"><div class="sechead"><h3>Products</h3><button class="btn small primary" id="addp" ${dis}>＋ Add product</button></div>
+   <section class="stack" style="gap:8px"><div class="sechead"><h3>Products</h3><button class="btn small primary" id="addp" type="button" ${dis}>＋ Add product</button></div>
      <div class="tw tbl-edit" data-live><table><thead><tr><th>Code</th><th>Name</th><th>Unit</th><th>Type</th><th>Names in sheets</th><th></th></tr></thead><tbody>
-     ${C.products.map((p, i) => `<tr><td class="tiny font-mono font-bold">${esc(p.id)}</td><td><input type="text" data-p="${i}" data-f="name" value="${esc(p.name)}" style="min-width:180px" ${dis}></td><td><select data-p="${i}" data-f="unit" ${dis}><option ${p.unit === "MT" ? "selected" : ""}>MT</option><option ${p.unit === "KL" ? "selected" : ""}>KL</option></select></td><td><select data-p="${i}" data-f="cls" ${dis}>${[["black", "Black oil"], ["white", "Light / white"], ["bitumen", "Bitumen"]].map(([v, l]) => `<option value="${v}" ${p.cls === v ? "selected" : ""}>${l}</option>`).join("")}</select></td><td><input type="text" data-p="${i}" data-f="aliases" value="${esc((p.aliases || []).join(", "))}" style="min-width:180px" ${dis}></td><td><button class="btn small danger" data-pdel="${i}" ${dis}>✕</button></td></tr>`).join("")}
+     ${(S.catalog.products || []).map((p, i) => `<tr><td><input type="text" data-p="${i}" data-f="id" value="${esc(p.id)}" placeholder="e.g. MTO" class="font-mono font-bold" style="width:90px" ${dis}></td><td><input type="text" data-p="${i}" data-f="name" value="${esc(p.name)}" placeholder="e.g. MTO (Mineral Turpentine Oil)" style="min-width:190px" ${dis}></td><td><select data-p="${i}" data-f="unit" ${dis}><option ${p.unit === "MT" ? "selected" : ""}>MT</option><option ${p.unit === "KL" ? "selected" : ""}>KL</option></select></td><td><select data-p="${i}" data-f="cls" ${dis}>${[["black", "Black oil"], ["white", "Light / white"], ["bitumen", "Bitumen"]].map(([v, l]) => `<option value="${v}" ${p.cls === v ? "selected" : ""}>${l}</option>`).join("")}</select></td><td><input type="text" data-p="${i}" data-f="aliases" value="${esc((p.aliases || []).join(", "))}" placeholder="e.g. MTO, MINERAL TURPENTINE" style="min-width:180px" ${dis}></td><td><button class="btn small danger" type="button" data-pdel="${i}" ${dis}>✕</button></td></tr>`).join("")}
      </tbody></table></div></section></div>`;
+
   const val = (e, k) => k === "active" ? e.target.checked : k === "aliases" ? e.target.value.split(",").map(x => x.trim()).filter(Boolean) : e.target.value;
-  document.querySelectorAll("[data-s]").forEach(inp => inp.addEventListener(inp.type === "checkbox" ? "change" : "input", e => { if (!S.canWrite) return; C.sources[+inp.dataset.s][inp.dataset.f] = val(e, inp.dataset.f); saveC(); }));
-  document.querySelectorAll("[data-p]").forEach(inp => inp.addEventListener(inp.tagName === "SELECT" ? "change" : "input", e => { if (!S.canWrite) return; C.products[+inp.dataset.p][inp.dataset.f] = val(e, inp.dataset.f); saveC(); }));
-  document.querySelectorAll("[data-sdel]").forEach(b => b.onclick = () => { if (!S.canWrite) return; if (!b.dataset.armed) { b.dataset.armed = 1; b.textContent = "Del?"; return; } C.sources.splice(+b.dataset.sdel, 1); saveDoc("master/catalog", S.catalog, 0); viewRefineries(); });
-  document.querySelectorAll("[data-pdel]").forEach(b => b.onclick = () => { if (!S.canWrite) return; if (!b.dataset.armed) { b.dataset.armed = 1; b.textContent = "Del?"; return; } C.products.splice(+b.dataset.pdel, 1); saveDoc("master/catalog", S.catalog, 0); viewRefineries(); });
-  $("#adds").onclick = () => { if (!S.canWrite) return; C.sources.push({ id: "s" + uid(), company: "IOCL", name: "New supply point", loading: "", creditDays: 0, active: true, aliases: [] }); saveC(); viewRefineries(); };
-  $("#addp").onclick = () => { if (!S.canWrite) return; C.products.push({ id: "P" + uid().toUpperCase().slice(0, 4), name: "New product", unit: "MT", cls: "black", aliases: [] }); saveC(); viewRefineries(); };
+
+  document.querySelectorAll("[data-s]").forEach(inp => inp.addEventListener(inp.type === "checkbox" ? "change" : "input", e => {
+    if (!S.canWrite) return;
+    const row = S.catalog.sources[+inp.dataset.s];
+    if (!row) return;
+    row[inp.dataset.f] = val(e, inp.dataset.f);
+    if (inp.dataset.f === "name" && row.id.startsWith("s_new_")) {
+      row.id = sourceIdFor(row.name || "src");
+    }
+    saveC(500);
+  }));
+
+  document.querySelectorAll("[data-p]").forEach(inp => inp.addEventListener(inp.tagName === "SELECT" ? "change" : "input", e => {
+    if (!S.canWrite) return;
+    const idx = +inp.dataset.p;
+    const row = S.catalog.products[idx];
+    if (!row) return;
+    const field = inp.dataset.f;
+    if (field === "id") {
+      row.id = e.target.value.trim().toUpperCase() || row.id;
+      delete row._autoCode;
+    } else {
+      row[field] = val(e, field);
+      if (field === "name" && row._autoCode) {
+        const cleanCode = e.target.value.trim().toUpperCase().replace(/[^A-Z0-9_-]/g, "").slice(0, 10);
+        if (cleanCode) {
+          row.id = cleanCode;
+          const codeInp = document.querySelector(`input[data-p="${idx}"][data-f="id"]`);
+          if (codeInp && document.activeElement !== codeInp) codeInp.value = cleanCode;
+        }
+      }
+    }
+    saveC(500);
+  }));
+
+  document.querySelectorAll("[data-sdel]").forEach(b => b.onclick = () => {
+    if (!S.canWrite) return;
+    if (!b.dataset.armed) { b.dataset.armed = 1; b.textContent = "Del?"; return; }
+    S.catalog.sources.splice(+b.dataset.sdel, 1);
+    saveC(0);
+    viewRefineries();
+  });
+
+  document.querySelectorAll("[data-pdel]").forEach(b => b.onclick = () => {
+    if (!S.canWrite) return;
+    if (!b.dataset.armed) { b.dataset.armed = 1; b.textContent = "Del?"; return; }
+    S.catalog.products.splice(+b.dataset.pdel, 1);
+    saveC(0);
+    viewRefineries();
+  });
+
+  $("#adds").onclick = () => {
+    if (!S.canWrite) return;
+    S.catalog.sources.push({ id: "s_new_" + uid(), company: "", name: "", loading: "", creditDays: 0, active: true, aliases: [] });
+    saveC(0);
+    viewRefineries();
+    const lastInp = document.querySelector(`input[data-s="${S.catalog.sources.length - 1}"][data-f="company"]`);
+    lastInp?.focus();
+  };
+
+  $("#addp").onclick = () => {
+    if (!S.canWrite) return;
+    S.catalog.products.push({ id: "NEW", name: "", unit: "MT", cls: "black", aliases: [], _autoCode: true });
+    saveC(0);
+    viewRefineries();
+    const lastInp = document.querySelector(`input[data-p="${S.catalog.products.length - 1}"][data-f="name"]`);
+    lastInp?.focus();
+  };
 }
 
 /* ================= EXCEL MASTER: DOWNLOAD & UPLOAD (.XLSX) ================= */
@@ -2695,6 +2933,7 @@ async function saveQuotation() {
     };
     await S.db.collection("quotes").add(doc);
     toast("Saved as " + number + " & downloading PDF!");
+    await logQuotationEvent({ action: "Generated & Downloaded A4 PDF Quotation", actionType: "pdf", quoteNumber: number, customer: d.cust.name, location: [...new Set(d.lines.map(l => l.location))].join(", "), product: d.lines.map(l => l.product).join(", "), qty: d.lines.map(l => l.qty ? l.qty + " " + l.unit : "").filter(Boolean).join(", "), rate: d.lines[0]?.rate, rateGst: d.lines[0]?.rateGst, margin: d.lines[0]?.margin, refinery: d.lines.map(l => l.source).join(", ") });
     await downloadQuotation(doc);
     UI.qdoc = null;
     renderQuoteResults();
@@ -2970,24 +3209,79 @@ function renderAddForm() {
   const x = $("#af-x"); if (x) x.onclick = () => { UI.addForm = null; render(); };
 }
 
-/* ================= VIEW 9: SAVED QUOTES LOG ================= */
+/* ================= VIEW 9: SAVED QUOTES & SENT QUOTATION AUDIT LOG ================= */
 function viewSaved() {
-  const Q = S.quotes; const f = UI.sf = UI.sf || { text: "" };
-  const vis = Q.filter(q => !f.text || norm([q.number, q.customer, q.location, q.productName].join(" ")).includes(norm(f.text)));
-  V().innerHTML = `<div class="sechead"><div><h2>Saved Quotes Log</h2><p class="sub" style="margin:0">Formal PDF quotations and quick quotes saved by the team, newest first.</p></div>
-    <div class="field" style="min-width:240px"><label class="lbl" for="sf">Search</label><input type="search" id="sf" value="${esc(f.text)}" placeholder="Number, customer, town"></div></div>
-  <div style="height:14px"></div>
-  ${vis.length ? `<div class="tw"><table><thead><tr><th>Date</th><th>Quotation</th><th>Customer</th><th>Products · delivered at</th><th class="n">Rate quoted</th><th>Supplied from</th><th>By</th><th></th></tr></thead><tbody>
-  ${vis.map(q => {
-    const L = q.lines || [{ product: q.productName, location: q.location, rate: q.price, unit: q.unit, source: q.sourceName, qty: q.qty }];
-    return `<tr><td>${new Date(q.createdAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "2-digit" })}</td>
-    <td>${q.number ? `<b>${esc(q.number)}</b>` : '<span class="pill flat">quick quote</span>'}</td><td><b>${esc(q.customer || q.cust?.name || "—")}</b></td>
-    <td>${L.map(l => `${esc(l.product)} <span class="tiny">· ${esc(l.location)}${l.qty ? ` · ${nf(l.qty, 2)} ${l.unit}` : ""}</span>`).join("<br>")}</td>
-    <td class="n">${L.map(l => `${inr(l.rate)}<span class="tiny">/${l.unit}</span>`).join("<br>")}</td>
-    <td class="tiny">${L.map(l => esc(l.source || "")).join("<br>")}</td><td class="tiny">${esc(S.names[q.by] || q.by || "Desk")}</td>
-    <td class="n" style="white-space:nowrap">${q.type === "quotation" ? `<button class="btn small primary" data-pdf="${q.id}">⬇ PDF</button> ` : ""}<button class="btn small" data-re="${q.id}">🎯 Re-price</button> <button class="btn small danger" data-qdel="${q.id}" ${S.canWrite ? "" : "disabled"} aria-label="Delete">✕</button></td></tr>`;
-  }).join("")}
-  </tbody></table></div>` : `<div class="panel empty"><strong>${Q.length ? "No quotes match" : "No saved quotes yet"}</strong>${Q.length ? "Try another search." : "Get a price, add it to a quotation, then choose “Save &amp; Download PDF”."}</div>`}`;
+  const Q = S.quotes || [];
+  const logs = S.quoteLogs || [];
+  UI.savedTab = UI.savedTab || "quotes"; // "quotes" or "audit"
+  const f = UI.sf = UI.sf || { text: "" };
+
+  const visQuotes = Q.filter(q => !f.text || norm([q.number, q.customer, q.location, q.productName].join(" ")).includes(norm(f.text)));
+  const visLogs = logs.filter(l => !f.text || norm([l.userEmail, l.userName, l.action, l.quoteNumber, l.customer, l.location, l.product, l.refinery].join(" ")).includes(norm(f.text)));
+
+  V().innerHTML = `
+  <div class="sechead" style="align-items:flex-end">
+    <div>
+      <h2>Quotation Desk History &amp; Audit Trail</h2>
+      <p class="sub" style="margin:0">Track team quotation activity, who sent/downloaded quotes via Gmail, and access formal saved PDF documents.</p>
+    </div>
+    <div class="actions">
+      ${UI.savedTab === "audit" ? `<button id="btn-export-audit-csv" type="button" class="btn small">⬇ Export Audit Log (.csv)</button>` : ""}
+      <div class="field" style="min-width:220px;margin:0">
+        <input type="search" id="sf" value="${esc(f.text)}" placeholder="Search customer, Gmail, town, product…">
+      </div>
+    </div>
+  </div>
+
+  <!-- Tab Toggle: Saved Formal Quotations vs Sent Quotation Audit Log -->
+  <div class="flex items-center gap-2 border-b border-slate-200 mt-2 mb-4">
+    <button type="button" id="tab-btn-saved-quotes" class="py-2.5 px-4 font-bold text-xs border-b-2 transition-colors flex items-center gap-2 ${UI.savedTab === "quotes" ? "border-indigo-600 text-indigo-600 bg-indigo-50/50 rounded-t-xl" : "border-transparent text-slate-500 hover:text-slate-900"}">
+      <span>📄</span><span>Saved Quotation Documents</span>
+      <span class="text-[10px] bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full font-mono">${Q.length}</span>
+    </button>
+    <button type="button" id="tab-btn-audit-logs" class="py-2.5 px-4 font-bold text-xs border-b-2 transition-colors flex items-center gap-2 ${UI.savedTab === "audit" ? "border-indigo-600 text-indigo-600 bg-indigo-50/50 rounded-t-xl" : "border-transparent text-slate-500 hover:text-slate-900"}">
+      <span>📋</span><span>Sent Quotation Activity Log (Gmail Audit)</span>
+      <span class="text-[10px] bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full font-mono">${logs.length}</span>
+    </button>
+  </div>
+
+  ${UI.savedTab === "quotes" ? `
+    ${visQuotes.length ? `<div class="tw"><table><thead><tr><th>Date</th><th>Quotation</th><th>Customer</th><th>Products · delivered at</th><th class="n">Rate quoted</th><th>Supplied from</th><th>By (Gmail)</th><th></th></tr></thead><tbody>
+    ${visQuotes.map(q => {
+      const L = q.lines || [{ product: q.productName, location: q.location, rate: q.price, unit: q.unit, source: q.sourceName, qty: q.qty }];
+      return `<tr><td>${new Date(q.createdAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "2-digit" })}</td>
+      <td>${q.number ? `<b>${esc(q.number)}</b>` : '<span class="pill flat">quick quote</span>'}</td><td><b>${esc(q.customer || q.cust?.name || "—")}</b></td>
+      <td>${L.map(l => `${esc(l.product)} <span class="tiny">· ${esc(l.location)}${l.qty ? ` · ${nf(l.qty, 2)} ${l.unit}` : ""}</span>`).join("<br>")}</td>
+      <td class="n">${L.map(l => `${inr(l.rate)}<span class="tiny">/${l.unit}</span>`).join("<br>")}</td>
+      <td class="tiny">${L.map(l => esc(l.source || "")).join("<br>")}</td><td class="tiny">${esc(S.names[q.by] || q.by || "Desk")}</td>
+      <td class="n" style="white-space:nowrap">${q.type === "quotation" ? `<button class="btn small primary" data-pdf="${q.id}">⬇ PDF</button> ` : ""}<button class="btn small" data-re="${q.id}">🎯 Re-price</button> <button class="btn small danger" data-qdel="${q.id}" ${S.canWrite ? "" : "disabled"} aria-label="Delete">✕</button></td></tr>`;
+    }).join("")}
+    </tbody></table></div>` : `<div class="panel empty"><strong>${Q.length ? "No quotes match your search" : "No saved quotes yet"}</strong>Get a price, add it to quotation basket, and choose “Save &amp; Download PDF”.</div>`}
+  ` : `
+    ${visLogs.length ? `<div class="tw"><table><thead><tr><th>Time &amp; Date</th><th>Quoted By (Gmail)</th><th>Action</th><th>Quote No</th><th>Customer &amp; Town</th><th>Product &amp; Qty</th><th>Refinery</th><th class="n">Margin</th><th class="n">Quoted Rate</th></tr></thead><tbody>
+    ${visLogs.map(l => {
+      const dt = new Date(l.ts);
+      const timeStr = dt.toLocaleDateString("en-IN", { day: "2-digit", month: "short" }) + " " + dt.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
+      const badgeClass = l.actionType === "pdf" ? "bg-indigo-100 text-indigo-800" : l.actionType === "copy" ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800";
+      return `<tr>
+        <td class="tiny font-mono">${timeStr}</td>
+        <td><b>${esc(l.userName || "User")}</b><div class="tiny font-mono text-slate-500">${esc(l.userEmail || "—")}</div></td>
+        <td><span class="px-2 py-0.5 rounded-full text-[10px] font-extrabold ${badgeClass}">${esc(l.action)}</span></td>
+        <td class="font-mono text-xs font-bold">${esc(l.quoteNumber)}</td>
+        <td><b>${esc(l.customer)}</b><div class="tiny">📍 ${esc(l.location)}</div></td>
+        <td><b>${esc(l.product)}</b><div class="tiny">${esc(l.qty)}</div></td>
+        <td class="tiny">${esc(l.refinery)}</td>
+        <td class="n font-mono">${l.margin ? `+₹${nf(l.margin)}` : "₹0"}</td>
+        <td class="n font-mono font-bold">${l.rate ? inr(l.rate) : "—"}<div class="tiny font-normal">${l.rateGst ? `Incl GST: ${inr(l.rateGst)}` : ""}</div></td>
+      </tr>`;
+    }).join("")}
+    </tbody></table></div>` : `<div class="panel empty"><strong>${logs.length ? "No quotation logs match your search" : "No sent quotations logged yet"}</strong>When any user generates an A4 PDF or copies a WhatsApp quotation, it is logged here with their Gmail ID.</div>`}
+  `}`;
+
+  $("#tab-btn-saved-quotes")?.addEventListener("click", () => { UI.savedTab = "quotes"; viewSaved(); });
+  $("#tab-btn-audit-logs")?.addEventListener("click", () => { UI.savedTab = "audit"; viewSaved(); });
+  $("#btn-export-audit-csv")?.addEventListener("click", exportQuoteLogsCsv);
+
   $("#sf").addEventListener("input", e => { f.text = e.target.value; viewSaved(); const s = $("#sf"); s.focus(); s.setSelectionRange(s.value.length, s.value.length); });
   document.querySelectorAll("[data-pdf]").forEach(b => b.onclick = () => downloadQuotation(Q.find(x => x.id === b.dataset.pdf)));
   document.querySelectorAll("[data-re]").forEach(b => b.onclick = () => {
@@ -3002,7 +3296,6 @@ function viewSaved() {
     delDoc("quotes/" + b.dataset.qdel);
   });
 }
-
 /* ================= VIEW 10: USER & ADMIN MANAGEMENT PANEL ================= */
 function viewUsersAdmin() {
   const isAdmin = S.currentUser?.role === "admin";
@@ -3055,6 +3348,7 @@ function viewUsersAdmin() {
       <thead>
         <tr>
           <th>Full Name</th>
+          <th>Gmail Address</th>
           <th>Username</th>
           <th>Password</th>
           <th>Role</th>
@@ -3067,9 +3361,10 @@ function viewUsersAdmin() {
       <tbody>
         ${(S.users || []).map((u, i) => `
           <tr>
-            <td><input type="text" data-u="${i}" data-uf="name" value="${esc(u.name)}" style="min-width:160px" ${dis}></td>
-            <td><input type="text" data-u="${i}" data-uf="username" value="${esc(u.username)}" style="min-width:110px" class="font-mono" ${dis}></td>
-            <td><input type="text" data-u="${i}" data-uf="password" value="${esc(u.password)}" style="min-width:110px" class="font-mono" ${dis}></td>
+            <td><input type="text" data-u="${i}" data-uf="name" value="${esc(u.name)}" placeholder="Full Name" style="min-width:150px" ${dis}></td>
+            <td><input type="text" data-u="${i}" data-uf="email" value="${esc(u.email || (u.username ? u.username + "@gmail.com" : ""))}" placeholder="user@gmail.com" style="min-width:180px" class="font-mono" ${dis}></td>
+            <td><input type="text" data-u="${i}" data-uf="username" value="${esc(u.username)}" style="min-width:100px" class="font-mono" ${dis}></td>
+            <td><input type="text" data-u="${i}" data-uf="password" value="${esc(u.password || "")}" style="min-width:100px" class="font-mono" ${dis}></td>
             <td>
               <select data-u="${i}" data-uf="role" ${dis}>
                 <option value="admin" ${u.role === "admin" ? "selected" : ""}>👑 Admin</option>
@@ -3101,20 +3396,27 @@ function viewUsersAdmin() {
     }
   });
 
-  document.querySelectorAll("[data-u]").forEach(inp => inp.addEventListener("change", async e => {
+  let userSaveTimer = null;
+  document.querySelectorAll("[data-u]").forEach(inp => inp.addEventListener((inp.type === "checkbox" || inp.tagName === "SELECT") ? "change" : "input", e => {
     if (!isAdmin) return;
     const idx = +inp.dataset.u;
     const f = inp.dataset.uf;
     const u = S.users[idx];
+    if (!u) return;
     if (inp.type === "checkbox") u[f] = inp.checked;
-    else u[f] = inp.value.trim();
+    else u[f] = inp.value;
     if (u.role === "admin") { u.canEditMaster = true; u.canQuote = true; }
+    markLocalMutation();
     saveLocal("users", S.users);
     syncUserNamesMap();
-    await pushKeyToNeon("users", S.users);
-    if (S.currentUser?.id === u.id) applyUserSession(u);
-    else viewUsersAdmin();
-    toast("User account updated & synced!");
+    clearTimeout(userSaveTimer);
+    userSaveTimer = setTimeout(async () => {
+      await pushKeyToNeon("users", S.users);
+    }, 500);
+    if (inp.type === "checkbox" || inp.tagName === "SELECT") {
+      if (S.currentUser?.id === u.id) applyUserSession(u);
+      else viewUsersAdmin();
+    }
   }));
 
   document.querySelectorAll("[data-udel]").forEach(b => b.onclick = async () => {
@@ -3263,6 +3565,7 @@ async function boot() {
   S.template = loadLocal("template", DEF_TEMPLATE);
   S.cycles = loadLocal("cycles", DEFAULT_CYCLES);
   S.quotes = loadLocal("quotes", DEFAULT_QUOTES);
+  S.quoteLogs = loadLocal("quoteLogs", []);
   S.quoteSeq = loadLocal("quoteSeq", { "26-27": 1 });
   S.got = { all: true, catalog: true, routes: true, cycles: true, settings: true, transporters: true, quotes: true };
 
@@ -3325,32 +3628,16 @@ async function boot() {
     location.hash = "#admin-users";
   });
 
-  $("#form-login")?.addEventListener("submit", e => {
+  $("#form-gmail-login")?.addEventListener("submit", e => {
     e.preventDefault();
-    const uVal = ($("#login-username")?.value || "").trim().toLowerCase();
-    const pVal = $("#login-password")?.value || "";
-    const found = (S.users || []).find(u => u.active !== false && u.username.toLowerCase() === uVal && u.password === pVal);
-    const errEl = $("#login-error-msg");
-    if (!found) {
-      if (errEl) errEl.hidden = false;
-      toast("Invalid username or password");
-      return;
-    }
-    if (errEl) errEl.hidden = true;
-    applyUserSession(found);
-    $("#modal-auth").hidden = true;
-    $("#login-password").value = "";
-    toast(`Signed in as ${found.name} (${found.role.toUpperCase()})`);
+    const gm = ($("#login-gmail-address")?.value || "").trim();
+    const nm = ($("#login-gmail-name")?.value || "").trim();
+    signInWithGmail(gm, nm);
   });
 
-  document.querySelectorAll("[data-quick-user]").forEach(btn => btn.addEventListener("click", () => {
-    const uname = btn.getAttribute("data-quick-user");
-    const found = (S.users || []).find(u => u.username.toLowerCase() === uname);
-    if (found) {
-      applyUserSession(found);
-      $("#modal-auth").hidden = true;
-      toast(`Switched to ${found.name} (${found.role.toUpperCase()})`);
-    }
+  document.querySelectorAll("[data-quick-gmail]").forEach(btn => btn.addEventListener("click", () => {
+    const gm = btn.getAttribute("data-quick-gmail");
+    signInWithGmail(gm);
   }));
 
   // Brand Customizer Modal Wiring (Logo & Company Name in Header now navigate to Home / Calculator!)

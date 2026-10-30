@@ -795,7 +795,7 @@ const DEF_TEMPLATE = {
 
 const UI = {
   tab: "quote",
-  q: { loc: "Nagpur", product: "LDO", specificSource: "ALL", qty: "20", days: "", margin: "", disc: "none", cycleId: "", manual: {}, discEdit: {}, routeSel: {}, sel: null, customer: "" },
+  q: { loc: "Nagpur", product: "LDO", specificSource: "ALL", qty: "20", days: "", margin: "", disc: "none", cycleId: "", manual: {}, manualBasic: {}, discEdit: {}, routeSel: {}, sel: null, customer: "" },
   termsOpen: true,
   masterPreview: null,
   h: { product: "LDO", a: "", b: "" },
@@ -1593,14 +1593,16 @@ function computeQuote(q) {
   const qty = Math.max(num(q.qty) || 0, 0), days = Math.max(num(q.days) ?? num(st.defaultCreditDays) ?? 30, 0);
   const margin = num(q.margin) ?? 0;
   const discMode = q.disc || "none";
+  q.manualBasic = q.manualBasic || {};
   const rows = [], noprice = [];
   for (const s of S.catalog?.sources || []) {
     if (s.active === false) continue;
     if (Array.isArray(s.products) && s.products.length > 0 && !s.products.includes(q.product)) continue;
-    const p = idx[s.id + "|" + q.product];
-    if (!p) continue;
-    if (!(num(p.basic) > 0)) { noprice.push({ s, p }); continue; }
-    const basic = num(p.basic), maxD = num(p.maxDiscount) || 0;
+    const p = idx[s.id + "|" + q.product] || { sourceId: s.id, productId: q.product, basic: null, maxDiscount: 0 };
+    const mb = num(q.manualBasic[s.id]);
+    const basic = mb > 0 ? mb : num(p.basic);
+    if (!(basic > 0)) { noprice.push({ s, p }); continue; }
+    const maxD = num(p.maxDiscount) || 0;
     const disc = q.discEdit[s.id] !== undefined && q.discEdit[s.id] !== "" ? num(q.discEdit[s.id]) || 0 : (discMode === "max" ? maxD : 0);
     const net = basic - disc;
     const ro = routeOptions(s, q.product, q.loc, qty);
@@ -1619,6 +1621,9 @@ function computeQuote(q) {
         freight = rate * billedQty / qty;
       } else freight = rate;
       freightSrc = ro.est ? "estimated" : "route";
+    } else if (!q.loc.trim() || q.specificSource === s.id || !(S.routes?.rows || []).length) {
+      freight = 0;
+      freightSrc = "ex-refinery (0 transport)";
     }
     const prev = prevIdx[s.id + "|" + q.product];
     const prevBasic = num(prev?.basic);
@@ -1760,10 +1765,11 @@ function render() {
 /* ================= VIEW 1: GET A PRICE (QUOTE CALCULATOR IN OUR UI) ================= */
 function allLocations() { return [...new Set((S.routes?.rows || []).map(r => r.delivery).filter(Boolean))].sort((a, b) => a.localeCompare(b)); }
 function sellableProducts() {
+  const named = (S.catalog?.products || []).filter(p => (p.name || "").trim());
   const lc = S.cycles.find(c => c.id === UI.q.cycleId) || latestCycle();
   const ids = new Set((lc?.prices || []).filter(p => num(p.basic) > 0).map(p => p.productId));
-  const list = (S.catalog.products || []).filter(p => ids.has(p.id));
-  return list.length ? list : (S.catalog.products || []);
+  const list = named.filter(p => ids.has(p.id));
+  return list.length ? list : named;
 }
 const CO_VAR = { HPCL: "--hp", IOCL: "--io", BPCL: "--bp", RIL: "--ril", Nayara: "--ny", Depot: "--dp", Imported: "--imp" };
 const coVar = c => `var(${CO_VAR[c] || "--dp"})`;
@@ -1915,13 +1921,58 @@ function viewQuote() {
         </div>
       </div>
     </div>
+
+    <!-- Prominent Calculate & Reset Action Bar -->
+    <div class="pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3">
+      <div class="text-xs text-slate-500 flex items-center gap-2">
+        <span>💡 Select your parameters above and click <b>Calculate Price</b> to generate landed cost &amp; customer quotation.</span>
+      </div>
+      <div class="flex items-center gap-2.5 ml-auto">
+        <button type="button" id="btn-reset-calc" class="px-4 py-2.5 rounded-xl border border-slate-300 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition-colors flex items-center gap-1.5">
+          <span>🔄</span><span>Reset</span>
+        </button>
+        <button type="submit" id="btn-calculate-quote" class="px-6 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 via-indigo-700 to-violet-700 hover:from-indigo-500 hover:to-violet-600 text-white text-sm font-extrabold shadow-md hover:shadow-lg transition-all flex items-center gap-2 cursor-pointer">
+          <span>⚡</span><span>Calculate Price</span>
+        </button>
+      </div>
+    </div>
   </form>
 
   <div id="qres" class="stack" style="min-width:0;margin-top:18px"></div>`;
 
   const f = $("#qform");
-  f.addEventListener("submit", e => e.preventDefault());
   const reset = () => { q.manual = {}; q.discEdit = {}; q.routeSel = {}; q.sel = null; };
+  f.addEventListener("submit", e => {
+    e.preventDefault();
+    q.customer = ($("#q-cust")?.value || "").trim();
+    q.loc = ($("#q-loc")?.value || "").trim();
+    q.qty = $("#q-qty")?.value || "";
+    q.days = $("#q-days")?.value || "";
+    q.margin = $("#q-margin")?.value || "";
+    if ($("#q-prod-select")) q.product = $("#q-prod-select").value;
+    if ($("#q-spec-ref")) {
+      q.specificSource = $("#q-spec-ref").value;
+      q.sel = q.specificSource === "ALL" ? null : q.specificSource;
+    }
+    saveWorkspaceState(200);
+    renderQuoteResults();
+    toast("⚡ Landed price & quotation calculated!");
+    $("#qres")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  });
+  $("#btn-reset-calc")?.addEventListener("click", () => {
+    q.loc = "";
+    q.customer = "";
+    q.qty = "20";
+    q.days = "";
+    q.margin = "";
+    q.disc = "none";
+    q.specificSource = "ALL";
+    q.manualBasic = {};
+    reset();
+    saveWorkspaceState(200);
+    viewQuote();
+    toast("Calculator inputs reset");
+  });
   const bind = (id, k) => $(id)?.addEventListener("input", e => {
     q[k] = e.target.value;
     if (k === "loc" || k === "cycleId") reset();
@@ -1952,13 +2003,65 @@ function viewQuote() {
 function renderQuoteResults() {
   const box = $("#qres");
   if (!box) return;
-  const q = UI.q, R = computeQuote(q), unit = R.pr?.unit || "";
-  if (!q.loc.trim()) {
-    box.innerHTML = `<div class="panel empty"><strong>Enter the delivery location</strong>Pick one of the ${allLocations().length} towns with transport rates, or type a new town.</div>`;
-    return;
-  }
+  const q = UI.q, R = computeQuote(q), unit = R.pr?.unit || "MT";
   const total = R.priced.length + R.unrouted.length;
   if (!total) {
+    const candidateSources = (S.catalog?.sources || []).filter(s => s.active !== false && (!Array.isArray(s.products) || !s.products.length || s.products.includes(q.product)));
+    if (candidateSources.length) {
+      box.innerHTML = `<div class="panel pad stack" style="gap:12px;border-color:var(--accent)">
+        <div class="sechead">
+          <div>
+            <h3>Enter Basic Price for ${esc(R.pr?.name || q.product)} to Calculate</h3>
+            <p class="tiny" style="margin:2px 0 0">No 15-day refinery rate is saved for <b>${esc(R.pr?.name || q.product)}</b> yet. Enter the refinery Basic Price (₹/${esc(unit)}) below and click <b>⚡ Save Rate &amp; Calculate</b>.</p>
+          </div>
+          <a class="btn small" href="#master-rates">Open 15-Day Refinery Rates</a>
+        </div>
+        <div class="tw tbl-edit" data-live>
+          <table>
+            <thead>
+              <tr>
+                <th>Refinery / Source</th>
+                <th>Location</th>
+                <th class="n">Basic Price (₹/${esc(unit)} before GST)</th>
+                <th class="n">Transport Rate (₹/${esc(unit)})</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              ${candidateSources.map(s => `<tr>
+                <td><b>${esc(s.name)}</b></td>
+                <td class="tiny">📍 ${esc(getRefineryLocations(s).join(", ") || s.loading || "—")}</td>
+                <td class="n"><input type="number" step="any" data-qbasic="${s.id}" value="${esc(q.manualBasic?.[s.id] ?? "")}" placeholder="e.g. 48500" style="width:130px"></td>
+                <td class="n"><input type="number" step="any" data-qtrans="${s.id}" value="${esc(q.manual?.[s.id] ?? "")}" placeholder="e.g. 2200 (optional)" style="width:140px"></td>
+                <td class="n"><button type="button" class="btn small primary" data-qsavebasic="${s.id}">⚡ Save Rate &amp; Calculate</button></td>
+              </tr>`).join("")}
+            </tbody>
+          </table>
+        </div>
+      </div>`;
+      box.querySelectorAll("[data-qsavebasic]").forEach(btn => btn.onclick = async () => {
+        const sid = btn.getAttribute("data-qsavebasic");
+        const bVal = num(box.querySelector(`input[data-qbasic="${sid}"]`)?.value);
+        const tVal = box.querySelector(`input[data-qtrans="${sid}"]`)?.value;
+        if (!(bVal > 0)) { toast("Enter a Basic Price greater than 0"); return; }
+        q.manualBasic = q.manualBasic || {};
+        q.manualBasic[sid] = bVal;
+        if (tVal !== undefined && tVal !== "") q.manual[sid] = tVal;
+        // Also save to current or new 15-day rate cycle if user has write access
+        if (S.canWrite) {
+          let lc = latestCycle();
+          const cid = lc ? lc.id : todayISO();
+          const cyc = lc ? JSON.parse(JSON.stringify(lc)) : { id: cid, effectiveDate: cid, note: "Added from Calculator", savedAt: new Date().toISOString(), prices: [] };
+          const pi = cyc.prices.findIndex(p => p.sourceId === sid && p.productId === q.product);
+          if (pi >= 0) cyc.prices[pi].basic = bVal;
+          else cyc.prices.push({ sourceId: sid, productId: q.product, basic: bVal, maxDiscount: 0 });
+          await writeDoc("cycles/" + cid, cyc);
+        }
+        renderQuoteResults();
+        toast("⚡ Rate saved & landed quote calculated!");
+      });
+      return;
+    }
     box.innerHTML = `<div class="panel empty"><strong>No refinery has a rate for ${esc(R.pr?.name || q.product)}</strong>Pick another product, or add its rate in Master file → Refinery rates.</div>`;
     return;
   }

@@ -1,15 +1,16 @@
 {
-  "name": "refinecalc-app",
+  "name": "refinecalc-pro",
   "version": "1.0.0",
-  "description": "Refinery & Transporter Price Calculator",
+  "description": "Internal Refinery & Transport Price Optimizer for Render & Neon DB",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "dev": "nodemon server.js"
   },
   "dependencies": {
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
-    "pg": "^8.11.5"
+    "pg": "^8.12.0"
   }
 }

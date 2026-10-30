@@ -194,7 +194,7 @@
   <!-- ========================================== -->
   <!-- TOP HEADER: COMPANY LOGO, NAME, HOME BUTTON & USER/ADMIN SIGN-IN -->
   <!-- ========================================== -->
-  <header class="bg-slate-900 border-b border-slate-800 text-white relative z-40 shadow-md">
+  <header class="bg-slate-900 border-b border-slate-800 text-white sticky top-0 z-40 shadow-md">
     <div class="max-w-[1600px] mx-auto px-3 sm:px-6">
       <div class="flex items-center justify-between h-16 gap-2 sm:gap-3">
         <!-- Left: Hamburger Button (Mobile) + Brand / Logo (Clicks Go Home) -->
@@ -855,13 +855,12 @@ let lastLocalMutationAt = 0;
 let wsSyncTimer = null;
 let sseConnection = null;
 
- markLocalMutation();
-  // Keep the live object the screen is editing; only persist it locally
-  const liveKey = path.startsWith("master/") ? path.split("/")[1] : null;
-  if (liveKey && S[liveKey] === data) saveLocal(liveKey, data);
-  else applyDocToMemoryAndLocal(path, data);
-  updateSidebarStats();
-  
+function markLocalMutation() {
+  lastLocalMutationAt = Date.now();
+  S.stateRev = lastLocalMutationAt;
+  saveLocal("_stateRev", S.stateRev);
+}
+
 function getApiBase() {
   try { return (localStorage.getItem("refinecalc_api_base_url") || "").trim().replace(/\/+$/, ""); } catch (e) { return ""; }
 }
@@ -1032,15 +1031,12 @@ async function pullFromNeon(notify = false, force = false) {
     return false;
   }
   try {
-    const startedMut = lastLocalMutationAt;
-  try {
     const res = await apiRequest("/api/storage?_t=" + Date.now(), {
       method: "GET",
       headers: { "Accept": "application/json" }
     });
     if (!res.ok) return false;
     const payload = await res.json();
-    if (!force && (lastLocalMutationAt !== startedMut || inflight > 0 || Object.keys(pending).length > 0 || editing())) return false;
     const data = payload?.data || payload;
     if (!data || typeof data !== "object") return false;
     cloudConnected = true;
@@ -1247,7 +1243,7 @@ function flush(path) {
   inflight++;
   setSync();
   chains[path] = (chains[path] || Promise.resolve())
-    .then(() => pushPathToNeon(path))
+    .then(() => S.db.doc(path).set(JSON.parse(JSON.stringify(p.data))))
     .catch(e => toast("Save failed: " + (e?.message || "error")))
     .finally(() => { inflight = Math.max(0, inflight - 1); setSync(); });
 }

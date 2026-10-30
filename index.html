@@ -800,7 +800,20 @@ function revisionsSince(iso) { let n = 0, c = iso; const t = todayISO(); while (
 
 /* ================= HYBRID NEON POSTGRESQL + LOCALSTORAGE STORE ADAPTER ================= */
 const LS_PREFIX = "goverdhan_desk_";
-const CLOUD_KEYS = ["catalog", "routes", "transporters", "settings", "template", "cycles", "quotes", "quoteSeq", "users", "authSettings", "brand_settings"];
+const CLOUD_KEYS = ["catalog", "routes", "transporters", "settings", "template", "cycles", "quotes", "quoteSeq", "users", "authSettings", "brand_settings", "workspaceState"];
+
+let inflight = 0;
+let cloudConnected = false;
+let initialPullDone = false;
+let lastLocalMutationAt = 0;
+let wsSyncTimer = null;
+let sseConnection = null;
+
+function markLocalMutation() {
+  lastLocalMutationAt = Date.now();
+  S.stateRev = lastLocalMutationAt;
+  saveLocal("_stateRev", S.stateRev);
+}
 
 function getApiBase() {
   try { return (localStorage.getItem("refinecalc_api_base_url") || "").trim().replace(/\/+$/, ""); } catch (e) { return ""; }
@@ -810,9 +823,18 @@ async function apiRequest(endpoint, options = {}) {
   const base = getApiBase();
   const url = base ? (base + endpoint) : endpoint;
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 6500);
+  const timer = setTimeout(() => controller.abort(), 8000);
   try {
-    return await fetch(url, { ...options, signal: controller.signal });
+    return await fetch(url, {
+      cache: "no-store",
+      ...options,
+      headers: {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        ...(options.headers || {})
+      },
+      signal: controller.signal
+    });
   } finally {
     clearTimeout(timer);
   }
@@ -821,9 +843,9 @@ async function apiRequest(endpoint, options = {}) {
 function loadLocal(k, fallback) {
   try {
     const raw = localStorage.getItem(LS_PREFIX + k);
-    if (raw) return JSON.parse(raw);
+    if (raw !== null && raw !== undefined) return JSON.parse(raw);
   } catch (e) {}
-  return JSON.parse(JSON.stringify(fallback));
+  return fallback !== undefined ? JSON.parse(JSON.stringify(fallback)) : null;
 }
 
 function saveLocal(k, val) {
@@ -832,43 +854,98 @@ function saveLocal(k, val) {
   } catch (e) {}
 }
 
-let inflight = 0;
-let cloudConnected = false;
-
 function setSync(customText) {
   const el = $("#sync");
   const dot = $("#sync-dot");
   if (!el) return;
   if (customText) { el.textContent = customText; return; }
   if (inflight > 0) {
-    el.textContent = "Saving…";
+    el.textContent = "Auto-saving to Cloud…";
     if (dot) dot.className = "w-2 h-2 rounded-full bg-amber-500 animate-pulse";
   } else if (!S.canWrite) {
-    el.textContent = "Read-only (" + (S.currentUser?.role || "user") + ")";
+    el.textContent = "Live Sync (" + (S.currentUser?.role || "user") + ")";
     if (dot) dot.className = "w-2 h-2 rounded-full bg-sky-500";
   } else {
-    el.textContent = cloudConnected ? "Neon Cloud Synced" : "All changes saved";
+    el.textContent = cloudConnected ? "Live Multi-Device Synced" : "All changes saved";
     if (dot) dot.className = "w-2 h-2 rounded-full bg-emerald-500";
   }
 }
 
 async function pushKeyToNeon(k, val) {
+  markLocalMutation();
+  inflight++;
+  setSync();
   try {
     const res = await apiRequest("/api/storage/" + encodeURIComponent(k), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ value: val })
+      body: JSON.stringify({ value: val, stateRev: S.stateRev })
     });
     if (res.ok) cloudConnected = true;
     return res.ok;
   } catch (e) {
     return false;
+  } finally {
+    inflight = Math.max(0, inflight - 1);
+    setSync();
   }
 }
 
-async function pushAllToNeon(notify = false) {
+function getWorkspaceStateSnapshot() {
+  return {
+    q: UI.q,
+    qdoc: UI.qdoc,
+    color_mode: loadLocal("color_mode", "white")
+  };
+}
+
+function saveWorkspaceState(delay = 300) {
+  if (!initialPullDone) return;
+  markLocalMutation();
+  const snap = getWorkspaceStateSnapshot();
+  saveLocal("workspaceState", snap);
+  clearTimeout(wsSyncTimer);
+  wsSyncTimer = setTimeout(() => {
+    pushKeyToNeon("workspaceState", getWorkspaceStateSnapshot());
+  }, delay);
+}
+
+function flushActiveEditorToState() {
+  if (UI.editor && /^\d{4}-\d\d-\d\d$/.test(UI.editor.effectiveDate || "")) {
+    const E = UI.editor;
+    const id = E.effectiveDate;
+    const doc = {
+      id,
+      effectiveDate: id,
+      note: E.note || "",
+      by: S.currentUser?.id || "",
+      savedAt: new Date().toISOString(),
+      prices: (E.rows || []).map(({ old, ...r }) => r)
+    };
+    if (E.id && E.id !== id) {
+      S.cycles = S.cycles.filter(c => c.id !== E.id);
+    }
+    const idx = S.cycles.findIndex(c => c.id === id);
+    if (idx >= 0) S.cycles[idx] = doc;
+    else S.cycles.push(doc);
+    E.id = id;
+    saveLocal("cycles", S.cycles);
+  }
+  for (const path of Object.keys(pending)) {
+    clearTimeout(pending[path]?.t);
+    const p = pending[path];
+    delete pending[path];
+    if (p && p.data !== undefined) {
+      applyDocToMemoryAndLocal(path, p.data);
+    }
+  }
+}
+
+async function pushAllToNeon(notify = false, replaceAll = true) {
+  flushActiveEditorToState();
+  markLocalMutation();
   inflight++;
-  setSync("Pushing to Neon DB…");
+  setSync("Syncing all data to Neon DB…");
   try {
     const entries = {
       catalog: S.catalog,
@@ -881,38 +958,53 @@ async function pushAllToNeon(notify = false) {
       quoteSeq: S.quoteSeq,
       users: S.users,
       authSettings: S.authSettings,
-      brand_settings: loadLocal("brand_settings", null)
+      brand_settings: loadLocal("brand_settings", null),
+      workspaceState: getWorkspaceStateSnapshot()
     };
     const res = await apiRequest("/api/storage", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ entries })
+      body: JSON.stringify({ entries, stateRev: S.stateRev, replaceAll })
     });
     if (res.ok) {
       cloudConnected = true;
-      if (notify) toast("All Master Data, Cycles, Quotes & Users pushed to Neon DB!");
+      if (notify) toast("All changes auto-saved & synced across all devices!");
       return true;
     }
   } catch (e) {} finally {
-    inflight--;
+    inflight = Math.max(0, inflight - 1);
     setSync();
   }
-  if (notify) toast("Saved locally (Deploy updated server.js on Render for Neon sync)");
+  if (notify) toast("Saved locally (Check Render server connection)");
   return false;
 }
 
-async function pullFromNeon(notify = false) {
+async function pullFromNeon(notify = false, force = false) {
+  // Never clobber active local edits or in-flight saves during background polling
+  if (!force && (inflight > 0 || Object.keys(pending).length > 0 || (Date.now() - lastLocalMutationAt < 2000))) {
+    return false;
+  }
   try {
-    const res = await apiRequest("/api/storage", { method: "GET", headers: { "Accept": "application/json" } });
+    const res = await apiRequest("/api/storage?_t=" + Date.now(), {
+      method: "GET",
+      headers: { "Accept": "application/json" }
+    });
     if (!res.ok) return false;
     const payload = await res.json();
     const data = payload?.data || payload;
     if (!data || typeof data !== "object") return false;
     cloudConnected = true;
-    let changed = false;
 
+    // If Neon DB has never been initialized (zero keys in table), seed it once
+    const keysPresent = Object.keys(data).filter(k => k !== "_meta");
+    if (keysPresent.length === 0) {
+      await pushAllToNeon(false, true);
+      return true;
+    }
+
+    let changed = false;
     const applyKey = (k, targetProp) => {
-      if (data[k] !== undefined && data[k] !== null) {
+      if (Object.prototype.hasOwnProperty.call(data, k) && data[k] !== undefined && data[k] !== null) {
         const curStr = JSON.stringify(S[targetProp]);
         const newStr = JSON.stringify(data[k]);
         if (curStr !== newStr) {
@@ -928,25 +1020,46 @@ async function pullFromNeon(notify = false) {
     applyKey("transporters", "transporters");
     applyKey("settings", "settings");
     applyKey("template", "template");
-    if (Array.isArray(data.cycles) && data.cycles.length > 0) applyKey("cycles", "cycles");
+    if (Array.isArray(data.cycles)) applyKey("cycles", "cycles");
     if (Array.isArray(data.quotes)) applyKey("quotes", "quotes");
     if (data.quoteSeq) applyKey("quoteSeq", "quoteSeq");
-    if (Array.isArray(data.users) && data.users.length > 0) applyKey("users", "users");
+    if (Array.isArray(data.users)) applyKey("users", "users");
     if (data.authSettings) applyKey("authSettings", "authSettings");
+
     if (data.brand_settings) {
-      saveLocal("brand_settings", data.brand_settings);
-      applyBrandToUI(data.brand_settings);
+      const curBrand = JSON.stringify(loadLocal("brand_settings", null));
+      const newBrand = JSON.stringify(data.brand_settings);
+      if (curBrand !== newBrand) {
+        saveLocal("brand_settings", data.brand_settings);
+        applyBrandToUI(data.brand_settings);
+        changed = true;
+      }
     }
 
-    // If Neon DB was empty, seed it automatically
-    if (!data.catalog && !data.cycles) {
-      pushAllToNeon(false);
+    if (data.workspaceState && !editing()) {
+      const ws = data.workspaceState;
+      const curWs = JSON.stringify(getWorkspaceStateSnapshot());
+      const newWs = JSON.stringify(ws);
+      if (curWs !== newWs) {
+        if (ws.q && typeof ws.q === "object") UI.q = { ...UI.q, ...ws.q };
+        if (ws.qdoc !== undefined) UI.qdoc = ws.qdoc;
+        if (ws.color_mode && ws.color_mode !== loadLocal("color_mode", "white")) {
+          applyColorMode(ws.color_mode, false, true);
+        }
+        saveLocal("workspaceState", ws);
+        changed = true;
+      }
+    }
+
+    if (data._meta?.stateRev) {
+      S.stateRev = data._meta.stateRev;
+      saveLocal("_stateRev", S.stateRev);
     }
 
     syncUserNamesMap();
     if (changed) dataChanged();
     setSync();
-    if (notify) toast("Synced latest data from Neon PostgreSQL!");
+    if (notify) toast("Synced latest version from Neon PostgreSQL!");
     return true;
   } catch (e) {
     if (notify) toast("Using local store (Neon API offline in preview)");
@@ -954,7 +1067,54 @@ async function pullFromNeon(notify = false) {
   }
 }
 
-// Built-in S.db adapter so all S.db.doc(...) and S.db.collection(...) calls in the reference code work natively!
+function connectRealtimeSSE() {
+  try {
+    if (sseConnection) { sseConnection.close(); sseConnection = null; }
+    const base = getApiBase();
+    const url = (base ? base : "") + "/api/events";
+    const es = new EventSource(url);
+    sseConnection = es;
+    es.onmessage = evt => {
+      try {
+        const msg = JSON.parse(evt.data);
+        if (msg.type === "sync") {
+          const remoteRev = Number(msg.stateRev) || 0;
+          if (!remoteRev || remoteRev > (S.stateRev || 0)) {
+            pullFromNeon(false, false);
+          }
+        }
+      } catch (e) {}
+    };
+    es.onerror = () => {
+      // Automatically falls back to fast 2.5s polling and reconnects
+    };
+  } catch (e) {}
+}
+
+function applyDocToMemoryAndLocal(path, val) {
+  const copy = JSON.parse(JSON.stringify(val));
+  if (path === "master/quoteSeq") {
+    S.quoteSeq = copy;
+    saveLocal("quoteSeq", S.quoteSeq);
+    return { key: "quoteSeq", val: S.quoteSeq };
+  } else if (path.startsWith("master/")) {
+    const k = path.split("/")[1];
+    S[k] = copy;
+    saveLocal(k, S[k]);
+    return { key: k, val: S[k] };
+  } else if (path.startsWith("cycles/")) {
+    const id = path.split("/")[1];
+    const docObj = { ...copy, id };
+    const idx = S.cycles.findIndex(c => c.id === id);
+    if (idx >= 0) S.cycles[idx] = docObj;
+    else S.cycles.push(docObj);
+    saveLocal("cycles", S.cycles);
+    return { key: "cycles", val: S.cycles };
+  }
+  return null;
+}
+
+// Built-in S.db adapter so all S.db.doc(...) and S.db.collection(...) calls work and auto-sync to Neon DB!
 function createHybridDbAdapter() {
   return {
     doc(path) {
@@ -973,28 +1133,15 @@ function createHybridDbAdapter() {
           return { exists: false, data: () => null };
         },
         async set(val) {
-          const copy = JSON.parse(JSON.stringify(val));
-          if (path === "master/quoteSeq") {
-            S.quoteSeq = copy;
-            saveLocal("quoteSeq", S.quoteSeq);
-            await pushKeyToNeon("quoteSeq", S.quoteSeq);
-          } else if (path.startsWith("master/")) {
-            const k = path.split("/")[1];
-            S[k] = copy;
-            saveLocal(k, S[k]);
-            await pushKeyToNeon(k, S[k]);
-          } else if (path.startsWith("cycles/")) {
-            const id = path.split("/")[1];
-            const docObj = { ...copy, id };
-            const idx = S.cycles.findIndex(c => c.id === id);
-            if (idx >= 0) S.cycles[idx] = docObj;
-            else S.cycles.push(docObj);
-            saveLocal("cycles", S.cycles);
-            await pushKeyToNeon("cycles", S.cycles);
+          markLocalMutation();
+          const res = applyDocToMemoryAndLocal(path, val);
+          if (res) {
+            await pushKeyToNeon(res.key, res.val);
           }
           dataChanged();
         },
         async delete() {
+          markLocalMutation();
           if (path.startsWith("cycles/")) {
             const id = path.split("/")[1];
             S.cycles = S.cycles.filter(c => c.id !== id);
@@ -1013,6 +1160,7 @@ function createHybridDbAdapter() {
     collection(name) {
       return {
         async add(doc) {
+          markLocalMutation();
           const newDoc = { ...JSON.parse(JSON.stringify(doc)), id: "q_" + uid() };
           if (name === "quotes") {
             S.quotes.unshift(newDoc);
@@ -1028,13 +1176,17 @@ function createHybridDbAdapter() {
 }
 
 const pending = {};
-function saveDoc(path, data, delay = 350) {
+function saveDoc(path, data, delay = 250) {
   if (!S.canWrite) {
     toast("Read-only access: Sign in as Admin to modify master data.");
     return;
   }
+  markLocalMutation();
+  // Immediately commit to in-memory state and localStorage so no edit is ever lost
+  applyDocToMemoryAndLocal(path, data);
+  updateSidebarStats();
   clearTimeout(pending[path]?.t);
-  pending[path] = { data, t: setTimeout(() => flush(path), delay) };
+  pending[path] = { data: JSON.parse(JSON.stringify(data)), t: setTimeout(() => flush(path), delay) };
 }
 
 const chains = {};
@@ -1047,12 +1199,12 @@ function flush(path) {
   chains[path] = (chains[path] || Promise.resolve())
     .then(() => S.db.doc(path).set(JSON.parse(JSON.stringify(p.data))))
     .catch(e => toast("Save failed: " + (e?.message || "error")))
-    .finally(() => { inflight--; setSync(); });
+    .finally(() => { inflight = Math.max(0, inflight - 1); setSync(); });
 }
 
 async function delDoc(path) {
-  if (!S.canWrite) {
-    toast("Read-only access: Sign in as Admin to delete records.");
+  if (path.startsWith("quotes/") ? !S.canQuote : !S.canWrite) {
+    toast("Read-only access: Sign in with edit permissions to delete records.");
     return;
   }
   try {
@@ -1062,7 +1214,7 @@ async function delDoc(path) {
   } catch (e) {
     toast("Delete failed: " + (e?.message || e?.code));
   } finally {
-    inflight--;
+    inflight = Math.max(0, inflight - 1);
     setSync();
   }
 }
@@ -1081,7 +1233,7 @@ async function writeDoc(path, data) {
     toast("Save failed: " + (e?.message || e?.code));
     return false;
   } finally {
-    inflight--;
+    inflight = Math.max(0, inflight - 1);
     setSync();
   }
 }
@@ -1479,6 +1631,7 @@ function viewQuote() {
     q[k] = e.target.value;
     if (k === "loc" || k === "cycleId") reset();
     if (k === "loc") f.querySelectorAll("[data-loc]").forEach(b => b.setAttribute("aria-pressed", norm(b.dataset.loc) === norm(q.loc)));
+    saveWorkspaceState(350);
     renderQuoteResults();
   });
   bind("#q-cust", "customer");
@@ -1488,15 +1641,16 @@ function viewQuote() {
   bind("#q-margin", "margin");
   bind("#q-cyc", "cycleId");
 
-  $("#q-prod-select")?.addEventListener("change", e => { q.product = e.target.value; reset(); viewQuote(); });
+  $("#q-prod-select")?.addEventListener("change", e => { q.product = e.target.value; reset(); saveWorkspaceState(200); viewQuote(); });
   $("#q-spec-ref")?.addEventListener("change", e => {
     q.specificSource = e.target.value;
     q.sel = e.target.value === "ALL" ? null : e.target.value;
+    saveWorkspaceState(200);
     viewQuote();
   });
-  f.querySelectorAll("[data-loc]").forEach(b => b.onclick = () => { q.loc = b.dataset.loc; reset(); viewQuote(); });
-  f.querySelectorAll("[data-prod]").forEach(b => b.onclick = () => { q.product = b.dataset.prod; reset(); viewQuote(); });
-  f.querySelectorAll("[data-disc]").forEach(b => b.onclick = () => { q.disc = b.dataset.disc; q.discEdit = {}; viewQuote(); });
+  f.querySelectorAll("[data-loc]").forEach(b => b.onclick = () => { q.loc = b.dataset.loc; reset(); saveWorkspaceState(200); viewQuote(); });
+  f.querySelectorAll("[data-prod]").forEach(b => b.onclick = () => { q.product = b.dataset.prod; reset(); saveWorkspaceState(200); viewQuote(); });
+  f.querySelectorAll("[data-disc]").forEach(b => b.onclick = () => { q.disc = b.dataset.disc; q.discEdit = {}; saveWorkspaceState(200); viewQuote(); });
   renderQuoteResults();
 }
 
@@ -1629,7 +1783,7 @@ function renderQuoteResults() {
    <div class="tw" data-live><table><thead><tr><th>Refinery</th><th class="n">Net Price</th><th>Status</th><th class="n">Enter Transport Rate</th></tr></thead><tbody>${unrouted}</tbody></table></div></section>` : ""}
    ${np}`;
 
-  box.querySelectorAll("[data-sel]").forEach(el => el.onclick = () => { q.sel = el.dataset.sel; renderQuoteResults(); });
+  box.querySelectorAll("[data-sel]").forEach(el => el.onclick = () => { q.sel = el.dataset.sel; saveWorkspaceState(200); renderQuoteResults(); });
   const al = box.querySelector("#addloc");
   if (al) al.onclick = () => {
     if (!S.canWrite) { toast("Sign in as Admin to add new master locations."); return; }
@@ -1640,6 +1794,7 @@ function renderQuoteResults() {
   box.querySelectorAll("[data-manual]").forEach(inp => inp.addEventListener("change", e => {
     q.manual[inp.dataset.manual] = e.target.value;
     q.sel = inp.dataset.manual;
+    saveWorkspaceState(200);
     renderQuoteResults();
   }));
   box.querySelectorAll("[data-route]").forEach(b => b.onclick = () => {
@@ -1942,17 +2097,28 @@ function viewEditor() {
      <div class="field"><label class="lbl" for="a-src">Refinery</label><select id="a-src">${S.catalog.sources.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join("")}</select></div>
      <div class="field"><label class="lbl" for="a-prod">Product</label><select id="a-prod">${S.catalog.products.map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join("")}</select></div>
      <button class="btn" id="a-add" ${S.canWrite ? "" : "disabled"}>Add line</button></div></div>`;
+  const autoSaveCycle = (delay = 300) => {
+    if (!S.canWrite || !/^\d{4}-\d\d-\d\d$/.test(E.effectiveDate || "")) return;
+    const id = E.effectiveDate;
+    const doc = { id, effectiveDate: id, note: E.note || "", by: S.currentUser?.id || "", savedAt: new Date().toISOString(), prices: E.rows.map(({ old, ...r }) => r) };
+    if (E.id && E.id !== id) {
+      delDoc("cycles/" + E.id);
+    }
+    E.id = id;
+    saveDoc("cycles/" + id, doc, delay);
+  };
   document.querySelectorAll("[data-i]").forEach(inp => inp.addEventListener("input", e => {
     const r = E.rows[+inp.dataset.i]; r[inp.dataset.f] = num(e.target.value);
     if (inp.dataset.f === "basic") { const d = r.basic != null && r.old != null ? r.basic - r.old : null; $("#d" + inp.dataset.i).innerHTML = d == null ? "—" : chgPill(d); }
+    autoSaveCycle(350);
   }));
-  document.querySelectorAll("[data-rm]").forEach(b => b.onclick = () => { E.rows.splice(+b.dataset.rm, 1); viewEditor(); });
-  $("#e-date").onchange = e => E.effectiveDate = e.target.value;
-  $("#e-note").oninput = e => E.note = e.target.value;
+  document.querySelectorAll("[data-rm]").forEach(b => b.onclick = () => { E.rows.splice(+b.dataset.rm, 1); autoSaveCycle(0); viewEditor(); });
+  $("#e-date").onchange = e => { E.effectiveDate = e.target.value; autoSaveCycle(100); };
+  $("#e-note").oninput = e => { E.note = e.target.value; autoSaveCycle(350); };
   $("#a-add").onclick = () => {
     const s = $("#a-src").value, p = $("#a-prod").value;
     if (E.rows.find(r => r.sourceId === s && r.productId === p)) { toast("That line is already in the cycle"); return; }
-    E.rows.push({ sourceId: s, productId: p, basic: null, maxDiscount: 0, old: null }); viewEditor();
+    E.rows.push({ sourceId: s, productId: p, basic: null, maxDiscount: 0, old: null }); autoSaveCycle(100); viewEditor();
   };
   $("#ecancel").onclick = () => { UI.editor = null; viewCycles(); };
   $("#esave").onclick = async () => {
@@ -2157,10 +2323,10 @@ function viewRefineries() {
      ${C.products.map((p, i) => `<tr><td class="tiny font-mono font-bold">${esc(p.id)}</td><td><input type="text" data-p="${i}" data-f="name" value="${esc(p.name)}" style="min-width:180px" ${dis}></td><td><select data-p="${i}" data-f="unit" ${dis}><option ${p.unit === "MT" ? "selected" : ""}>MT</option><option ${p.unit === "KL" ? "selected" : ""}>KL</option></select></td><td><select data-p="${i}" data-f="cls" ${dis}>${[["black", "Black oil"], ["white", "Light / white"], ["bitumen", "Bitumen"]].map(([v, l]) => `<option value="${v}" ${p.cls === v ? "selected" : ""}>${l}</option>`).join("")}</select></td><td><input type="text" data-p="${i}" data-f="aliases" value="${esc((p.aliases || []).join(", "))}" style="min-width:180px" ${dis}></td><td><button class="btn small danger" data-pdel="${i}" ${dis}>✕</button></td></tr>`).join("")}
      </tbody></table></div></section></div>`;
   const val = (e, k) => k === "active" ? e.target.checked : k === "aliases" ? e.target.value.split(",").map(x => x.trim()).filter(Boolean) : e.target.value;
-  document.querySelectorAll("[data-s]").forEach(inp => inp.addEventListener("change", e => { if (!S.canWrite) return; C.sources[+inp.dataset.s][inp.dataset.f] = val(e, inp.dataset.f); saveC(); }));
-  document.querySelectorAll("[data-p]").forEach(inp => inp.addEventListener("change", e => { if (!S.canWrite) return; C.products[+inp.dataset.p][inp.dataset.f] = val(e, inp.dataset.f); saveC(); }));
-  document.querySelectorAll("[data-sdel]").forEach(b => b.onclick = () => { if (!S.canWrite) return; if (!b.dataset.armed) { b.dataset.armed = 1; b.textContent = "Del?"; return; } C.sources.splice(+b.dataset.sdel, 1); saveC(); viewRefineries(); });
-  document.querySelectorAll("[data-pdel]").forEach(b => b.onclick = () => { if (!S.canWrite) return; if (!b.dataset.armed) { b.dataset.armed = 1; b.textContent = "Del?"; return; } C.products.splice(+b.dataset.pdel, 1); saveC(); viewRefineries(); });
+  document.querySelectorAll("[data-s]").forEach(inp => inp.addEventListener(inp.type === "checkbox" ? "change" : "input", e => { if (!S.canWrite) return; C.sources[+inp.dataset.s][inp.dataset.f] = val(e, inp.dataset.f); saveC(); }));
+  document.querySelectorAll("[data-p]").forEach(inp => inp.addEventListener(inp.tagName === "SELECT" ? "change" : "input", e => { if (!S.canWrite) return; C.products[+inp.dataset.p][inp.dataset.f] = val(e, inp.dataset.f); saveC(); }));
+  document.querySelectorAll("[data-sdel]").forEach(b => b.onclick = () => { if (!S.canWrite) return; if (!b.dataset.armed) { b.dataset.armed = 1; b.textContent = "Del?"; return; } C.sources.splice(+b.dataset.sdel, 1); saveDoc("master/catalog", S.catalog, 0); viewRefineries(); });
+  document.querySelectorAll("[data-pdel]").forEach(b => b.onclick = () => { if (!S.canWrite) return; if (!b.dataset.armed) { b.dataset.armed = 1; b.textContent = "Del?"; return; } C.products.splice(+b.dataset.pdel, 1); saveDoc("master/catalog", S.catalog, 0); viewRefineries(); });
   $("#adds").onclick = () => { if (!S.canWrite) return; C.sources.push({ id: "s" + uid(), company: "IOCL", name: "New supply point", loading: "", creditDays: 0, active: true, aliases: [] }); saveC(); viewRefineries(); };
   $("#addp").onclick = () => { if (!S.canWrite) return; C.products.push({ id: "P" + uid().toUpperCase().slice(0, 4), name: "New product", unit: "MT", cls: "black", aliases: [] }); saveC(); viewRefineries(); };
 }
@@ -2303,9 +2469,11 @@ function renderMasterPreview() {
   };
   box.innerHTML = `<div class="panel pad stack" style="gap:10px;margin-top:14px;border-color:var(--accent)"><div class="sechead"><h3>Check before applying · ${esc(pv.file)}</h3><button class="btn small" id="mpx" type="button">Cancel</button></div>
    ${pv.parts.map((p, i) => `<label class="actions" style="align-items:flex-start"><input type="checkbox" data-mp="${i}" ${p.on ? "checked" : ""}><span>${line(p)}</span></label>`).join("")}
-   <div class="actions"><button class="btn primary" id="mpa" type="button" ${S.canWrite ? "" : "disabled"}>Apply selected updates</button></div></div>`;
+   <label class="actions tiny" style="margin-top:4px"><input type="checkbox" id="mp-replace-cycles" ${pv.replaceCycles ? "checked" : ""}><span>Replace all older 15-day rate cycles with only this uploaded revision</span></label>
+   <div class="actions"><button class="btn primary" id="mpa" type="button" ${S.canWrite ? "" : "disabled"}>Apply &amp; Auto-Sync Across All Devices</button></div></div>`;
   $("#mpx").onclick = () => { UI.masterPreview = null; box.innerHTML = ""; };
   box.querySelectorAll("[data-mp]").forEach(c => c.onchange = () => pv.parts[+c.dataset.mp].on = c.checked);
+  const rc = $("#mp-replace-cycles"); if (rc) rc.onchange = () => pv.replaceCycles = rc.checked;
   $("#mpa").onclick = applyMaster;
 }
 
@@ -2317,6 +2485,7 @@ async function applyMaster() {
     for (const p of pv.parts.filter(p => p.on)) {
       if (p.kind === "rates") {
         if (!p.date) { toast("Put the effective date in cell B1 of Refinery rates"); continue; }
+        if (pv.replaceCycles) { S.cycles = []; saveLocal("cycles", S.cycles); }
         await S.db.doc("cycles/" + p.date).set({ effectiveDate: p.date, note: "Uploaded from " + pv.file, by, savedAt: new Date().toISOString(), prices: p.rows });
         done.push("refinery rates");
       }
@@ -2342,7 +2511,8 @@ async function applyMaster() {
     const tp = pv.parts.find(p => p.kind === "transporters" && p.on);
     if (tp) { await S.db.doc("master/transporters").set({ list: JSON.parse(JSON.stringify(tp.list)) }); done.push("transporters"); }
     UI.masterPreview = null;
-    toast(done.length ? "Updated & synced: " + done.join(", ") : "Nothing selected");
+    await pushAllToNeon(false, true);
+    toast(done.length ? "Updated & synced across all devices: " + done.join(", ") : "Nothing selected");
     render();
   } catch (e) { toast("Upload failed: " + (e?.message || e?.code)); }
   finally { inflight--; setSync(); }
@@ -2387,15 +2557,16 @@ function bindQuotationPanel(box, r, R) {
     const i = d.lines.findIndex(x => x.productId === l.productId && norm(x.location) === norm(l.location));
     if (i >= 0) d.lines[i] = l; else d.lines.push(l);
     if (!d.cust.name && UI.q.customer) d.cust.name = UI.q.customer;
+    saveWorkspaceState(200);
     toast(i >= 0 ? "Quotation line updated" : "Added to quotation basket");
     renderQuoteResults();
   };
-  box.querySelectorAll("[data-qrm]").forEach(b => b.onclick = () => { d.lines.splice(+b.dataset.qrm, 1); renderQuoteResults(); });
-  const f = (id, set) => { const el = box.querySelector(id); if (el) el.addEventListener("input", e => set(e.target.value)); };
+  box.querySelectorAll("[data-qrm]").forEach(b => b.onclick = () => { d.lines.splice(+b.dataset.qrm, 1); saveWorkspaceState(200); renderQuoteResults(); });
+  const f = (id, set) => { const el = box.querySelector(id); if (el) el.addEventListener("input", e => { set(e.target.value); saveWorkspaceState(350); }); };
   f("#qc-name", v => d.cust.name = v); f("#qc-attn", v => d.cust.attn = v); f("#qc-addr", v => d.cust.address = v); f("#qc-gst", v => d.cust.gstin = v); f("#qc-ref", v => d.ref = v);
   const dr = box.querySelector("#qdraft"); if (dr) dr.onclick = () => downloadQuotation({ ...d, number: "DRAFT", date: todayISO() });
   const sv = box.querySelector("#qsave"); if (sv) sv.onclick = () => saveQuotation();
-  const cl = box.querySelector("#qclear"); if (cl) cl.onclick = () => { if (!cl.dataset.armed) { cl.dataset.armed = 1; cl.textContent = "Clear all lines?"; return; } UI.qdoc = null; renderQuoteResults(); };
+  const cl = box.querySelector("#qclear"); if (cl) cl.onclick = () => { if (!cl.dataset.armed) { cl.dataset.armed = 1; cl.textContent = "Clear all lines?"; return; } UI.qdoc = null; saveWorkspaceState(200); renderQuoteResults(); };
 }
 function fyLabel(iso) { const [y, m] = iso.split("-").map(Number); const s = m >= 4 ? y : y - 1; return `${String(s).slice(2)}-${String(s + 1).slice(2)}`; }
 function shortNameOf(id, name) { const p = prodMap()[id]; return p ? shortName(p) : name; }
@@ -2907,13 +3078,13 @@ function viewCloudSync() {
     </div>
   </div>`;
 
-  $("#btn-cloud-pull")?.addEventListener("click", () => pullFromNeon(true));
+  $("#btn-cloud-pull")?.addEventListener("click", () => pullFromNeon(true, true));
   $("#btn-cloud-push")?.addEventListener("click", () => pushAllToNeon(true));
   $("#btn-save-api-url")?.addEventListener("click", () => {
     const val = ($("#input-custom-api-url")?.value || "").trim().replace(/\/+$/, "");
     try { localStorage.setItem("refinecalc_api_base_url", val); } catch (e) {}
     toast(val ? "Set API Base URL to " + val : "Using default same-origin /api");
-    pullFromNeon(true);
+    pullFromNeon(true, true);
   });
   $("#btn-reset-all-defaults")?.addEventListener("click", async () => {
     if (!S.canWrite) return;
@@ -2955,7 +3126,7 @@ function applyBrandToUI(brand) {
   }
 }
 
-function applyColorMode(mode, notify = false) {
+function applyColorMode(mode, notify = false, fromRemote = false) {
   const body = $("#app-body");
   const btnW = $("#btn-mode-white");
   const btnD = $("#btn-mode-dark");
@@ -2975,6 +3146,7 @@ function applyColorMode(mode, notify = false) {
     if (btnD) btnD.className = "py-1.5 px-2 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 transition-all text-slate-600 hover:text-slate-900";
   }
   saveLocal("color_mode", mode);
+  if (!fromRemote) saveWorkspaceState(250);
   if (notify) toast(mode === "dark" ? "Switched to Dark Mode" : "Switched to White Mode");
 }
 
@@ -2996,7 +3168,7 @@ async function boot() {
 
   // 3. Apply saved Color Mode & Brand Settings
   const savedMode = loadLocal("color_mode", "white");
-  applyColorMode(savedMode, false);
+  applyColorMode(savedMode, false, true);
   const savedBrand = loadLocal("brand_settings", null);
   if (savedBrand) applyBrandToUI(savedBrand);
 
@@ -3022,7 +3194,7 @@ async function boot() {
   });
 
   // Sidebar Cloud Sync Buttons
-  $("#btn-sidebar-pull")?.addEventListener("click", () => pullFromNeon(true));
+  $("#btn-sidebar-pull")?.addEventListener("click", () => pullFromNeon(true, true));
   $("#btn-sidebar-push")?.addEventListener("click", () => pushAllToNeon(true));
 
   // Auth Modal Wiring
@@ -3106,11 +3278,22 @@ async function boot() {
     toast("Restored Goverdhan default logo & brand");
   });
 
-  // 5. Render initial route immediately
+  // Restore saved workspaceState (calculator inputs & quotation draft)
+  const savedWs = loadLocal("workspaceState", null);
+  if (savedWs && typeof savedWs === "object") {
+    if (savedWs.q && typeof savedWs.q === "object") UI.q = { ...UI.q, ...savedWs.q };
+    if (savedWs.qdoc !== undefined) UI.qdoc = savedWs.qdoc;
+  }
+  S.stateRev = loadLocal("_stateRev", 0) || 0;
+
+  // 5. Render initial route immediately, then pull latest state from Neon DB
   route();
 
-  // 6. Connect to Neon PostgreSQL & set up live cross-tab and multi-PC polling
-  pullFromNeon(false);
+  // 6. Connect to Neon PostgreSQL (await authoritative server state first, then enable live SSE + 2.5s poll)
+  await pullFromNeon(false, true);
+  initialPullDone = true;
+  connectRealtimeSSE();
+
   window.addEventListener("storage", e => {
     if (!e.key || !e.key.startsWith(LS_PREFIX)) return;
     S.catalog = loadLocal("catalog", DEFAULT_CATALOG);
@@ -3121,12 +3304,21 @@ async function boot() {
     S.cycles = loadLocal("cycles", DEFAULT_CYCLES);
     S.quotes = loadLocal("quotes", DEFAULT_QUOTES);
     S.users = loadLocal("users", DEFAULT_USERS);
+    const ws = loadLocal("workspaceState", null);
+    if (ws?.q) UI.q = { ...UI.q, ...ws.q };
+    if (ws?.qdoc !== undefined) UI.qdoc = ws.qdoc;
     syncUserNamesMap();
     dataChanged();
   });
+
+  window.addEventListener("focus", () => pullFromNeon(false, false));
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") pullFromNeon(false, false);
+  });
+
   setInterval(() => {
-    if (document.visibilityState === "visible") pullFromNeon(false);
-  }, 6000);
+    if (document.visibilityState === "visible") pullFromNeon(false, false);
+  }, 2500);
 }
 
 boot();

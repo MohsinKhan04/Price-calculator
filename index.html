@@ -1557,7 +1557,7 @@ function routeOptions(src, prodId, loc, qty) {
   const blockedMin = exact.filter(r => num(r.rate) !== null && num(r.minQty) && qty < num(r.minQty));
   let list = exact.filter(ok), est = null;
   if (!list.length && st.classFallback && pr) {
-    const sim = base.filter(r => r.productId !== prodId && P[r.productId] && P[r.productId].cls === pr.cls && P[r.productId].unit === pr.unit && ok(r));
+    const sim = base.filter(r => r.productId !== prodId && P[r.productId] && norm(displayTypeLabel(P[r.productId].cls)) === norm(displayTypeLabel(pr.cls)) && P[r.productId].unit === pr.unit && ok(r));
     if (sim.length) { list = sim; est = sim[0].productId; }
   }
   list = [...list].sort((a, b) => num(a.rate) - num(b.rate));
@@ -1754,7 +1754,22 @@ function sellableProducts() {
 }
 const CO_VAR = { HPCL: "--hp", IOCL: "--io", BPCL: "--bp", RIL: "--ril", Nayara: "--ny", Depot: "--dp", Imported: "--imp" };
 const coVar = c => `var(${CO_VAR[c] || "--dp"})`;
-const CLS_DOT = { black: "var(--black-oil)", white: "var(--white-oil)", bitumen: "var(--bitumen)" };
+const CLS_DOT = { black: "var(--black-oil)", white: "var(--white-oil)", bitumen: "var(--bitumen)", yellow: "#eab308" };
+function clsDotColor(cls) {
+  const s = String(cls || "").toLowerCase();
+  if (s.includes("yellow") || s.includes("amber")) return "#eab308";
+  if (s.includes("white") || s.includes("light") || s.includes("clear")) return "var(--white-oil)";
+  if (s.includes("bitumen") || s.includes("asphalt")) return "var(--bitumen)";
+  if (s.includes("black") || s.includes("dark") || s.includes("furnace")) return "var(--black-oil)";
+  return CLS_DOT[cls] || "#6366f1";
+}
+function displayTypeLabel(cls) {
+  if (!cls) return "White liquid";
+  if (cls === "white") return "White liquid";
+  if (cls === "black") return "Black";
+  if (cls === "bitumen") return "Bitumen";
+  return cls;
+}
 function popularLocations(n) {
   const c = {};
   (S.routes?.rows || []).forEach(r => { if (num(r.rate) !== null) c[r.delivery] = (c[r.delivery] || 0) + 1; });
@@ -1812,7 +1827,7 @@ function viewQuote() {
           Quick Select Product
         </span>
         <div class="chips" role="group" aria-label="Product">
-          ${prods.map(p => `<button type="button" class="chip" data-prod="${p.id}" aria-pressed="${p.id === q.product}" title="${esc(p.name)}"><span class="dot" style="background:${CLS_DOT[p.cls] || "var(--dp)"}"></span>${esc(shortName(p))} <span class="opacity-70 text-[10px]">(${p.unit})</span></button>`).join("")}
+          ${prods.map(p => `<button type="button" class="chip" data-prod="${p.id}" aria-pressed="${p.id === q.product}" title="${esc(p.name)}"><span class="dot" style="background:${clsDotColor(p.cls)}"></span>${esc(shortName(p))} <span class="opacity-70 text-[10px]">(${p.unit})</span></button>`).join("")}
         </div>
       </div>
       <div class="space-y-1.5">
@@ -2270,16 +2285,28 @@ function viewCycles() {
      return `<tr><td><b>${fmtDate(c.effectiveDate)}</b>${i === 0 ? ' <span class="pill info">current</span>' : ""}</td><td class="n">${c.prices.filter(p => num(p.basic) > 0).length}</td><td class="n">${prev ? `<span class="d-up">${up} up</span> · <span class="d-down">${ch.length - up} down</span>` : "—"}</td><td class="tiny">${esc(c.note || "")}${c.by && S.names[c.by] ? ` · by ${esc(S.names[c.by])}` : ""}</td><td class="n"><button class="btn small" data-edit="${c.id}">${S.canWrite ? "Edit" : "View"}</button> <button class="btn small danger" data-del="${c.id}" ${S.canWrite ? "" : "disabled"}>Delete</button></td></tr>`;
    }).join("") || `<tr><td colspan="5" class="empty">No cycles yet.</td></tr>`}
    </tbody></table></div><p class="hint mt-2">Importing reads blocks headed “PRICE REVISED EFF. ON dd-mm-yyyy” with Supply location, Product, Basic price and Max discount columns, or standard Master .xlsx sheets.</p>`;
+  const buildCycleEditorRows = (basePrices, oldIndex) => {
+    const rows = (basePrices || []).map(p => ({ ...p, old: oldIndex ? num(oldIndex[p.sourceId + "|" + p.productId]?.basic) : num(p.basic) }));
+    (S.catalog?.sources || []).filter(s => s.active !== false).forEach(s => {
+      const sold = Array.isArray(s.products) ? s.products : [];
+      sold.forEach(pid => {
+        if (!rows.find(r => r.sourceId === s.id && r.productId === pid)) {
+          rows.push({ sourceId: s.id, productId: pid, basic: null, maxDiscount: 0, old: oldIndex ? num(oldIndex[s.id + "|" + pid]?.basic) : null });
+        }
+      });
+    });
+    return rows;
+  };
   $("#newc").onclick = () => {
     if (!S.canWrite) return;
-    const lc = latestCycle();
-    UI.editor = { id: null, effectiveDate: lc ? nextRevision(lc.effectiveDate) : todayISO(), note: "", rows: (lc?.prices || []).map(p => ({ ...p, old: num(p.basic) })) };
+    const lc = latestCycle(); const pi = priceIndex(lc);
+    UI.editor = { id: null, effectiveDate: lc ? nextRevision(lc.effectiveDate) : todayISO(), note: "", rows: buildCycleEditorRows(lc?.prices || [], pi) };
     viewCycles();
   };
   document.querySelectorAll("[data-edit]").forEach(b => b.onclick = () => {
     const c = S.cycles.find(x => x.id === b.dataset.edit);
     const prev = prevCycleOf(c); const pi = priceIndex(prev);
-    UI.editor = { id: c.id, effectiveDate: c.effectiveDate, note: c.note || "", rows: c.prices.map(p => ({ ...p, old: num(pi[p.sourceId + "|" + p.productId]?.basic) })) };
+    UI.editor = { id: c.id, effectiveDate: c.effectiveDate, note: c.note || "", rows: buildCycleEditorRows(c.prices, pi) };
     viewCycles();
   });
   document.querySelectorAll("[data-del]").forEach(b => b.onclick = () => {
@@ -2586,33 +2613,156 @@ function viewCredit() {
 }
 
 /* ================= VIEW 7: MASTER FILE — REFINERIES & PRODUCTS ================= */
+function getRefineryProducts(s) {
+  if (Array.isArray(s.products)) return s.products;
+  // Initialize from any priced products in cycles for this source, or default to all current products
+  const fromCycles = [...new Set((S.cycles || []).flatMap(c => (c.prices || []).filter(p => p.sourceId === s.id && num(p.basic) > 0).map(p => p.productId)))];
+  s.products = fromCycles.length ? fromCycles : (S.catalog?.products || []).map(p => p.id);
+  return s.products;
+}
+
+function syncRefineryProductsToLatestCycle(sourceId, productIds) {
+  const lc = latestCycle();
+  if (!lc) return;
+  let added = false;
+  (productIds || []).forEach(pid => {
+    if (!lc.prices.find(p => p.sourceId === sourceId && p.productId === pid)) {
+      lc.prices.push({ sourceId, productId: pid, basic: null, maxDiscount: 0 });
+      added = true;
+    }
+  });
+  if (added) {
+    saveDoc("cycles/" + lc.id, lc, 400);
+  }
+}
+
 function viewRefineries() {
   S.catalog = S.catalog || { sources: [], products: [] };
   const saveC = (delay = 500) => saveDoc("master/catalog", S.catalog, delay);
   const dis = S.canWrite ? "" : "disabled";
-  V().innerHTML = `<div class="stack">
-   <section class="stack" style="gap:8px"><div class="sechead"><h3>Refineries and supply points</h3><button class="btn small primary" id="adds" type="button" ${dis}>＋ Add supply point</button></div>
-     <p class="tiny" style="margin:0">The loading point links a refinery to its transport routes. "Names in sheets" are aliases matched during Excel uploads.</p>
-     <div class="tw tbl-edit" data-live><table><thead><tr><th>Company</th><th>Name</th><th>Loading point</th><th>In use</th><th>Names in sheets (comma-separated)</th><th></th></tr></thead><tbody>
-     ${(S.catalog.sources || []).map((s, i) => `<tr><td><input type="text" data-s="${i}" data-f="company" value="${esc(s.company)}" placeholder="e.g. IOCL" style="width:95px" ${dis}></td><td><input type="text" data-s="${i}" data-f="name" value="${esc(s.name)}" placeholder="e.g. IOCL Koyali" style="min-width:160px" ${dis}></td><td><input type="text" data-s="${i}" data-f="loading" value="${esc(s.loading)}" placeholder="e.g. Vadodara" style="min-width:120px" ${dis}></td><td><input type="checkbox" data-s="${i}" data-f="active" ${s.active !== false ? "checked" : ""} aria-label="In use" ${dis}></td><td><input type="text" data-s="${i}" data-f="aliases" value="${esc((s.aliases || []).join(", "))}" placeholder="Comma-separated sheet names" style="min-width:200px" ${dis}></td><td><button class="btn small danger" type="button" data-sdel="${i}" ${dis}>✕</button></td></tr>`).join("")}
-     </tbody></table></div></section>
-   <section class="stack" style="gap:8px"><div class="sechead"><h3>Products</h3><button class="btn small primary" id="addp" type="button" ${dis}>＋ Add product</button></div>
-     <div class="tw tbl-edit" data-live><table><thead><tr><th>Code</th><th>Name</th><th>Unit</th><th>Type</th><th>Names in sheets</th><th></th></tr></thead><tbody>
-     ${(S.catalog.products || []).map((p, i) => `<tr><td><input type="text" data-p="${i}" data-f="id" value="${esc(p.id)}" placeholder="e.g. MTO" class="font-mono font-bold" style="width:90px" ${dis}></td><td><input type="text" data-p="${i}" data-f="name" value="${esc(p.name)}" placeholder="e.g. MTO (Mineral Turpentine Oil)" style="min-width:190px" ${dis}></td><td><select data-p="${i}" data-f="unit" ${dis}><option ${p.unit === "MT" ? "selected" : ""}>MT</option><option ${p.unit === "KL" ? "selected" : ""}>KL</option></select></td><td><select data-p="${i}" data-f="cls" ${dis}>${[["black", "Black oil"], ["white", "Light / white"], ["bitumen", "Bitumen"]].map(([v, l]) => `<option value="${v}" ${p.cls === v ? "selected" : ""}>${l}</option>`).join("")}</select></td><td><input type="text" data-p="${i}" data-f="aliases" value="${esc((p.aliases || []).join(", "))}" placeholder="e.g. MTO, MINERAL TURPENTINE" style="min-width:180px" ${dis}></td><td><button class="btn small danger" type="button" data-pdel="${i}" ${dis}>✕</button></td></tr>`).join("")}
-     </tbody></table></div></section></div>`;
+  const allProds = S.catalog.products || [];
 
-  const val = (e, k) => k === "active" ? e.target.checked : k === "aliases" ? e.target.value.split(",").map(x => x.trim()).filter(Boolean) : e.target.value;
+  V().innerHTML = `<div class="stack">
+   <section class="stack" style="gap:8px">
+     <div class="sechead">
+       <div>
+         <h3>Refineries and supply points</h3>
+         <p class="tiny" style="margin:2px 0 0">Enter each refinery/source, its loading point, and click the products it sells (one refinery can sell multiple products like MTO, LDO, FO, etc.).</p>
+       </div>
+       <button class="btn small primary" id="adds" type="button" ${dis}>＋ Add refinery / source</button>
+     </div>
+     <div class="tw tbl-edit" data-live>
+       <table>
+         <thead>
+           <tr>
+             <th>Refinery / Source</th>
+             <th>Loading point</th>
+             <th>Products sold (click to select multiple)</th>
+             <th>In use</th>
+             <th></th>
+           </tr>
+         </thead>
+         <tbody>
+         ${(S.catalog.sources || []).map((s, i) => {
+           const sold = getRefineryProducts(s);
+           return `<tr>
+             <td><input type="text" data-s="${i}" data-f="name" value="${esc(s.name)}" placeholder="e.g. Nayara Vadinar or IOCL Koyali" style="min-width:210px" ${dis}></td>
+             <td><input type="text" data-s="${i}" data-f="loading" value="${esc(s.loading)}" placeholder="e.g. Vadinar" style="min-width:130px" ${dis}></td>
+             <td style="min-width:260px">
+               <div class="chips" style="gap:5px">
+                 ${allProds.map(p => {
+                   const on = sold.includes(p.id);
+                   return `<button type="button" data-sprod="${i}|${esc(p.id)}" aria-pressed="${on}" class="chip" style="padding:3px 9px;font-size:11.5px" ${dis}>
+                     <span class="dot" style="background:${clsDotColor(p.cls)}"></span>
+                     <span>${esc(shortName(p))}</span>
+                   </button>`;
+                 }).join("") || `<span class="tiny">Add products below first</span>`}
+               </div>
+             </td>
+             <td><input type="checkbox" data-s="${i}" data-f="active" ${s.active !== false ? "checked" : ""} aria-label="In use" ${dis}></td>
+             <td><button class="btn small danger" type="button" data-sdel="${i}" ${dis}>✕</button></td>
+           </tr>`;
+         }).join("")}
+         </tbody>
+       </table>
+     </div>
+   </section>
+
+   <section class="stack" style="gap:8px">
+     <div class="sechead">
+       <div>
+         <h3>Products</h3>
+         <p class="tiny" style="margin:2px 0 0">Add products (e.g. MTO, LDO, FO), choose unit (MT or KL), and write the product type (e.g. White liquid, Yellow, Black).</p>
+       </div>
+       <button class="btn small primary" id="addp" type="button" ${dis}>＋ Add product</button>
+     </div>
+     <datalist id="dl-product-types">
+       <option value="White liquid">
+       <option value="Yellow">
+       <option value="Yellow liquid">
+       <option value="Black">
+       <option value="Black oil">
+       <option value="Bitumen">
+     </datalist>
+     <div class="tw tbl-edit" data-live>
+       <table>
+         <thead>
+           <tr>
+             <th>Name</th>
+             <th>Unit</th>
+             <th>Type (write e.g. White liquid, Yellow, Black)</th>
+             <th></th>
+           </tr>
+         </thead>
+         <tbody>
+         ${(S.catalog.products || []).map((p, i) => `<tr>
+           <td><input type="text" data-p="${i}" data-f="name" value="${esc(p.name)}" placeholder="e.g. MTO or Light Diesel Oil (LDO)" style="min-width:220px" ${dis}></td>
+           <td><select data-p="${i}" data-f="unit" style="width:95px" ${dis}><option ${p.unit === "MT" ? "selected" : ""}>MT</option><option ${p.unit === "KL" ? "selected" : ""}>KL</option></select></td>
+           <td><input type="text" list="dl-product-types" data-p="${i}" data-f="cls" value="${esc(displayTypeLabel(p.cls))}" placeholder="Write type: White liquid, Yellow, Black…" style="min-width:210px" ${dis}></td>
+           <td><button class="btn small danger" type="button" data-pdel="${i}" ${dis}>✕</button></td>
+         </tr>`).join("")}
+         </tbody>
+       </table>
+     </div>
+   </section>
+  </div>`;
 
   document.querySelectorAll("[data-s]").forEach(inp => inp.addEventListener(inp.type === "checkbox" ? "change" : "input", e => {
     if (!S.canWrite) return;
     const row = S.catalog.sources[+inp.dataset.s];
     if (!row) return;
-    row[inp.dataset.f] = val(e, inp.dataset.f);
-    if (inp.dataset.f === "name" && row.id.startsWith("s_new_")) {
-      row.id = sourceIdFor(row.name || "src");
+    const f = inp.dataset.f;
+    if (f === "active") {
+      row.active = e.target.checked;
+    } else if (f === "name") {
+      row.name = e.target.value;
+      const firstWord = e.target.value.trim().split(/\s+/)[0];
+      if (firstWord) row.company = firstWord;
+      if (row.id.startsWith("s_new_") && e.target.value.trim()) {
+        row.id = sourceIdFor(e.target.value.trim());
+      }
+    } else {
+      row[f] = e.target.value;
     }
     saveC(500);
   }));
+
+  document.querySelectorAll("[data-sprod]").forEach(btn => btn.onclick = () => {
+    if (!S.canWrite) return;
+    const [siStr, pid] = btn.getAttribute("data-sprod").split("|");
+    const row = S.catalog.sources[+siStr];
+    if (!row) return;
+    const sold = getRefineryProducts(row);
+    const idx = sold.indexOf(pid);
+    if (idx >= 0) sold.splice(idx, 1);
+    else {
+      sold.push(pid);
+      syncRefineryProductsToLatestCycle(row.id, [pid]);
+    }
+    row.products = sold;
+    btn.setAttribute("aria-pressed", String(sold.includes(pid)));
+    saveC(250);
+  });
 
   document.querySelectorAll("[data-p]").forEach(inp => inp.addEventListener(inp.tagName === "SELECT" ? "change" : "input", e => {
     if (!S.canWrite) return;
@@ -2620,17 +2770,22 @@ function viewRefineries() {
     const row = S.catalog.products[idx];
     if (!row) return;
     const field = inp.dataset.f;
-    if (field === "id") {
-      row.id = e.target.value.trim().toUpperCase() || row.id;
-      delete row._autoCode;
-    } else {
-      row[field] = val(e, field);
-      if (field === "name" && row._autoCode) {
-        const cleanCode = e.target.value.trim().toUpperCase().replace(/[^A-Z0-9_-]/g, "").slice(0, 10);
-        if (cleanCode) {
-          row.id = cleanCode;
-          const codeInp = document.querySelector(`input[data-p="${idx}"][data-f="id"]`);
-          if (codeInp && document.activeElement !== codeInp) codeInp.value = cleanCode;
+    row[field] = e.target.value;
+    if (field === "name") {
+      const cleanName = e.target.value.trim();
+      if (cleanName) {
+        row.aliases = [cleanName.toUpperCase()];
+        if (row._autoCode) {
+          const newId = productIdFor(cleanName, "");
+          const oldId = row.id;
+          row.id = newId;
+          // Update references in sources.products if id changed while creating new product
+          (S.catalog.sources || []).forEach(s => {
+            if (Array.isArray(s.products)) {
+              const pi = s.products.indexOf(oldId);
+              if (pi >= 0) s.products[pi] = newId;
+            }
+          });
         }
       }
     }
@@ -2655,16 +2810,18 @@ function viewRefineries() {
 
   $("#adds").onclick = () => {
     if (!S.canWrite) return;
-    S.catalog.sources.push({ id: "s_new_" + uid(), company: "", name: "", loading: "", creditDays: 0, active: true, aliases: [] });
+    const defaultProds = (S.catalog.products || []).map(p => p.id);
+    S.catalog.sources.push({ id: "s_new_" + uid(), company: "", name: "", loading: "", creditDays: 0, active: true, products: defaultProds, aliases: [] });
     saveC(0);
     viewRefineries();
-    const lastInp = document.querySelector(`input[data-s="${S.catalog.sources.length - 1}"][data-f="company"]`);
+    const lastInp = document.querySelector(`input[data-s="${S.catalog.sources.length - 1}"][data-f="name"]`);
     lastInp?.focus();
   };
 
   $("#addp").onclick = () => {
     if (!S.canWrite) return;
-    S.catalog.products.push({ id: "NEW", name: "", unit: "MT", cls: "black", aliases: [], _autoCode: true });
+    const tempId = "P_" + uid().toUpperCase().slice(0, 5);
+    S.catalog.products.push({ id: tempId, name: "", unit: "MT", cls: "White liquid", aliases: [], _autoCode: true });
     saveC(0);
     viewRefineries();
     const lastInp = document.querySelector(`input[data-p="${S.catalog.products.length - 1}"][data-f="name"]`);
@@ -3107,30 +3264,38 @@ const loadingPoints = () => [...new Set([...S.catalog.sources.map(s => s.loading
 const companies = () => [...new Set(S.catalog.sources.map(s => s.company).filter(Boolean))].sort();
 
 function refineryFields(pfx) {
+  const allProds = S.catalog?.products || [];
   return `<div class="tgrid" style="grid-column:1/-1">
-   <div class="field"><label class="lbl" for="${pfx}-co">Company</label><input type="text" id="${pfx}-co" list="dl-co" placeholder="e.g. BPCL"><datalist id="dl-co">${companies().map(c => `<option value="${esc(c)}">`).join("")}</datalist></div>
-   <div class="field"><label class="lbl" for="${pfx}-nm">Refinery / supply point name</label><input type="text" id="${pfx}-nm" placeholder="e.g. BPCL Kochi"></div>
-   <div class="field"><label class="lbl" for="${pfx}-lp">Loading point (town)</label><input type="text" id="${pfx}-lp" list="dl-lp" placeholder="e.g. Kochi"><datalist id="dl-lp">${loadingPoints().map(c => `<option value="${esc(c)}">`).join("")}</datalist></div>
-   <div class="field"><label class="lbl" for="${pfx}-cd">Free credit days from refinery</label><input type="number" id="${pfx}-cd" value="0" min="0"></div></div>`;
+   <div class="field"><label class="lbl" for="${pfx}-nm">Refinery / Source</label><input type="text" id="${pfx}-nm" placeholder="e.g. Nayara Vadinar or BPCL Kochi"></div>
+   <div class="field"><label class="lbl" for="${pfx}-lp">Loading point (town)</label><input type="text" id="${pfx}-lp" list="dl-lp" placeholder="e.g. Vadinar"><datalist id="dl-lp">${loadingPoints().map(c => `<option value="${esc(c)}">`).join("")}</datalist></div>
+   <div class="field"><label class="lbl" for="${pfx}-cd">Free credit days from refinery</label><input type="number" id="${pfx}-cd" value="0" min="0"></div>
+   <div class="field" style="grid-column:1/-1">
+     <label class="lbl">Products sold by this refinery (select multiple)</label>
+     <div class="chips" id="${pfx}-prods">
+       ${allProds.map(p => `<label class="chip" style="cursor:pointer"><input type="checkbox" value="${esc(p.id)}" checked style="width:auto;margin-right:4px"><span>${esc(p.name)}</span></label>`).join("")}
+     </div>
+   </div></div>`;
 }
 function productFields(pfx) {
   return `<div class="tgrid" style="grid-column:1/-1">
-   <div class="field"><label class="lbl" for="${pfx}-pn">Product name</label><input type="text" id="${pfx}-pn" placeholder="e.g. Hexane"></div>
-   <div class="field"><label class="lbl" for="${pfx}-pc">Short code</label><input type="text" id="${pfx}-pc" placeholder="e.g. HEX"></div>
-   <div class="field"><label class="lbl" for="${pfx}-pu">Sold per</label><select id="${pfx}-pu"><option>MT</option><option>KL</option></select></div>
-   <div class="field"><label class="lbl" for="${pfx}-pt">Type</label><select id="${pfx}-pt"><option value="black">Black oil</option><option value="white">Light / white oil</option><option value="bitumen">Bitumen</option></select></div></div>`;
+   <div class="field"><label class="lbl" for="${pfx}-pn">Product name</label><input type="text" id="${pfx}-pn" placeholder="e.g. MTO or LDO"></div>
+   <div class="field"><label class="lbl" for="${pfx}-pu">Unit</label><select id="${pfx}-pu"><option>MT</option><option>KL</option></select></div>
+   <div class="field"><label class="lbl" for="${pfx}-pt">Type (write e.g. White liquid, Yellow, Black)</label><input type="text" id="${pfx}-pt" list="dl-product-types-qa" value="White liquid" placeholder="e.g. White liquid, Yellow, Black"><datalist id="dl-product-types-qa"><option value="White liquid"><option value="Yellow"><option value="Yellow liquid"><option value="Black"><option value="Black oil"><option value="Bitumen"></datalist></div></div>`;
 }
 function readRefinery(pfx) {
-  const company = $(`#${pfx}-co`).value.trim(), name = $(`#${pfx}-nm`).value.trim(), loading = $(`#${pfx}-lp`).value.trim();
-  if (!name || !loading) { toast("Enter the refinery name and its loading point"); return null; }
+  const name = $(`#${pfx}-nm`).value.trim(), loading = $(`#${pfx}-lp`).value.trim();
+  if (!name || !loading) { toast("Enter the refinery/source name and its loading point"); return null; }
   if (S.catalog.sources.find(s => norm(s.name) === norm(name))) { toast(name + " already exists. Pick it from the list instead."); return null; }
-  return { id: sourceIdFor(name), company: company || name.split(" ")[0], name, loading, creditDays: num($(`#${pfx}-cd`).value) || 0, active: true, aliases: [] };
+  const checkedProds = [...document.querySelectorAll(`#${pfx}-prods input[type="checkbox"]:checked`)].map(c => c.value);
+  const company = name.split(/\s+/)[0] || "Refinery";
+  return { id: sourceIdFor(name), company, name, loading, creditDays: num($(`#${pfx}-cd`).value) || 0, active: true, products: checkedProds, aliases: [] };
 }
 function readProduct(pfx) {
   const name = $(`#${pfx}-pn`).value.trim(); if (!name) { toast("Enter the product name"); return null; }
   if (S.catalog.products.find(p => norm(p.name) === norm(name))) { toast(name + " already exists. Pick it from the list instead."); return null; }
-  const code = $(`#${pfx}-pc`).value.trim(); const id = productIdFor(name, code);
-  return { id, name: code && !name.includes("(") ? `${name} (${code.toUpperCase()})` : name, unit: $(`#${pfx}-pu`).value, cls: $(`#${pfx}-pt`).value, aliases: code ? [code] : [] };
+  const id = productIdFor(name, "");
+  const clsVal = ($(`#${pfx}-pt`)?.value || "").trim() || "White liquid";
+  return { id, name, unit: $(`#${pfx}-pu`).value, cls: clsVal, aliases: [name.toUpperCase()] };
 }
 
 function renderAddForm() {

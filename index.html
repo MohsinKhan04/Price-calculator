@@ -6,6 +6,8 @@
   <title>RefineCalc Pro — Goverdhan Refinery Quote Desk & Price Optimizer</title>
   <script src="https://cdn.tailwindcss.com/3.4.17"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Lexend:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -194,7 +196,7 @@
   <!-- ========================================== -->
   <!-- TOP HEADER: COMPANY LOGO, NAME, HOME BUTTON & USER/ADMIN SIGN-IN -->
   <!-- ========================================== -->
-  <header class="bg-slate-900 border-b border-slate-800 text-white sticky top-0 z-40 shadow-md">
+  <header class="bg-slate-900 border-b border-slate-800 text-white relative z-30 shadow-md">
     <div class="max-w-[1600px] mx-auto px-3 sm:px-6">
       <div class="flex items-center justify-between h-16 gap-2 sm:gap-3">
         <!-- Left: Hamburger Button (Mobile) + Brand / Logo (Clicks Go Home) -->
@@ -249,6 +251,9 @@
       <button type="button" data-nav-pill="quote" class="mobile-nav-pill shrink-0 px-3 py-1.5 rounded-lg text-xs font-bold bg-indigo-600 text-white flex items-center gap-1.5 shadow-xs">
         <span>🏠</span><span>Home / Get a Price</span>
       </button>
+      <button type="button" data-nav-pill="map" class="mobile-nav-pill shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 text-slate-300 flex items-center gap-1.5">
+        <span>🗺️</span><span>Route Map</span>
+      </button>
       <button type="button" data-nav-pill="master-rates" class="mobile-nav-pill shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 text-slate-300 flex items-center gap-1.5">
         <span>📋</span><span>Master File</span>
       </button>
@@ -291,6 +296,10 @@
         <a href="#quote" data-nav="quote" class="sidebar-link w-full px-3 py-2.5 rounded-xl text-xs font-bold transition-all bg-indigo-600 text-white flex items-center justify-between shadow-sm">
           <span class="flex items-center gap-2.5"><span class="text-base">🏠</span><span>Home · Get a Price</span></span>
           <span class="text-[10px] bg-white/20 px-2 py-0.5 rounded-full">Calculator</span>
+        </a>
+        <a href="#map" data-nav="map" class="sidebar-link w-full px-3 py-2 rounded-xl text-xs font-semibold transition-all text-slate-700 hover:bg-slate-100 flex items-center justify-between">
+          <span class="flex items-center gap-2.5"><span class="text-base">🗺️</span><span>Route &amp; Refinery Map</span></span>
+          <span class="text-[10px] bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-full font-bold">Live Map</span>
         </a>
         <a href="#trends" data-nav="trends" class="sidebar-link w-full px-3 py-2 rounded-xl text-xs font-semibold transition-all text-slate-700 hover:bg-slate-100 flex items-center justify-between">
           <span class="flex items-center gap-2.5"><span class="text-base">📈</span><span>Price History &amp; Trends</span></span>
@@ -419,7 +428,7 @@
   <!-- SIGN-IN WITH GMAIL & ROLE SWITCHER MODAL -->
   <!-- ========================================== -->
   <div id="modal-auth" hidden class="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4">
-    <div class="surface-card bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-5">
+    <div class="surface-card bg-white rounded-2xl max-w-md w-full max-h-[90vh] overflow-y-auto p-6 shadow-2xl border border-slate-200 space-y-5">
       <div class="flex items-center justify-between border-b border-slate-100 pb-3">
         <div class="flex items-center gap-2.5">
           <div class="w-8 h-8 rounded-full bg-indigo-50 border border-indigo-200 flex items-center justify-center text-indigo-600 font-extrabold text-sm">
@@ -493,7 +502,7 @@
   <!-- COMPANY LOGO & BRAND IDENTITY MODAL -->
   <!-- ========================================== -->
   <div id="modal-brand" hidden class="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4">
-    <div class="surface-card bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-4">
+    <div class="surface-card bg-white rounded-2xl max-w-md w-full max-h-[90vh] overflow-y-auto p-6 shadow-2xl border border-slate-200 space-y-4">
       <div class="flex items-center justify-between border-b border-slate-100 pb-3">
         <h3 class="text-base font-extrabold text-slate-900">🖼️ Customize Company Logo &amp; Brand</h3>
         <button id="btn-close-brand-modal" type="button" class="text-slate-400 hover:text-slate-700 text-xl font-bold">&times;</button>
@@ -1657,7 +1666,7 @@ function computeQuote(q) {
 }
 
 /* ================= ROUTER & SIDEBAR STATS ================= */
-const TABS = ["quote", "master-rates", "master-transport", "master-credit", "master-transporters", "master-refineries", "master-template", "trends", "saved", "admin-users", "cloud-sync"];
+const TABS = ["quote", "map", "master-rates", "master-transport", "master-credit", "master-transporters", "master-refineries", "master-template", "trends", "saved", "admin-users", "cloud-sync"];
 const LEGACY = { cycles: "master-rates", routes: "master-transport", transporters: "master-transporters", setup: "master-credit", master: "master-rates" };
 
 function updateSidebarStats() {
@@ -1749,6 +1758,7 @@ function render() {
   }
   ({
     quote: viewQuote,
+    map: viewMap,
     "master-rates": viewCycles,
     "master-transport": viewRoutes,
     "master-credit": viewCredit,
@@ -1760,6 +1770,271 @@ function render() {
     "admin-users": viewUsersAdmin,
     "cloud-sync": viewCloudSync
   })[UI.tab]?.();
+}
+
+
+/* ================= INTERACTIVE ROUTE & REFINERY MAP ENGINE ================= */
+const INDIA_COORDS = {
+  "vadodara": [22.3072, 73.1812], "koyali": [22.3736, 73.1256], "baroda": [22.3072, 73.1812],
+  "mumbai": [19.0760, 72.8777], "mahul": [19.0069, 72.8876], "navi mumbai": [19.0330, 73.0297], "taloja": [19.0865, 73.1169], "thane": [19.2183, 72.9781],
+  "jamnagar": [22.4707, 70.0577], "vadinar": [22.3900, 69.7000], "rajkot": [22.3039, 70.8022], "kandla": [23.0333, 70.2167], "mundra": [22.8394, 69.7213], "gandhidham": [23.0753, 70.1337],
+  "ahmedabad": [23.0225, 72.5714], "surat": [21.1702, 72.8311], "bharuch": [21.7051, 72.9959], "ankleshwar": [21.6264, 73.0152], "vapi": [20.3893, 72.9106], "dahej": [21.7119, 72.5831], "hazira": [21.1161, 72.6517],
+  "mathura": [27.4924, 77.6737], "panipat": [29.3909, 76.9635], "bathinda": [30.2110, 74.9455], "delhi": [28.6139, 77.2090], "new delhi": [28.6139, 77.2090], "gurugram": [28.4595, 77.0266], "noida": [28.5355, 77.3910], "faridabad": [28.4089, 77.3178], "ghaziabad": [28.6692, 77.4538],
+  "haldia": [22.0667, 88.0698], "kolkata": [22.5726, 88.3639], "durgapur": [23.5204, 87.3119], "asansol": [23.6739, 86.9524], "siliguri": [26.7271, 88.3953], "budge budge": [22.4828, 88.1818],
+  "visakhapatnam": [17.6868, 83.2185], "vizag": [17.6868, 83.2185], "visakh": [17.6868, 83.2185], "vijayawada": [16.5062, 80.6480], "guntur": [16.3067, 80.4365], "kakinada": [16.9891, 82.2475], "nellore": [14.4426, 79.9865],
+  "chennai": [13.0827, 80.2707], "manali": [13.1667, 80.2667], "ennore": [13.2167, 80.3167], "coimbatore": [11.0168, 76.9558], "madurai": [9.9252, 78.1198], "salem": [11.6643, 78.1460], "trichy": [10.7905, 78.7047], "hosur": [12.7409, 77.8253], "tuticorin": [8.7642, 78.1348],
+  "kochi": [9.9312, 76.2673], "cochin": [9.9312, 76.2673], "ambalamugal": [9.9800, 76.3700], "trivandrum": [8.5241, 76.9366], "kozhikode": [11.2588, 75.7804],
+  "mangalore": [12.9141, 74.8560], "mangaluru": [12.9141, 74.8560], "bengaluru": [12.9716, 77.5946], "bangalore": [12.9716, 77.5946], "mysuru": [12.2958, 76.6394], "hubli": [15.3647, 75.1240], "belagavi": [15.8497, 74.4977], "karwar": [14.8136, 74.1297],
+  "nagpur": [21.1458, 79.0882], "pune": [18.5204, 73.8567], "nashik": [19.9975, 73.7898], "aurangabad": [19.8762, 75.3433], "chhatrapati sambhajinagar": [19.8762, 75.3433], "amravati": [20.9320, 77.7523], "akola": [20.7002, 77.0082], "jalgaon": [21.0077, 75.5626], "solapur": [17.6599, 75.9064], "kolhapur": [16.7050, 74.2433], "chandrapur": [19.9615, 79.2961], "wardha": [20.7453, 78.6022], "yavatmal": [20.3888, 78.1204], "bhandara": [21.1702, 79.6489], "gondia": [21.4624, 80.2210], "dhule": [20.9042, 74.7749], "nanded": [19.1383, 77.3210], "latur": [18.4088, 76.5604], "satara": [17.6805, 74.0183], "sangli": [16.8524, 74.5815], "ratnagiri": [16.9902, 73.3120],
+  "indore": [22.7196, 75.8577], "bhopal": [23.2599, 77.4126], "jabalpur": [23.1815, 79.9864], "gwalior": [26.2183, 78.1828], "bina": [24.1752, 78.1887], "ujjain": [23.1765, 75.7885], "dewas": [22.9676, 76.0534], "pithampur": [22.6133, 75.6822], "satna": [24.6005, 80.8322], "rewa": [24.5362, 81.3037], "chhindwara": [22.0574, 78.9382],
+  "raipur": [21.2514, 81.6296], "bilaspur": [22.0797, 82.1409], "bhilai": [21.1938, 81.3509], "durg": [21.1904, 81.2849], "korba": [22.3595, 82.7501], "raigarh": [21.8974, 83.3950],
+  "hyderabad": [17.3850, 78.4867], "secunderabad": [17.4399, 78.4983], "warangal": [17.9689, 79.5941], "karimnagar": [18.4386, 79.1288], "nizamabad": [18.6725, 78.0941], "khammam": [17.2473, 80.1514], "ramagundam": [18.7557, 79.4740],
+  "jaipur": [26.9124, 75.7873], "udaipur": [24.5854, 73.7125], "jodhpur": [26.2389, 73.0243], "kota": [25.2138, 75.8648], "ajmer": [26.4499, 74.6399], "bhiwadi": [28.2088, 76.8446], "barmer": [25.7521, 71.3967], "bikaner": [28.0229, 73.3119],
+  "lucknow": [26.8467, 80.9462], "kanpur": [26.4499, 80.3319], "varanasi": [25.3176, 82.9739], "prayagraj": [25.4358, 81.8463], "agra": [27.1767, 78.0081], "meerut": [28.9845, 77.7064], "bareilly": [28.3670, 79.4304], "gorakhpur": [26.7606, 83.3732],
+  "ludhiana": [30.9010, 75.8573], "jalandhar": [31.3260, 75.5762], "amritsar": [31.6340, 74.8723], "chandigarh": [30.7333, 76.7794], "patiala": [30.3398, 76.3869],
+  "patna": [25.5941, 85.1376], "barauni": [25.4716, 86.0020], "begusarai": [25.4182, 86.1272], "muzaffarpur": [26.1197, 85.3910],
+  "ranchi": [23.3441, 85.3096], "jamshedpur": [22.8046, 86.2029], "dhanbad": [23.7957, 86.4304], "bokaro": [23.6693, 86.1511],
+  "bhubaneswar": [20.2961, 85.8245], "cuttack": [20.4625, 85.8830], "paradip": [20.3166, 86.6114], "rourkela": [22.2604, 84.8536], "sambalpur": [21.4669, 83.9812], "jharsuguda": [21.8554, 84.0062],
+  "guwahati": [26.1445, 91.7362], "numaligarh": [26.6269, 93.7369], "digboi": [27.3917, 95.6177], "bongaigaon": [26.4765, 90.5583],
+  "goa": [15.2993, 74.1240], "vasco": [15.3982, 73.8113]
+};
+
+function getCoordsForTown(townName) {
+  if (!townName) return null;
+  const raw = String(townName).toLowerCase().trim();
+  if (INDIA_COORDS[raw]) return INDIA_COORDS[raw];
+  const parts = raw.split(/[,/()-]+/).map(s => s.trim()).filter(Boolean);
+  for (const p of parts) {
+    if (INDIA_COORDS[p]) return INDIA_COORDS[p];
+  }
+  for (const [k, coords] of Object.entries(INDIA_COORDS)) {
+    if (raw.includes(k) || k.includes(raw)) return coords;
+  }
+  return null;
+}
+
+function calcRoadDistanceKm(fromTown, toTown) {
+  const c1 = getCoordsForTown(fromTown);
+  const c2 = getCoordsForTown(toTown);
+  if (!c1 || !c2) return null;
+  const R = 6371;
+  const dLat = (c2[0] - c1[0]) * Math.PI / 180;
+  const dLon = (c2[1] - c1[1]) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+            Math.cos(c1[0] * Math.PI / 180) * Math.cos(c2[0] * Math.PI / 180) *
+            Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const straightKm = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  // Highway road winding factor (~1.24x straight-line distance in India)
+  return Math.max(10, Math.round(straightKm * 1.24));
+}
+
+let activeQuoteLeafletMap = null;
+function mountInlineQuoteMap(containerId, fromTown, toTown, refineryName) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  const c1 = getCoordsForTown(fromTown) || [20.5937, 78.9629];
+  const c2 = getCoordsForTown(toTown) || c1;
+  const distKm = calcRoadDistanceKm(fromTown, toTown);
+
+  if (window.L) {
+    try {
+      if (activeQuoteLeafletMap) {
+        activeQuoteLeafletMap.remove();
+        activeQuoteLeafletMap = null;
+      }
+      const map = L.map(el, { scrollWheelZoom: false }).setView([(c1[0] + c2[0]) / 2, (c1[1] + c2[1]) / 2], 6);
+      activeQuoteLeafletMap = map;
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        attribution: "&copy; OpenStreetMap"
+      }).addTo(map);
+
+      const refIcon = L.divIcon({
+        className: "",
+        html: `<div style="background:#4f46e5;color:#fff;font-weight:800;font-size:11px;padding:4px 8px;border-radius:999px;border:2px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,0.3);white-space:nowrap">🏭 ${esc(fromTown || refineryName)}</div>`,
+        iconAnchor: [40, 14]
+      });
+      const delIcon = L.divIcon({
+        className: "",
+        html: `<div style="background:#e11d48;color:#fff;font-weight:800;font-size:11px;padding:4px 8px;border-radius:999px;border:2px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,0.3);white-space:nowrap">📍 ${esc(toTown || "Delivery")}</div>`,
+        iconAnchor: [40, 14]
+      });
+
+      L.marker(c1, { icon: refIcon }).addTo(map).bindPopup(`<b>🏭 ${esc(refineryName)}</b><br>Loading: ${esc(fromTown)}`);
+      if (toTown && (c1[0] !== c2[0] || c1[1] !== c2[1])) {
+        L.marker(c2, { icon: delIcon }).addTo(map).bindPopup(`<b>📍 Delivery Location</b><br>${esc(toTown)}${distKm ? `<br>~${distKm} km road distance` : ""}`);
+        const line = L.polyline([c1, c2], { color: "#4f46e5", weight: 4, dashArray: "8, 6" }).addTo(map);
+        map.fitBounds(line.getBounds(), { padding: [45, 45] });
+      } else {
+        map.setView(c1, 8);
+      }
+      setTimeout(() => map.invalidateSize(), 150);
+      return;
+    } catch (e) {}
+  }
+  el.innerHTML = `<div class="p-4 text-center text-xs text-slate-500">Route: <b>🏭 ${esc(fromTown)}</b> → <b>📍 ${esc(toTown || "Customer")}</b> ${distKm ? `(~${distKm} km)` : ""}</div>`;
+}
+
+let dedicatedLeafletMap = null;
+function viewMap() {
+  const sources = (S.catalog?.sources || []).filter(s => s.active !== false);
+  const dels = allLocations();
+  UI.mapState = UI.mapState || {
+    sourceId: sources[0]?.id || "",
+    delivery: UI.q.loc || dels[0] || "Nagpur",
+    productId: UI.q.product || (S.catalog?.products?.[0]?.id || "LDO")
+  };
+  const ms = UI.mapState;
+  const selSrc = sources.find(s => s.id === ms.sourceId) || sources[0];
+  const fromLoc = selSrc ? (getRefineryLocations(selSrc)[0] || selSrc.loading || selSrc.name) : "";
+  const distKm = calcRoadDistanceKm(fromLoc, ms.delivery);
+  const transitHrs = distKm ? Math.max(2, Math.round(distKm / 38)) : null;
+  const transitDays = transitHrs ? Math.max(1, Math.ceil(transitHrs / 14)) : null;
+  const matchingRoutes = (S.routes?.rows || []).filter(r =>
+    selSrc && getRefineryLocations(selSrc).map(norm).includes(norm(r.loading)) &&
+    (!ms.delivery || norm(r.delivery) === norm(ms.delivery))
+  );
+  const gmapsUrl = `https://www.google.com/maps/dir/${encodeURIComponent(fromLoc + ", India")}/${encodeURIComponent((ms.delivery || "Nagpur") + ", India")}`;
+
+  V().innerHTML = `
+  <div class="sechead">
+    <div>
+      <h2>🗺️ Refinery &amp; Delivery Route Map</h2>
+      <p class="sub" style="margin:0">Inspect refinery loading locations, customer delivery hubs, highway distance (km), and tanker transit times across India.</p>
+    </div>
+    <div class="actions">
+      <a href="${gmapsUrl}" target="_blank" rel="noopener" class="btn">↗ Open Route in Google Maps</a>
+      <button type="button" id="btn-map-to-quote" class="btn primary">⚡ Price This Route in Calculator</button>
+    </div>
+  </div>
+
+  <div class="panel pad">
+    <div class="grid grid-cols-1 md:grid-cols-4 gap-3.5 items-end">
+      <div class="field">
+        <label class="lbl" for="map-src">1. Refinery / Source</label>
+        <select id="map-src" class="font-bold">
+          ${sources.map(s => `<option value="${s.id}" ${s.id === selSrc?.id ? "selected" : ""}>🏭 ${esc(s.name)} (${esc(getRefineryLocations(s).join(", ") || s.loading)})</option>`).join("")}
+        </select>
+      </div>
+      <div class="field">
+        <label class="lbl" for="map-del">2. Delivery Location</label>
+        <input type="text" id="map-del" list="map-dl-locs" value="${esc(ms.delivery)}" placeholder="Type customer town (e.g. Nagpur, Pune)" class="font-bold">
+        <datalist id="map-dl-locs">${dels.map(l => `<option value="${esc(l)}">`).join("")}</datalist>
+      </div>
+      <div class="field">
+        <label class="lbl" for="map-prod">3. Product</label>
+        <select id="map-prod" class="font-bold">
+          ${sellableProducts().map(p => `<option value="${p.id}" ${p.id === ms.productId ? "selected" : ""}>${esc(p.name)} (${p.unit})</option>`).join("")}
+        </select>
+      </div>
+      <div class="flex items-center gap-2">
+        <button type="button" id="btn-map-calc" class="btn primary w-full justify-center py-2.5">🗺️ Show Route &amp; Distance</button>
+      </div>
+    </div>
+
+    <!-- Route Metrics Strip -->
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4 pt-4 border-t border-slate-200">
+      <div class="p-3 rounded-xl bg-slate-50 border border-slate-200">
+        <span class="text-[10px] font-extrabold uppercase text-slate-400">Origin (Loading Location)</span>
+        <div class="text-sm font-extrabold text-indigo-700 mt-0.5">🏭 ${esc(fromLoc || "—")}</div>
+        <span class="text-[11px] text-slate-500">${esc(selSrc?.name || "")}</span>
+      </div>
+      <div class="p-3 rounded-xl bg-slate-50 border border-slate-200">
+        <span class="text-[10px] font-extrabold uppercase text-slate-400">Destination (Delivery)</span>
+        <div class="text-sm font-extrabold text-rose-600 mt-0.5">📍 ${esc(ms.delivery || "—")}</div>
+        <span class="text-[11px] text-slate-500">Customer Hub</span>
+      </div>
+      <div class="p-3 rounded-xl bg-slate-50 border border-slate-200">
+        <span class="text-[10px] font-extrabold uppercase text-slate-400">Est. Highway Distance</span>
+        <div class="text-base font-extrabold font-mono text-emerald-700 mt-0.5">${distKm ? `~${nf(distKm)} km` : "Enter known town"}</div>
+        <span class="text-[11px] text-slate-500">${transitHrs ? `~${transitHrs} driving hrs (${transitDays}d transit)` : "Road corridor"}</span>
+      </div>
+      <div class="p-3 rounded-xl bg-slate-50 border border-slate-200">
+        <span class="text-[10px] font-extrabold uppercase text-slate-400">Saved Transport Routes</span>
+        <div class="text-base font-extrabold font-mono text-amber-700 mt-0.5">${matchingRoutes.length} route(s)</div>
+        <span class="text-[11px] text-slate-500">${matchingRoutes[0]?.rate ? `From ${inr(matchingRoutes[0].rate)}/unit` : "Click Price Route to quote"}</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Interactive Map Canvas -->
+  <div class="panel overflow-hidden" style="border-radius:16px">
+    <div id="dedicated-map-canvas" style="height:460px;width:100%;z-index:1"></div>
+  </div>`;
+
+  const updateMapRoute = () => {
+    ms.sourceId = $("#map-src")?.value || ms.sourceId;
+    ms.delivery = ($("#map-del")?.value || "").trim();
+    ms.productId = $("#map-prod")?.value || ms.productId;
+    viewMap();
+  };
+  $("#map-src")?.addEventListener("change", updateMapRoute);
+  $("#map-prod")?.addEventListener("change", updateMapRoute);
+  $("#btn-map-calc")?.addEventListener("click", updateMapRoute);
+  $("#map-del")?.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); updateMapRoute(); } });
+
+  $("#btn-map-to-quote")?.addEventListener("click", () => {
+    UI.q.specificSource = ms.sourceId || "ALL";
+    UI.q.sel = ms.sourceId || null;
+    if (ms.delivery) UI.q.loc = ms.delivery;
+    if (ms.productId) UI.q.product = ms.productId;
+    saveWorkspaceState(200);
+    navigateToTab("quote");
+    toast("⚡ Loaded route into Calculator!");
+  });
+
+  // Render Leaflet Map with all active refineries + selected delivery route
+  setTimeout(() => {
+    const el = document.getElementById("dedicated-map-canvas");
+    if (!el || !window.L) return;
+    try {
+      if (dedicatedLeafletMap) {
+        dedicatedLeafletMap.remove();
+        dedicatedLeafletMap = null;
+      }
+      const map = L.map(el).setView([21.1458, 79.0882], 5);
+      dedicatedLeafletMap = map;
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        attribution: "&copy; OpenStreetMap contributors"
+      }).addTo(map);
+
+      const boundsPts = [];
+      sources.forEach(s => {
+        const locs = getRefineryLocations(s);
+        const locName = locs[0] || s.loading || s.name;
+        const coords = getCoordsForTown(locName) || getCoordsForTown(s.name);
+        if (!coords) return;
+        const isSel = selSrc && s.id === selSrc.id;
+        const icon = L.divIcon({
+          className: "",
+          html: `<div style="background:${isSel ? "#4f46e5" : "#0f172a"};color:#fff;font-weight:800;font-size:11px;padding:4px 9px;border-radius:999px;border:2px solid ${isSel ? "#fbbf24" : "#fff"};box-shadow:0 2px 8px rgba(0,0,0,0.35);white-space:nowrap">🏭 ${esc(s.name)}</div>`,
+          iconAnchor: [45, 14]
+        });
+        const m = L.marker(coords, { icon }).addTo(map);
+        m.bindPopup(`<b>🏭 ${esc(s.name)}</b><br>Location: ${esc(locs.join(", ") || s.loading)}<br>Products: ${esc(getRefineryProducts(s).join(", "))}`);
+        m.on("click", () => { ms.sourceId = s.id; viewMap(); });
+        if (isSel) boundsPts.push(coords);
+      });
+
+      const delCoords = getCoordsForTown(ms.delivery);
+      const selCoords = getCoordsForTown(fromLoc) || (selSrc && getCoordsForTown(selSrc.name));
+      if (delCoords) {
+        const delIcon = L.divIcon({
+          className: "",
+          html: `<div style="background:#e11d48;color:#fff;font-weight:800;font-size:11.5px;padding:5px 10px;border-radius:999px;border:2px solid #fff;box-shadow:0 3px 10px rgba(225,29,72,0.45);white-space:nowrap">📍 ${esc(ms.delivery)}</div>`,
+          iconAnchor: [45, 14]
+        });
+        L.marker(delCoords, { icon: delIcon }).addTo(map).bindPopup(`<b>📍 Delivery: ${esc(ms.delivery)}</b>${distKm ? `<br>~${distKm} km from ${esc(fromLoc)}` : ""}`).openPopup();
+        boundsPts.push(delCoords);
+      }
+      if (selCoords && delCoords && (selCoords[0] !== delCoords[0] || selCoords[1] !== delCoords[1])) {
+        const poly = L.polyline([selCoords, delCoords], { color: "#4f46e5", weight: 4, dashArray: "8, 6" }).addTo(map);
+        map.fitBounds(poly.getBounds(), { padding: [55, 55] });
+      } else if (boundsPts.length === 1) {
+        map.setView(boundsPts[0], 7);
+      }
+      setTimeout(() => map.invalidateSize(), 150);
+    } catch (e) {}
+  }, 50);
 }
 
 /* ================= VIEW 1: GET A PRICE (QUOTE CALCULATOR IN OUR UI) ================= */
@@ -2148,6 +2423,24 @@ function renderQuoteResults() {
           <span class="text-[10px] text-indigo-200">${R.qty ? `Order: ${inr(B.orderValue)}` : `Incl GST: ${inr(B.sellGst)}`}</span>
         </div>
       </div>
+      ${(() => {
+        const origLoc = B.route?.loading || getRefineryLocations(B.s)[0] || B.s.loading || B.s.name;
+        const dKm = calcRoadDistanceKm(origLoc, q.loc);
+        const gmUrl = `https://www.google.com/maps/dir/${encodeURIComponent(origLoc + ", India")}/${encodeURIComponent((q.loc || origLoc) + ", India")}`;
+        return `<div class="mt-4 pt-3.5 border-t border-indigo-800/60 flex flex-wrap items-center justify-between gap-2 text-xs">
+          <div class="flex flex-wrap items-center gap-3 text-indigo-200">
+            <span>🗺️ <b>Route:</b> 🏭 ${esc(origLoc)} → 📍 ${esc(q.loc || "Ex-Refinery")}</span>
+            ${dKm ? `<span class="px-2 py-0.5 rounded-full bg-indigo-900/90 border border-indigo-600 text-amber-300 font-mono font-bold">~${nf(dKm)} km road distance</span>` : ""}
+          </div>
+          <div class="flex items-center gap-2">
+            <button type="button" id="btn-toggle-inline-map" class="px-3 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs flex items-center gap-1.5 cursor-pointer">
+              <span>🗺️</span><span>${UI.showInlineMap ? "Hide Route Map" : "View Route on Map"}</span>
+            </button>
+            <a href="${gmUrl}" target="_blank" rel="noopener" class="px-3 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600 font-bold text-xs">↗ Google Maps</a>
+          </div>
+        </div>
+        ${UI.showInlineMap ? `<div id="inline-quote-map-box" class="mt-3 rounded-xl overflow-hidden border border-indigo-500/40" style="height:270px;width:100%"></div>` : ""}`;
+      })()}
     </div>` : `<div class="banner"><span><b>No transport rate to ${esc(q.loc)} yet.</b> Type a transporter's rate against a refinery below to price it, or add this location with its transport rates.</span><button class="btn small lime" type="button" id="addloc">＋ Add ${esc(q.loc)} as a location</button></div>`;
 
   const cards = R.priced.map((r, i) => `
@@ -2182,6 +2475,15 @@ function renderQuoteResults() {
    ${np}`;
 
   box.querySelectorAll("[data-sel]").forEach(el => el.onclick = () => { q.sel = el.dataset.sel; saveWorkspaceState(200); renderQuoteResults(); });
+  const btnMap = box.querySelector("#btn-toggle-inline-map");
+  if (btnMap) btnMap.onclick = () => {
+    UI.showInlineMap = !UI.showInlineMap;
+    renderQuoteResults();
+  };
+  if (UI.showInlineMap && B) {
+    const origLoc = B.route?.loading || getRefineryLocations(B.s)[0] || B.s.loading || B.s.name;
+    setTimeout(() => mountInlineQuoteMap("inline-quote-map-box", origLoc, q.loc || origLoc, B.s.name), 50);
+  }
   const al = box.querySelector("#addloc");
   if (al) al.onclick = () => {
     if (!S.canWrite) { toast("Sign in as Admin to add new master locations."); return; }

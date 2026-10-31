@@ -2122,6 +2122,29 @@ function extractCleanCityFromRefineryName(refName, rawLoc = "") {
 }
 
 // Automatically heal any products that were wrongly defaulted to "White liquid" and group refinery products/locations cleanly
+function formatSupplyPointDisplayName(brand, loc) {
+  const b = String(brand || "").trim();
+  const l = String(loc || "").trim();
+  if (!l) return b || "Refinery";
+  if (!b) return l;
+  if (norm(b).includes(norm(l))) return b;
+  return `${b} (${l})`;
+}
+
+function getSourceBrandName(s) {
+  if (!s) return "";
+  if (s.brandName && String(s.brandName).trim()) return String(s.brandName).trim();
+  const rawName = String(s.name || s.company || "").trim();
+  const loc = String(s.loading || (s.locations && s.locations[0]) || "").trim();
+  if (loc && rawName.toLowerCase().endsWith(`(${loc.toLowerCase()})`)) {
+    return rawName.slice(0, rawName.length - loc.length - 2).trim();
+  }
+  if (loc && norm(rawName) !== norm(loc) && rawName.toLowerCase().endsWith(" " + loc.toLowerCase())) {
+    return rawName.slice(0, rawName.length - loc.length - 1).trim();
+  }
+  return s.company || rawName || "Refinery";
+}
+
 function autoHealCatalogAndRoutes() {
   let changed = false;
   if (S.catalog?.products) {
@@ -2136,51 +2159,80 @@ function autoHealCatalogAndRoutes() {
     });
   }
 
-  // Merge duplicate refineries (e.g. "RAIPUR HPCL" and "HPCL RAIPUR") and ensure their locations & products sold are grouped
+  // Split any multi-location refinery record (e.g. BPCL with ["kochi", "Mumbai", "bina"]) into location-scoped supply points
+  // so BPCL Bina, BPCL Kochi, and BPCL Mumbai each have their OWN independent Products Sold list, Basic Price, and Transport Routes!
   if (S.catalog?.sources) {
-    const byNormName = new Map();
-    const mergedSources = [];
+    const expanded = [];
     for (const s of S.catalog.sources) {
-      // Fix location if location is identical to full refinery name like "RAIPUR HPCL"
-      const locs = getRefineryLocations(s).map(l => norm(l) === norm(s.name) ? extractCleanCityFromRefineryName(s.name, l) : l);
-      if (JSON.stringify(locs) !== JSON.stringify(s.locations)) {
-        s.locations = [...new Set(locs.filter(Boolean))];
-        s.loading = s.locations.join(", ");
-        changed = true;
-      }
-      const keyTokens = norm(s.name).split(" ").sort().join(" ");
-      if (byNormName.has(keyTokens) && keyTokens) {
-        const target = byNormName.get(keyTokens);
-        const tLocs = getRefineryLocations(target);
-        s.locations.forEach(l => { if (!tLocs.some(x => norm(x) === norm(l))) tLocs.push(l); });
-        target.locations = tLocs;
-        target.loading = tLocs.join(", ");
-        const tProds = Array.isArray(target.products) ? target.products : [];
-        (s.products || []).forEach(pid => { if (!tProds.includes(pid)) tProds.push(pid); });
-        target.products = tProds;
+      const brand = getSourceBrandName(s);
+      const rawLocs = getRefineryLocations(s).map(l => norm(l) === norm(s.name) ? extractCleanCityFromRefineryName(s.name, l) : l).filter(Boolean);
+
+      if (rawLocs.length > 1) {
+        // Split into 1 record per location under the same brandName
+        rawLocs.forEach((loc, idx) => {
+          const cleanLoc = loc.charAt(0).toUpperCase() + loc.slice(1);
+          const spName = formatSupplyPointDisplayName(brand, cleanLoc);
+          const spId = idx === 0 ? s.id : sourceIdFor(`${brand}-${cleanLoc}`);
+          const locProds = (s.locationProducts && Array.isArray(s.locationProducts[norm(cleanLoc)]))
+            ? s.locationProducts[norm(cleanLoc)]
+            : (Array.isArray(s.products) ? [...s.products] : []);
+          expanded.push({
+            ...JSON.parse(JSON.stringify(s)),
+            id: spId,
+            brandName: brand,
+            company: brand.split(/\s+/)[0] || brand,
+            name: spName,
+            loading: cleanLoc,
+            locations: [cleanLoc],
+            products: locProds
+          });
+        });
         changed = true;
       } else {
-        byNormName.set(keyTokens, s);
-        mergedSources.push(s);
+        const singleLoc = rawLocs[0] || String(s.loading || "").trim();
+        const cleanLoc = singleLoc ? (singleLoc.charAt(0).toUpperCase() + singleLoc.slice(1)) : "";
+        const desiredName = cleanLoc ? formatSupplyPointDisplayName(brand, cleanLoc) : (s.name || brand);
+        if (!s.brandName) { s.brandName = brand; changed = true; }
+        if (cleanLoc && (s.loading !== cleanLoc || (s.locations || []).length !== 1)) {
+          s.loading = cleanLoc;
+          s.locations = [cleanLoc];
+          changed = true;
+        }
+        if (desiredName && s.name !== desiredName && cleanLoc) {
+          s.name = desiredName;
+          changed = true;
+        }
+        expanded.push(s);
       }
     }
-    if (mergedSources.length !== S.catalog.sources.length) {
-      S.catalog.sources = mergedSources;
-    }
 
-    // Also link products from S.cycles and S.routes into each matching refinery's s.products list
+    // Deduplicate any identical (brandName, loading) supply points, merging their products
+    const byBrandLoc = new Map();
+    const deduped = [];
+    for (const s of expanded) {
+      const keyStr = `${norm(getSourceBrandName(s))}|${norm(s.loading || "")}`;
+      if (byBrandLoc.has(keyStr) && s.loading) {
+        const existing = byBrandLoc.get(keyStr);
+        const mergedProds = [...new Set([...(existing.products || []), ...(s.products || [])])];
+        existing.products = mergedProds;
+        changed = true;
+      } else {
+        byBrandLoc.set(keyStr, s);
+        deduped.push(s);
+      }
+    }
+    S.catalog.sources = deduped;
+
+    // Link products from S.cycles and S.routes into the exact (Refinery + Location) supply point
     S.catalog.sources.forEach(s => {
-      const sLocs = getRefineryLocations(s).map(norm);
+      const sLoc = norm(s.loading || "");
       const fromCycles = (S.cycles || []).flatMap(c => (c.prices || []).filter(p => p.sourceId === s.id && num(p.basic) > 0).map(p => p.productId));
-      const fromRoutes = (S.routes?.rows || []).filter(r => sLocs.includes(norm(r.loading)) || norm(r.loading) === norm(s.name)).map(r => r.productId).filter(Boolean);
-      const combined = [...new Set([...(Array.isArray(s.products) ? s.products : []), ...fromCycles, ...fromRoutes])];
-      // If s.products previously had ALL 30+ catalog products selected by default when only specific ones exist, narrow to actual or keep explicit
+      const fromRoutes = sLoc
+        ? (S.routes?.rows || []).filter(r => norm(r.loading) === sLoc && (!r.company || norm(r.company) === norm(s.company) || norm(r.company) === norm(s.brandName))).map(r => r.productId).filter(Boolean)
+        : [];
       const allCount = (S.catalog.products || []).length;
       if (allCount > 10 && Array.isArray(s.products) && s.products.length >= allCount - 2 && (fromCycles.length > 0 || fromRoutes.length > 0)) {
         s.products = [...new Set([...fromCycles, ...fromRoutes])];
-        changed = true;
-      } else if (combined.length > (s.products || []).length && (fromCycles.length > 0 || fromRoutes.length > 0)) {
-        s.products = combined;
         changed = true;
       }
     });
@@ -2188,7 +2240,6 @@ function autoHealCatalogAndRoutes() {
 
   return changed;
 }
-
 function displayTypeLabel(cls) {
   if (!cls) return "White liquid";
   if (cls === "white") return "White liquid";
@@ -3323,26 +3374,65 @@ function syncRefineryProductsToLatestCycle(sourceId, productIds) {
   }
 }
 
-function addInlineLocationToRefinery(si, rawLoc) {
-  if (!S.canWrite) return;
-  const parts = String(rawLoc || "").split(",").map(x => x.trim()).filter(Boolean);
-  if (!parts.length) { toast("Type a location name first"); return; }
-  const row = S.catalog.sources[si];
-  if (!row) return;
-  const locs = getRefineryLocations(row);
-  parts.forEach(loc => {
-    if (!locs.some(x => norm(x) === norm(loc))) locs.push(loc);
+function getRefineryBrandGroups() {
+  const groups = [];
+  const map = new Map();
+  (S.catalog?.sources || []).forEach((s, sourceIndex) => {
+    const brand = getSourceBrandName(s) || "";
+    const gKey = norm(brand) || ("__unnamed_" + sourceIndex);
+    if (!map.has(gKey)) {
+      const g = { brandKey: gKey, brandName: brand, items: [] };
+      map.set(gKey, g);
+      groups.push(g);
+    }
+    map.get(gKey).items.push({ s, sourceIndex });
   });
-  row.locations = locs;
-  row.loading = locs.join(", ");
-  saveDoc("master/catalog", S.catalog, 0);
-  viewRefineries();
-  toast(`Added location(s) "${parts.join(", ")}" to ${row.name || "refinery"}`);
+  return groups;
 }
 
-function addInlineProductToRefinery(si, rawProdName) {
+function addLocationToBrandGroup(brandKey, rawLoc) {
   if (!S.canWrite) return;
-  // Support adding multiple comma-separated products at once (e.g. "MTO, LDO, FO")
+  const parts = String(rawLoc || "").split(",").map(x => x.trim()).filter(Boolean);
+  if (!parts.length) { toast("Type a location name first (e.g. Bina, Kochi)"); return; }
+  const groups = getRefineryBrandGroups();
+  const g = groups.find(x => x.brandKey === brandKey);
+  if (!g) return;
+  const brand = g.brandName || "Refinery";
+
+  parts.forEach(loc => {
+    const cleanLoc = loc.charAt(0).toUpperCase() + loc.slice(1);
+    // Check if first item in group has no location yet — if so, populate it directly!
+    const emptyLocItem = g.items.find(it => !String(it.s.loading || "").trim());
+    if (emptyLocItem) {
+      emptyLocItem.s.loading = cleanLoc;
+      emptyLocItem.s.locations = [cleanLoc];
+      emptyLocItem.s.brandName = brand;
+      emptyLocItem.s.company = brand.split(/\s+/)[0] || brand;
+      emptyLocItem.s.name = formatSupplyPointDisplayName(brand, cleanLoc);
+    } else if (!g.items.some(it => norm(it.s.loading) === norm(cleanLoc))) {
+      const newSp = {
+        id: sourceIdFor(`${brand}-${cleanLoc}`),
+        brandName: brand,
+        company: brand.split(/\s+/)[0] || brand,
+        name: formatSupplyPointDisplayName(brand, cleanLoc),
+        loading: cleanLoc,
+        locations: [cleanLoc],
+        creditDays: g.items[0]?.s?.creditDays || 0,
+        active: true,
+        products: [],
+        aliases: []
+      };
+      S.catalog.sources.push(newSp);
+    }
+  });
+
+  saveDoc("master/catalog", S.catalog, 0);
+  viewRefineries();
+  toast(`Added location(s) ${parts.join(", ")} to ${brand} — now assign the products sold at each location!`);
+}
+
+function addInlineProductToSupplyPoint(si, rawProdName) {
+  if (!S.canWrite) return;
   const names = String(rawProdName || "").split(",").map(x => x.trim()).filter(Boolean);
   if (!names.length) { toast("Type a product name first (e.g. MTO, LDO)"); return; }
   const row = S.catalog.sources[si];
@@ -3379,24 +3469,26 @@ function addInlineProductToRefinery(si, rawProdName) {
   row.products = sold;
   saveDoc("master/catalog", S.catalog, 0);
   viewRefineries();
-  toast(`Added ${addedNames.join(", ")} to ${row.name || "refinery"}`);
+  toast(`Added ${addedNames.join(", ")} to ${row.name || "location"}`);
 }
 
 function viewRefineries() {
   S.catalog = S.catalog || { sources: [], products: [] };
+  autoHealCatalogAndRoutes();
   const saveC = (delay = 500) => saveDoc("master/catalog", S.catalog, delay);
   const dis = S.canWrite ? "" : "disabled";
   const namedProds = (S.catalog.products || []).filter(p => (p.name || "").trim());
+  const brandGroups = getRefineryBrandGroups();
 
   V().innerHTML = `<div class="stack">
    <section class="stack" style="gap:8px">
      <div class="sechead">
        <div>
-         <h3>Step 2 · Refineries and supply points</h3>
-         <p class="tiny" style="margin:2px 0 0">Enter each refinery/source once, then add multiple <b>Locations</b> and multiple <b>Products</b> directly inside its row.</p>
+         <h3>Step 2 · Refineries and supply points (Location-Specific Products)</h3>
+         <p class="tiny" style="margin:2px 0 0">Each refinery (e.g. <b>BPCL</b>, <b>IOCL</b>, <b>Nayara</b>) can have multiple locations (e.g. <b>Kochi</b>, <b>Mumbai</b>, <b>Bina</b>), and <b>each location has its own Products Sold list</b> so calculation and transport matching are 100% accurate per location.</p>
        </div>
        <div class="actions">
-         ${S.canWrite && (S.catalog.sources || []).length ? `<button class="btn small danger" id="del-all-sources" type="button">🗑️ Delete All Refineries (${S.catalog.sources.length})</button>` : ""}
+         ${S.canWrite && (S.catalog.sources || []).length ? `<button class="btn small danger" id="del-all-sources" type="button">🗑️ Delete All Refineries (${brandGroups.length})</button>` : ""}
          ${S.canWrite ? `<label class="btn small" for="up-step-refineries">⬆ Upload Refineries (.xlsx)</label><input type="file" id="up-step-refineries" accept=".xlsx,.xls,.csv" hidden>` : ""}
          <button class="btn small primary" id="adds" type="button" ${dis}>＋ Add refinery / source</button>
        </div>
@@ -3405,70 +3497,93 @@ function viewRefineries() {
        <table>
          <thead>
            <tr>
-             <th style="min-width:190px">Refinery / Source</th>
-             <th style="min-width:260px">Location (multiple allowed)</th>
-             <th style="min-width:320px">Products sold (select or add multiple)</th>
-             <th>In use</th>
-             <th></th>
+             <th style="width:240px;min-width:210px">Refinery / Source</th>
+             <th style="min-width:520px">Location &amp; Products Sold at That Specific Location</th>
+             <th style="width:60px"></th>
            </tr>
          </thead>
          <tbody>
-         ${(S.catalog.sources || []).map((s, i) => {
-           const locs = getRefineryLocations(s);
-           const sold = getRefineryProducts(s);
+         ${brandGroups.map((g, gi) => {
            return `<tr>
-             <td style="vertical-align:top">
-               <input type="text" data-s="${i}" data-f="name" value="${esc(s.name)}" placeholder="e.g. CPCL, Nayara, IOCL" style="min-width:180px;font-weight:700" ${dis}>
-             </td>
-             <td style="vertical-align:top">
-               <div class="stack" style="gap:6px">
-                 <div class="chips" style="gap:5px">
-                   ${locs.map((loc, li) => `
-                     <span class="chip" style="padding:3px 9px;font-size:11.5px;background:var(--accent-soft);border-color:var(--accent);color:var(--ink)">
-                       <span>📍 ${esc(loc)}</span>
-                       ${S.canWrite ? `<button type="button" data-rmloc="${i}|${li}" class="ml-1 text-rose-600 hover:text-rose-800 font-extrabold" title="Remove location">×</button>` : ""}
-                     </span>
-                   `).join("") || `<span class="tiny">No location added yet</span>`}
+             <td style="vertical-align:top;padding-top:12px">
+               <div class="stack" style="gap:8px">
+                 <div>
+                   <label class="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 block mb-1">Refinery Brand / Company</label>
+                   <input type="text" data-brand-key="${esc(g.brandKey)}" value="${esc(g.brandName)}" placeholder="e.g. BPCL, IOCL, NAYARA Energy" style="font-weight:800;font-size:14px" ${dis}>
                  </div>
                  ${S.canWrite ? `
-                 <div class="flex items-center gap-1">
-                   <input type="text" data-addloc-in="${i}" list="dl-all-locs" placeholder="+ Add location (e.g. Chennai)" style="padding:4px 8px;font-size:12px;min-width:140px">
-                   <button type="button" data-addloc-btn="${i}" class="btn small primary" style="padding:4px 9px">+ Add</button>
-                 </div>` : ""}
-               </div>
-             </td>
-             <td style="vertical-align:top">
-               <div class="stack" style="gap:6px">
-                 <div class="chips" style="gap:5px">
-                   ${sold.map(pid => {
-                     const p = namedProds.find(x => x.id === pid);
-                     if (!p) return "";
-                     return `<span class="chip" style="padding:3px 10px;font-size:11.5px;background:var(--accent);border-color:var(--accent);color:#fff">
-                       <span class="dot" style="background:${clsDotColor(p.cls)};border:1px solid #fff"></span>
-                       <span>${esc(p.name)}</span>
-                       ${S.canWrite ? `<button type="button" data-sprod="${i}|${esc(p.id)}" class="ml-1 text-white/80 hover:text-white font-extrabold" title="Remove product from this refinery">×</button>` : ""}
-                     </span>`;
-                   }).join("") || `<span class="tiny">No products assigned yet — add or select below</span>`}
-                 </div>
-                 ${S.canWrite ? `
-                 <div class="flex flex-wrap items-center gap-1.5">
-                   <select data-pickprod-sel="${i}" style="width:auto;min-width:145px;padding:4px 8px;font-size:12px">
-                     <option value="">+ Select existing product…</option>
-                     ${namedProds.filter(p => !sold.includes(p.id)).map(p => `<option value="${esc(p.id)}">${esc(p.name)} (${p.unit})</option>`).join("")}
-                     <option value="__ALL__">✓ Add All Products (${namedProds.length})</option>
-                     <option value="__CLEAR__">✕ Clear All Products</option>
-                   </select>
+                 <div class="p-2 rounded-xl bg-slate-50 border border-slate-200 space-y-1.5">
+                   <span class="text-[10px] font-bold text-indigo-700 block">+ Add Location under ${esc(g.brandName || "this refinery")}:</span>
                    <div class="flex items-center gap-1">
-                     <input type="text" data-addprod-in="${i}" placeholder="Or type new (e.g. MTO, LDO)" style="padding:4px 8px;font-size:12px;min-width:155px">
-                     <button type="button" data-addprod-btn="${i}" class="btn small primary" style="padding:4px 9px">+ Add</button>
+                     <input type="text" data-add-brand-loc-in="${gi}" data-bkey="${esc(g.brandKey)}" list="dl-all-locs" placeholder="e.g. Bina, Kochi, Mumbai" style="padding:4px 8px;font-size:12px">
+                     <button type="button" data-add-brand-loc-btn="${gi}" data-bkey="${esc(g.brandKey)}" class="btn small primary" style="padding:4px 9px">+ Add</button>
                    </div>
                  </div>` : ""}
                </div>
              </td>
-             <td style="vertical-align:top"><input type="checkbox" data-s="${i}" data-f="active" ${s.active !== false ? "checked" : ""} aria-label="In use" ${dis}></td>
-             <td style="vertical-align:top"><button class="btn small danger" type="button" data-sdel="${i}" ${dis}>✕</button></td>
+             <td style="vertical-align:top">
+               <div class="stack" style="gap:8px">
+                 ${g.items.map(({ s, sourceIndex }) => {
+                   const sold = getRefineryProducts(s);
+                   const locVal = s.loading || (s.locations && s.locations[0]) || "";
+                   return `<div class="p-3 rounded-xl bg-slate-50/90 border border-slate-200/90 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+                     <!-- Left: Specific Location Input -->
+                     <div class="flex items-center gap-2 shrink-0" style="min-width:190px">
+                       <span class="px-2.5 py-1 rounded-lg bg-indigo-600 text-white text-xs font-extrabold">📍</span>
+                       <div class="flex-1">
+                         <span class="text-[10px] font-extrabold uppercase text-slate-400 block">Location</span>
+                         <input type="text" data-sp-loc="${sourceIndex}" list="dl-all-locs" value="${esc(locVal)}" placeholder="Type location (e.g. Kochi)" style="font-weight:700;padding:4px 8px;font-size:12.5px;width:155px" ${dis}>
+                       </div>
+                     </div>
+
+                     <!-- Middle: Products Sold at THIS Specific Location -->
+                     <div class="flex-1 stack" style="gap:6px">
+                       <div class="flex items-center justify-between">
+                         <span class="text-[10px] font-extrabold uppercase text-slate-400">Products Sold at ${esc(locVal || "this location")} (${sold.length})</span>
+                         <label class="text-[11px] text-slate-500 flex items-center gap-1 cursor-pointer">
+                           <input type="checkbox" data-sp-active="${sourceIndex}" ${s.active !== false ? "checked" : ""} ${dis}>
+                           <span>Active</span>
+                         </label>
+                       </div>
+                       <div class="chips" style="gap:5px">
+                         ${sold.map(pid => {
+                           const p = namedProds.find(x => x.id === pid);
+                           if (!p) return "";
+                           return `<span class="chip" style="padding:3px 10px;font-size:11.5px;background:var(--accent);border-color:var(--accent);color:#fff">
+                             <span class="dot" style="background:${clsDotColor(p.cls)};border:1px solid #fff"></span>
+                             <span>${esc(p.name)}</span>
+                             ${S.canWrite ? `<button type="button" data-sprod="${sourceIndex}|${esc(p.id)}" class="ml-1 text-white/80 hover:text-white font-extrabold" title="Remove ${esc(p.name)} from ${esc(locVal)}">×</button>` : ""}
+                           </span>`;
+                         }).join("") || `<span class="tiny text-amber-700 font-semibold">No products assigned to ${esc(locVal || "this location")} yet — select or add below</span>`}
+                       </div>
+                       ${S.canWrite ? `
+                       <div class="flex flex-wrap items-center gap-1.5 pt-0.5">
+                         <select data-pickprod-sel="${sourceIndex}" style="width:auto;min-width:155px;padding:4px 8px;font-size:11.5px">
+                           <option value="">+ Select product for ${esc(locVal || "location")}…</option>
+                           ${namedProds.filter(p => !sold.includes(p.id)).map(p => `<option value="${esc(p.id)}">${esc(p.name)} (${p.unit})</option>`).join("")}
+                           <option value="__ALL__">✓ Assign All Products (${namedProds.length})</option>
+                           <option value="__CLEAR__">✕ Clear Products on ${esc(locVal || "location")}</option>
+                         </select>
+                         <div class="flex items-center gap-1">
+                           <input type="text" data-addprod-in="${sourceIndex}" placeholder="Or type new (e.g. MTO, FO)" style="padding:4px 8px;font-size:11.5px;min-width:145px">
+                           <button type="button" data-addprod-btn="${sourceIndex}" class="btn small primary" style="padding:4px 8px">+ Add</button>
+                         </div>
+                       </div>` : ""}
+                     </div>
+
+                     <!-- Right: Remove This Location -->
+                     <div class="shrink-0 self-end lg:self-center">
+                       <button class="btn small danger" type="button" data-sdel="${sourceIndex}" title="Remove ${esc(locVal || "location")}" ${dis}>✕ Loc</button>
+                     </div>
+                   </div>`;
+                 }).join("")}
+               </div>
+             </td>
+             <td style="vertical-align:top;padding-top:12px">
+               <button class="btn small danger" type="button" data-bdel="${esc(g.brandKey)}" title="Delete entire ${esc(g.brandName)} refinery group" ${dis}>✕ All</button>
+             </td>
            </tr>`;
-         }).join("")}
+         }).join("") || `<tr><td colspan="3" class="empty">No refineries added yet. Click <b>＋ Add refinery / source</b> above.</td></tr>`}
          </tbody>
        </table>
      </div>
@@ -3518,53 +3633,68 @@ function viewRefineries() {
    </section>
   </div>`;
 
-  // Refinery Name & Active listeners
-  document.querySelectorAll("[data-s]").forEach(inp => inp.addEventListener(inp.type === "checkbox" ? "change" : "input", e => {
+  // 1. Refinery Brand Name input listener (updates brandName on all locations in that group in-place)
+  document.querySelectorAll("[data-brand-key]").forEach(inp => inp.addEventListener("input", e => {
     if (!S.canWrite) return;
-    const row = S.catalog.sources[+inp.dataset.s];
-    if (!row) return;
-    const f = inp.dataset.f;
-    if (f === "active") {
-      row.active = e.target.checked;
-    } else if (f === "name") {
-      row.name = e.target.value;
-      const firstWord = e.target.value.trim().split(/\s+/)[0];
-      if (firstWord) row.company = firstWord;
-      if (row.id.startsWith("s_new_") && e.target.value.trim()) {
-        row.id = sourceIdFor(e.target.value.trim());
+    const oldKey = inp.getAttribute("data-brand-key");
+    const newBrand = e.target.value;
+    const firstWord = newBrand.trim().split(/\s+/)[0] || "Refinery";
+    (S.catalog.sources || []).forEach(s => {
+      if ((norm(getSourceBrandName(s)) || "") === oldKey || (!oldKey.startsWith("__unnamed_") && norm(s.brandName) === oldKey)) {
+        s.brandName = newBrand;
+        s.company = firstWord;
+        s.name = formatSupplyPointDisplayName(newBrand, s.loading);
+      } else if (oldKey.startsWith("__unnamed_")) {
+        const idx = +oldKey.replace("__unnamed_", "");
+        if (S.catalog.sources[idx] === s) {
+          s.brandName = newBrand;
+          s.company = firstWord;
+          s.name = formatSupplyPointDisplayName(newBrand, s.loading);
+        }
       }
+    });
+    saveC(500);
+  }));
+
+  // 2. Specific Location input listener (updates loading & display name for that specific supply point)
+  document.querySelectorAll("[data-sp-loc]").forEach(inp => inp.addEventListener("input", e => {
+    if (!S.canWrite) return;
+    const si = +inp.getAttribute("data-sp-loc");
+    const row = S.catalog.sources[si];
+    if (!row) return;
+    const loc = e.target.value.trim();
+    row.loading = loc;
+    row.locations = loc ? [loc] : [];
+    const brand = getSourceBrandName(row);
+    row.name = formatSupplyPointDisplayName(brand, loc);
+    if (row.id.startsWith("s_new_") && brand && loc) {
+      row.id = sourceIdFor(`${brand}-${loc}`);
     }
     saveC(500);
   }));
 
-  // Remove a location pill from a refinery
-  document.querySelectorAll("[data-rmloc]").forEach(btn => btn.onclick = () => {
+  // 3. Active checkbox per location
+  document.querySelectorAll("[data-sp-active]").forEach(chk => chk.addEventListener("change", e => {
     if (!S.canWrite) return;
-    const [siStr, liStr] = btn.getAttribute("data-rmloc").split("|");
-    const row = S.catalog.sources[+siStr];
-    if (!row) return;
-    const locs = getRefineryLocations(row);
-    locs.splice(+liStr, 1);
-    row.locations = locs;
-    row.loading = locs.join(", ");
-    saveC(0);
-    viewRefineries();
-  });
+    const row = S.catalog.sources[+chk.getAttribute("data-sp-active")];
+    if (row) { row.active = e.target.checked; saveC(300); }
+  }));
 
-  // Inline "+ Add location" inside a refinery row (via button click or Enter key)
-  document.querySelectorAll("[data-addloc-btn]").forEach(btn => btn.onclick = () => {
-    const si = +btn.getAttribute("data-addloc-btn");
-    const inp = document.querySelector(`input[data-addloc-in="${si}"]`);
-    if (inp) addInlineLocationToRefinery(si, inp.value);
+  // 4. "+ Add Location under Brand" button & Enter key
+  document.querySelectorAll("[data-add-brand-loc-btn]").forEach(btn => btn.onclick = () => {
+    const gi = btn.getAttribute("data-add-brand-loc-btn");
+    const bkey = btn.getAttribute("data-bkey");
+    const inp = document.querySelector(`input[data-add-brand-loc-in="${gi}"]`);
+    if (inp) addLocationToBrandGroup(bkey, inp.value);
   });
-  document.querySelectorAll("[data-addloc-in]").forEach(inp => inp.addEventListener("keydown", e => {
+  document.querySelectorAll("[data-add-brand-loc-in]").forEach(inp => inp.addEventListener("keydown", e => {
     if (e.key === "Enter") {
       e.preventDefault();
-      addInlineLocationToRefinery(+inp.getAttribute("data-addloc-in"), inp.value);
+      addLocationToBrandGroup(inp.getAttribute("data-bkey"), inp.value);
     }
   }));
 
-  // Remove product pill from a refinery
+  // 5. Remove product pill from a specific location
   document.querySelectorAll("[data-sprod]").forEach(btn => btn.onclick = () => {
     if (!S.canWrite) return;
     const [siStr, pid] = btn.getAttribute("data-sprod").split("|");
@@ -3578,7 +3708,7 @@ function viewRefineries() {
     viewRefineries();
   });
 
-  // Select existing product from dropdown to add to refinery
+  // 6. Select existing product from dropdown for a specific location
   document.querySelectorAll("[data-pickprod-sel]").forEach(sel => sel.onchange = () => {
     if (!S.canWrite || !sel.value) return;
     const si = +sel.getAttribute("data-pickprod-sel");
@@ -3601,20 +3731,37 @@ function viewRefineries() {
     viewRefineries();
   });
 
-  // Inline "+ Add product" inside a refinery row (via button click or Enter key)
+  // 7. Inline "+ Add product" for a specific location
   document.querySelectorAll("[data-addprod-btn]").forEach(btn => btn.onclick = () => {
     const si = +btn.getAttribute("data-addprod-btn");
     const inp = document.querySelector(`input[data-addprod-in="${si}"]`);
-    if (inp) addInlineProductToRefinery(si, inp.value);
+    if (inp) addInlineProductToSupplyPoint(si, inp.value);
   });
   document.querySelectorAll("[data-addprod-in]").forEach(inp => inp.addEventListener("keydown", e => {
     if (e.key === "Enter") {
       e.preventDefault();
-      addInlineProductToRefinery(+inp.getAttribute("data-addprod-in"), inp.value);
+      addInlineProductToSupplyPoint(+inp.getAttribute("data-addprod-in"), inp.value);
     }
   }));
 
-  // Products table listeners
+  // 8. Delete single location vs delete entire brand group
+  document.querySelectorAll("[data-sdel]").forEach(b => b.onclick = () => {
+    if (!S.canWrite) return;
+    if (!b.dataset.armed) { b.dataset.armed = 1; b.textContent = "Del?"; return; }
+    S.catalog.sources.splice(+b.dataset.sdel, 1);
+    saveC(0);
+    viewRefineries();
+  });
+  document.querySelectorAll("[data-bdel]").forEach(b => b.onclick = () => {
+    if (!S.canWrite) return;
+    if (!b.dataset.armed) { b.dataset.armed = 1; b.textContent = "Del All?"; return; }
+    const bkey = b.getAttribute("data-bdel");
+    S.catalog.sources = (S.catalog.sources || []).filter(s => (norm(getSourceBrandName(s)) || "") !== bkey);
+    saveC(0);
+    viewRefineries();
+  });
+
+  // 9. Products table listeners
   document.querySelectorAll("[data-p]").forEach(inp => inp.addEventListener(inp.tagName === "SELECT" ? "change" : "input", e => {
     if (!S.canWrite) return;
     const idx = +inp.dataset.p;
@@ -3650,14 +3797,6 @@ function viewRefineries() {
     saveC(500);
   }));
 
-  document.querySelectorAll("[data-sdel]").forEach(b => b.onclick = () => {
-    if (!S.canWrite) return;
-    if (!b.dataset.armed) { b.dataset.armed = 1; b.textContent = "Del?"; return; }
-    S.catalog.sources.splice(+b.dataset.sdel, 1);
-    saveC(0);
-    viewRefineries();
-  });
-
   document.querySelectorAll("[data-pdel]").forEach(b => b.onclick = () => {
     if (!S.canWrite) return;
     if (!b.dataset.armed) { b.dataset.armed = 1; b.textContent = "Del?"; return; }
@@ -3689,14 +3828,14 @@ function viewRefineries() {
   if (usrRef) usrRef.onchange = e => { if (e.target.files?.[0]) uploadMaster(e.target.files[0], "refineries"); e.target.value = ""; };
   const usrProd = $("#up-step-products");
   if (usrProd) usrProd.onchange = e => { if (e.target.files?.[0]) uploadMaster(e.target.files[0], "products"); e.target.value = ""; };
+
   $("#adds").onclick = () => {
     if (!S.canWrite) return;
-    const defaultProds = (S.catalog.products || []).filter(p => (p.name || "").trim()).map(p => p.id);
-    S.catalog.sources.push({ id: "s_new_" + uid(), company: "", name: "", loading: "", locations: [], creditDays: 0, active: true, products: defaultProds, aliases: [] });
+    S.catalog.sources.push({ id: "s_new_" + uid(), brandName: "", company: "", name: "", loading: "", locations: [], creditDays: 0, active: true, products: [], aliases: [] });
     saveC(0);
     viewRefineries();
-    const lastInp = document.querySelector(`input[data-s="${S.catalog.sources.length - 1}"][data-f="name"]`);
-    lastInp?.focus();
+    const allBrandInps = document.querySelectorAll("[data-brand-key]");
+    allBrandInps[allBrandInps.length - 1]?.focus();
   };
 
   $("#addp").onclick = () => {
@@ -4493,45 +4632,41 @@ function matchOrDecomposeProduct(C, rawProdStr, rawRefStr = "", rawLocStr = "") 
 function ensureSourceInCatalog(C, refName, locName, prodId) {
   const cleanRef = String(refName || "").trim();
   if (!cleanRef) return null;
-  const normTokens = norm(cleanRef).split(" ").sort().join(" ");
-  let s = C.sources.find(x =>
-    norm(x.id) === norm(cleanRef) ||
-    norm(x.name) === norm(cleanRef) ||
-    norm(x.name).split(" ").sort().join(" ") === normTokens ||
-    (x.aliases || []).map(norm).includes(norm(cleanRef))
-  );
   const resolvedLoc = extractCleanCityFromRefineryName(cleanRef, locName);
-  if (!s) {
-    const id = sourceIdFor(cleanRef);
-    const firstWord = cleanRef.split(/\s+/)[0] || "Refinery";
-    const initLocs = resolvedLoc ? resolvedLoc.split(",").map(x => x.trim()).filter(Boolean) : [];
-    s = {
-      id,
-      company: firstWord,
-      name: cleanRef,
-      loading: initLocs.join(", "),
-      locations: initLocs,
-      creditDays: 0,
-      active: true,
-      products: prodId ? [prodId] : [],
-      aliases: [cleanRef.toUpperCase()]
-    };
-    C.sources.push(s);
-  } else {
-    if (resolvedLoc) {
-      const locs = getRefineryLocations(s);
-      resolvedLoc.split(",").map(x => x.trim()).filter(Boolean).forEach(l => {
-        if (!locs.some(existing => norm(existing) === norm(l))) locs.push(l);
-      });
-      s.locations = locs;
-      s.loading = locs.join(", ");
-    }
-    if (prodId) {
+  const locList = resolvedLoc ? resolvedLoc.split(",").map(x => x.trim()).filter(Boolean) : [""];
+  const brand = cleanRef.replace(/\b(kochi|mumbai|bina|vadinar|jamnagar|koyali|vadodara|mathura|haldia|visakh|vizag|chennai|manali|raipur|bathinda|bhatinda|panipat|mangalore|numaligarh|barauni)\b/gi, "").replace(/[()-]+/g, " ").trim() || cleanRef;
+  const firstWord = brand.split(/\s+/)[0] || "Refinery";
+
+  let lastMatched = null;
+  for (const singleLoc of locList) {
+    const cleanLoc = singleLoc ? (singleLoc.charAt(0).toUpperCase() + singleLoc.slice(1)) : "";
+    const fullName = formatSupplyPointDisplayName(brand, cleanLoc);
+    let s = C.sources.find(x =>
+      (cleanLoc && norm(getSourceBrandName(x)) === norm(brand) && norm(x.loading) === norm(cleanLoc)) ||
+      norm(x.name) === norm(fullName) ||
+      (!cleanLoc && norm(x.name) === norm(cleanRef))
+    );
+    if (!s) {
+      s = {
+        id: sourceIdFor(`${brand}-${cleanLoc || uid().slice(0, 4)}`),
+        brandName: brand,
+        company: firstWord,
+        name: fullName,
+        loading: cleanLoc,
+        locations: cleanLoc ? [cleanLoc] : [],
+        creditDays: 0,
+        active: true,
+        products: prodId ? [prodId] : [],
+        aliases: [fullName.toUpperCase(), cleanRef.toUpperCase()]
+      };
+      C.sources.push(s);
+    } else if (prodId) {
       s.products = Array.isArray(s.products) ? s.products : [];
       if (!s.products.includes(prodId)) s.products.push(prodId);
     }
+    lastMatched = s;
   }
-  return s;
+  return lastMatched;
 }
 
 function ensureProductInCatalog(C, prodName, unit = "MT", cls = "") {

@@ -867,7 +867,7 @@ function revisionsSince(iso) { let n = 0, c = iso; const t = todayISO(); while (
 
 /* ================= HYBRID NEON POSTGRESQL + LOCALSTORAGE STORE ADAPTER ================= */
 const LS_PREFIX = "goverdhan_desk_";
-const CLOUD_KEYS = ["catalog", "routes", "transporters", "settings", "template", "cycles", "quotes", "quoteSeq", "users", "authSettings", "brand_settings", "workspaceState", "quoteLogs"];
+const CLOUD_KEYS = ["catalog", "routes", "transporters", "settings", "template", "cycles", "quotes", "quoteSeq", "users", "authSettings", "brand_settings", "workspaceState", "quoteLogs", "mlMappings"];
 
 let inflight = 0;
 let cloudConnected = false;
@@ -1027,7 +1027,8 @@ async function pushAllToNeon(notify = false, replaceAll = true) {
       authSettings: S.authSettings,
       brand_settings: loadLocal("brand_settings", null),
       workspaceState: getWorkspaceStateSnapshot(),
-      quoteLogs: S.quoteLogs || []
+      quoteLogs: S.quoteLogs || [],
+      mlMappings: S.mlMappings || {}
     };
     const res = await apiRequest("/api/storage", {
       method: "POST",
@@ -1104,6 +1105,7 @@ async function pullFromNeon(notify = false, force = false) {
     if (Array.isArray(data.cycles)) applyKey("cycles", "cycles");
     if (Array.isArray(data.quotes)) applyKey("quotes", "quotes");
     if (Array.isArray(data.quoteLogs)) applyKey("quoteLogs", "quoteLogs");
+    if (data.mlMappings && typeof data.mlMappings === "object") applyKey("mlMappings", "mlMappings");
     if (data.quoteSeq) applyKey("quoteSeq", "quoteSeq");
     if (Array.isArray(data.users)) applyKey("users", "users");
     if (data.authSettings) applyKey("authSettings", "authSettings");
@@ -2741,55 +2743,13 @@ function matchProduct(name) { const k = key(name); return (S.catalog.products ||
 
 async function importXlsx(file) {
   if (!file) return;
-  if (!window.XLSX) { toast("The spreadsheet reader didn't load. Reload the page and try again."); return; }
-  try {
-    const wb = XLSX.read(await file.arrayBuffer(), { type: "array" });
-    const blocks = [];
-    for (const sn of wb.SheetNames) {
-      const rows = XLSX.utils.sheet_to_json(wb.Sheets[sn], { header: 1, raw: true, defval: null });
-      let cur = null, prod = null, cols = null;
-      for (const r of rows) {
-        const a = r[0];
-        if (typeof a === "string" && /EFF/i.test(a) && /(\d{1,2})[-./](\d{1,2})[-./](\d{4})/.test(a)) {
-          const m = a.match(/(\d{1,2})[-./](\d{1,2})[-./](\d{4})/);
-          cur = { sheet: sn, date: `${m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}`, rows: [], unmatched: [] };
-          blocks.push(cur); prod = null; cols = null; continue;
-        }
-        if (!cur) continue;
-        if (typeof a === "string" && /SUPPLY|REFINERY/i.test(a)) {
-          cols = {};
-          r.forEach((h, i) => { const t = key(h); if (t.includes("BASIC")) cols.basic = i; else if (t.includes("DISCOUNT")) cols.disc = i; else if (t === "PRODUCT") cols.prod = i; });
-          continue;
-        }
-        if (!a || !cols) continue;
-        if (r[cols.prod ?? 1]) prod = r[cols.prod ?? 1];
-        const s = matchSource(a), p = matchProduct(prod);
-        const basic = num(r[cols.basic ?? 3]); const dRaw = r[cols.disc ?? 8];
-        if (!s || !p) { cur.unmatched.push(`${a} · ${prod ?? "?"}`); continue; }
-        cur.rows.push({ sourceId: s.id, productId: p.id, basic: basic > 0 ? basic : null, maxDiscount: typeof dRaw === "number" ? dRaw : 0, ...(key(prod) === "RILFO" ? { variant: "RIL FO" } : {}), ...(typeof dRaw === "string" ? { note: "Sheet note on discount: " + dRaw } : {}) });
-      }
-    }
-    UI.importBlocks = blocks;
-    if (!blocks.length) toast("No circular blocks found. Use 'Upload Master .xlsx' for multi-sheet master files, or include a heading like 'PRICE REVISED EFF. ON 16-10-2026'.");
-    viewCycles();
-  } catch (e) { toast("Couldn't read that file: " + e.message); }
+  // Route circular imports through the unified Smart ML Excel Engine as well, or support multi-block circular sheets
+  await uploadMaster(file, true);
 }
 
 function renderImport() {
-  const b = UI.importBlocks; const have = new Set(S.cycles.map(c => c.id));
-  $("#imp").innerHTML = `<div class="panel pad stack" style="gap:10px;margin-bottom:16px"><div class="actions" style="justify-content:space-between"><h3>Found in the sheet</h3><button class="btn small" id="impx">Close</button></div>
-  <div class="tw"><table><thead><tr><th>Effective from</th><th class="n">Rows matched</th><th>Not recognised</th><th></th></tr></thead><tbody>
-  ${b.map((x, i) => `<tr><td><b>${fmtDate(x.date)}</b>${have.has(x.date) ? ' <span class="pill warn">already saved</span>' : ""}</td><td class="n">${x.rows.length}</td><td class="tiny">${x.unmatched.length ? esc(x.unmatched.join("; ")) + "<br>Add these names as aliases under Refineries &amp; products, then import again." : "—"}</td><td class="n"><button class="btn small primary" data-load="${i}">Review &amp; save</button></td></tr>`).join("")}
-  </tbody></table></div></div>`;
-  $("#impx").onclick = () => { UI.importBlocks = null; viewCycles(); };
-  document.querySelectorAll("[data-load]").forEach(btn => btn.onclick = () => {
-    const x = b[+btn.dataset.load];
-    const prevC = cyclesAsc().filter(c => c.effectiveDate < x.date).pop(); const pi = priceIndex(prevC);
-    UI.editor = { id: S.cycles.find(c => c.id === x.date) ? x.date : null, effectiveDate: x.date, note: "Imported from " + (x.sheet || "sheet"), rows: x.rows.map(p => ({ ...p, old: num(pi[p.sourceId + "|" + p.productId]?.basic) })) };
-    UI.importBlocks = null; viewCycles();
-  });
+  if (UI.masterPreview) renderMasterPreview();
 }
-
 function viewEditor() {
   const E = UI.editor, SM = srcMap(), P = prodMap();
   const lines = E.rows.map((r, i) => {
@@ -3428,134 +3388,815 @@ function xDate(v) {
 }
 function rowsOf(wb, name) { const sn = wb.SheetNames.find(n => norm(n) === norm(name)); return sn ? XLSX.utils.sheet_to_json(wb.Sheets[sn], { header: 1, raw: true, defval: null }) : null; }
 
+/* ================= SMART SELF-LEARNING ML EXCEL PARSER & HEADER MAPPER ================= */
+const ML_FIELD_DEFS = {
+  refinery: {
+    label: "Refinery / Source",
+    synonyms: ["refinery", "refinery source", "source", "supply point", "supply location", "plant", "plant name", "company", "company name", "supplier", "manufacturer", "depot", "terminal", "vendor", "refinery name", "oil company", "omc"]
+  },
+  location: {
+    label: "Loading Location",
+    synonyms: ["location", "loading", "loading point", "loading location", "origin", "from", "from location", "from city", "from town", "dispatch", "dispatch location", "ex location", "ex plant", "supply town", "loading city", "source location"]
+  },
+  delivery: {
+    label: "Delivery Location",
+    synonyms: ["delivery", "delivery point", "delivery location", "destination", "to", "to location", "to city", "to town", "customer location", "unloading", "unloading point", "drop location", "city", "town", "station", "consignee location", "place"]
+  },
+  product: {
+    label: "Product Name",
+    synonyms: ["product", "product name", "material", "material description", "item", "item name", "grade", "commodity", "oil", "fuel", "bitumen", "product code", "grade name", "particulars", "description"]
+  },
+  unit: {
+    label: "Unit (MT / KL)",
+    synonyms: ["unit", "uom", "sold per", "measure", "per", "mt kl", "billing unit", "pack", "qty unit"]
+  },
+  type: {
+    label: "Product Type (White / Yellow / Black)",
+    synonyms: ["type", "product type", "category", "class", "oil class", "color", "colour", "liquid type", "group", "nature"]
+  },
+  basic: {
+    label: "Basic Price (₹/unit)",
+    synonyms: ["basic", "basic price", "basic rate", "base price", "base rate", "ex gate", "ex refinery", "refinery rate", "refinery price", "price", "list price", "circular rate", "rate before gst", "assessable value", "ex works", "new basic"]
+  },
+  discount: {
+    label: "Max Discount (₹/unit)",
+    synonyms: ["discount", "max discount", "rebate", "scheme", "less discount", "cash discount", "trade discount", "disc", "disc amt", "offer discount", "allowance"]
+  },
+  freight: {
+    label: "Transport Rate (₹/unit)",
+    synonyms: ["transport", "transport rate", "freight", "freight rate", "lorry rate", "truck rate", "rate per mt", "rate per kl", "rate unit", "tpt", "tpt rate", "transportation", "cartage", "freight per unit", "route rate"]
+  },
+  transporter: {
+    label: "Transporter Name",
+    synonyms: ["transporter", "transporter name", "carrier", "logistics", "fleet owner", "transport company", "vendor name", "hauler", "truck owner"]
+  },
+  minQty: {
+    label: "Minimum Quantity",
+    synonyms: ["min qty", "minimum qty", "minimum quantity", "min load", "moq", "lot size"]
+  },
+  capacity: {
+    label: "Vehicle Capacity",
+    synonyms: ["capacity", "tanker capacity", "truck capacity", "load capacity", "vehicle size", "payload"]
+  },
+  vehicle: {
+    label: "Vehicle Category",
+    synonyms: ["vehicle", "vehicle category", "truck type", "tanker type", "lorry type", "fleet"]
+  },
+  phone: {
+    label: "Contact Phone",
+    synonyms: ["phone", "mobile", "contact", "contact no", "phone number", "mobile no", "tel"]
+  },
+  date: {
+    label: "Effective Date",
+    synonyms: ["effective date", "eff date", "effective from", "revision date", "price date", "wef", "w e f"]
+  },
+  note: {
+    label: "Notes / Remarks",
+    synonyms: ["note", "notes", "remark", "remarks", "comment", "narration"]
+  },
+  ignore: {
+    label: "Ignore (Extra Data)",
+    synonyms: ["sr", "sr no", "s no", "sl no", "serial", "id", "hsn", "hsn code", "sac", "gst", "cgst", "sgst", "igst", "tax", "vat", "tcs", "tds", "total", "gross", "net price", "invoice value", "amount", "status", "old basic", "previous basic", "change", "diff", "timestamp", "created at"]
+  }
+};
+
+function getTrigrams(str) {
+  const s = "  " + String(str || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim() + "  ";
+  const grams = new Set();
+  for (let i = 0; i <= s.length - 3; i++) grams.add(s.slice(i, i + 3));
+  return grams;
+}
+
+function trigramSim(a, b) {
+  if (!a || !b) return 0;
+  const na = norm(a), nb = norm(b);
+  if (na === nb) return 1.0;
+  if (na.length >= 3 && nb.length >= 3 && (na.includes(nb) || nb.includes(na))) return 0.86;
+  const ga = getTrigrams(na), gb = getTrigrams(nb);
+  if (!ga.size || !gb.size) return 0;
+  let inter = 0;
+  ga.forEach(g => { if (gb.has(g)) inter++; });
+  return (2 * inter) / (ga.size + gb.size);
+}
+
+// Self-learning ML column classifier combining learned user mappings + header trigram similarity + sample cell value profiling
+function classifyExcelColumn(headerText, sampleValues, siblingHeaders = []) {
+  const rawH = String(headerText ?? "").trim();
+  const normH = norm(rawH);
+  if (!normH) return { field: "ignore", confidence: 0, reason: "Empty header" };
+
+  // 1. Check learned user mappings first (100% confidence when trained by user!)
+  const learned = S.mlMappings?.[normH];
+  if (learned && (ML_FIELD_DEFS[learned] || learned === "ignore")) {
+    return { field: learned, confidence: 1.0, reason: "Learned from your previous mapping" };
+  }
+
+  // 2. Check explicit ignore patterns (e.g. GST, HSN, Sr No, Total, Net after discount)
+  for (const ign of ML_FIELD_DEFS.ignore.synonyms) {
+    if (normH === ign || (ign.length >= 4 && normH.includes(ign) && !normH.includes("discount"))) {
+      return { field: "ignore", confidence: 0.92, reason: "Extra / calculated column ignored" };
+    }
+  }
+
+  // 3. Profile sample values in this column (numeric range, unit strings, city names, product names)
+  const nonEmpty = (sampleValues || []).filter(v => v !== null && v !== undefined && String(v).trim() !== "").slice(0, 25);
+  const nums = nonEmpty.map(num).filter(n => n !== null);
+  const numRatio = nonEmpty.length ? nums.length / nonEmpty.length : 0;
+  const avgNum = nums.length ? nums.reduce((a, b) => a + b, 0) / nums.length : 0;
+  const unitRatio = nonEmpty.length ? nonEmpty.filter(v => /^(MT|KL|KG|LTR|TON)$/i.test(String(v).trim())).length / nonEmpty.length : 0;
+  const knownTownRatio = nonEmpty.length ? nonEmpty.filter(v => !!getCoordsForTown(String(v))).length / nonEmpty.length : 0;
+  const knownProdRatio = nonEmpty.length ? nonEmpty.filter(v => !!matchProduct(String(v))).length / nonEmpty.length : 0;
+  const knownSrcRatio = nonEmpty.length ? nonEmpty.filter(v => !!matchSource(String(v)) || /^(IOCL|BPCL|HPCL|RIL|NAYARA|CPCL|MRPL|HMEL|ONGC)/i.test(String(v).trim())).length / nonEmpty.length : 0;
+
+  const hasTransportSibling = siblingHeaders.some(h => /transport|freight|delivery|destination|unloading|transporter/i.test(String(h)));
+  const hasRefineryRateSibling = siblingHeaders.some(h => /basic|discount|ex gate|revised/i.test(String(h)));
+
+  let bestField = "ignore";
+  let bestScore = 0.38; // Threshold below which column is treated as extra/ignored
+
+  for (const [fieldKey, def] of Object.entries(ML_FIELD_DEFS)) {
+    if (fieldKey === "ignore") continue;
+    let headerScore = 0;
+    for (const syn of def.synonyms) {
+      const s = trigramSim(normH, syn);
+      if (s > headerScore) headerScore = s;
+    }
+
+    // Disambiguate generic "rate" or "price" using context & numeric distribution
+    if (normH === "rate" || normH === "price" || normH.includes("rate")) {
+      if (fieldKey === "freight" && hasTransportSibling && !normH.includes("basic")) headerScore = Math.max(headerScore, 0.88);
+      if (fieldKey === "basic" && hasRefineryRateSibling && !normH.includes("transport") && !normH.includes("freight")) headerScore = Math.max(headerScore, 0.88);
+    }
+
+    // Combine header similarity with data type feature boost
+    let dataBoost = 0;
+    if (fieldKey === "basic") {
+      if (numRatio > 0.6 && avgNum >= 15000 && avgNum <= 250000) dataBoost += 0.22;
+      else if (numRatio < 0.2 && nonEmpty.length > 2) dataBoost -= 0.35;
+    } else if (fieldKey === "freight") {
+      if (numRatio > 0.5 && avgNum >= 50 && avgNum < 25000) dataBoost += 0.20;
+      else if (numRatio < 0.2 && nonEmpty.length > 2) dataBoost -= 0.30;
+    } else if (fieldKey === "discount") {
+      if (numRatio > 0.4 && avgNum >= 0 && avgNum <= 15000) dataBoost += 0.18;
+    } else if (fieldKey === "unit") {
+      if (unitRatio > 0.5) dataBoost += 0.35;
+    } else if (fieldKey === "product") {
+      if (knownProdRatio > 0.3) dataBoost += 0.28;
+      if (numRatio > 0.7) dataBoost -= 0.40;
+    } else if (fieldKey === "refinery") {
+      if (knownSrcRatio > 0.3) dataBoost += 0.28;
+      if (numRatio > 0.7) dataBoost -= 0.40;
+    } else if (fieldKey === "location" || fieldKey === "delivery") {
+      if (knownTownRatio > 0.3) dataBoost += 0.22;
+      if (numRatio > 0.7) dataBoost -= 0.40;
+    }
+
+    const totalScore = Math.min(0.99, headerScore + dataBoost);
+    if (totalScore > bestScore) {
+      bestScore = totalScore;
+      bestField = fieldKey;
+    }
+  }
+
+  return {
+    field: bestField,
+    confidence: Math.round(bestScore * 100) / 100,
+    reason: bestField === "ignore" ? "Unmatched extra column (ignored)" : `Matched ${ML_FIELD_DEFS[bestField]?.label}`
+  };
+}
+
+function trainMlMapping(headerText, targetField) {
+  const normH = norm(headerText);
+  if (!normH) return;
+  S.mlMappings = S.mlMappings || {};
+  S.mlMappings[normH] = targetField;
+  saveLocal("mlMappings", S.mlMappings);
+  pushKeyToNeon("mlMappings", S.mlMappings);
+}
+
+// Find the best header row in any sheet (even if rows 1-5 have title banners or dates)
+function detectHeaderRowIndex(rows) {
+  let bestIdx = 0;
+  let bestCount = 0;
+  const limit = Math.min(rows.length, 15);
+  for (let i = 0; i < limit; i++) {
+    const r = rows[i];
+    if (!Array.isArray(r)) continue;
+    const nonEmptyText = r.filter(c => c !== null && c !== undefined && String(c).trim() !== "" && isNaN(Number(c))).length;
+    if (nonEmptyText > bestCount) {
+      bestCount = nonEmptyText;
+      bestIdx = i;
+    }
+  }
+  return bestIdx;
+}
+
+// Parse a sheet using the current column mapping array
+function extractSheetDataWithMapping(sheetRows, headerIdx, colMap, defaultDate) {
+  const dataRows = sheetRows.slice(headerIdx + 1);
+  const idxOf = f => colMap.findIndex(m => m.field === f);
+
+  const iRef = idxOf("refinery");
+  const iLoc = idxOf("location");
+  const iDel = idxOf("delivery");
+  const iProd = idxOf("product");
+  const iUnit = idxOf("unit");
+  const iType = idxOf("type");
+  const iBasic = idxOf("basic");
+  const iDisc = idxOf("discount");
+  const iFreight = idxOf("freight");
+  const iTrans = idxOf("transporter");
+  const iMinQty = idxOf("minQty");
+  const iCap = idxOf("capacity");
+  const iVeh = idxOf("vehicle");
+  const iPhone = idxOf("phone");
+  const iDate = idxOf("date");
+  const iNote = idxOf("note");
+
+  // Decide table kind from mapped columns
+  let kind = "unknown";
+  if (iBasic >= 0 && (iRef >= 0 || iProd >= 0)) kind = "rates";
+  else if (iFreight >= 0 || (iLoc >= 0 && iDel >= 0)) kind = "transport";
+  else if (iTrans >= 0 && (iCap >= 0 || iVeh >= 0 || iPhone >= 0)) kind = "transporters";
+  else if (iRef >= 0 || iProd >= 0) kind = "catalog";
+
+  const extracted = {
+    kind,
+    date: defaultDate || todayISO(),
+    rateRows: [],
+    routeRows: [],
+    transporters: [],
+    newSources: [],
+    newProducts: [],
+    ignoredCols: colMap.filter(m => m.field === "ignore" && m.header).map(m => m.header),
+    matchedCols: colMap.filter(m => m.field !== "ignore" && m.header)
+  };
+
+  let lastRefName = "";
+  let lastProdName = "";
+
+  for (const r of dataRows) {
+    if (!Array.isArray(r) || r.every(c => c === null || c === undefined || String(c).trim() === "")) continue;
+    // Skip total/summary footer rows
+    const firstCell = String(r[0] ?? "").trim();
+    if (/^(total|grand total|sub total|average|note:|terms)/i.test(firstCell)) continue;
+
+    const rawRef = iRef >= 0 ? String(r[iRef] ?? "").trim() : "";
+    const rawLoc = iLoc >= 0 ? String(r[iLoc] ?? "").trim() : "";
+    const rawDel = iDel >= 0 ? String(r[iDel] ?? "").trim() : "";
+    const rawProd = iProd >= 0 ? String(r[iProd] ?? "").trim() : "";
+    const rawUnit = iUnit >= 0 ? String(r[iUnit] ?? "").trim().toUpperCase() : "";
+    const rawType = iType >= 0 ? String(r[iType] ?? "").trim() : "";
+    const valBasic = iBasic >= 0 ? num(r[iBasic]) : null;
+    const valDisc = iDisc >= 0 ? (num(r[iDisc]) || 0) : 0;
+    const valFreight = iFreight >= 0 ? num(r[iFreight]) : null;
+    const rawTrans = iTrans >= 0 ? String(r[iTrans] ?? "").trim() : "";
+    const valMinQty = iMinQty >= 0 ? num(r[iMinQty]) : null;
+    const valCap = iCap >= 0 ? num(r[iCap]) : null;
+    const rawVeh = iVeh >= 0 ? String(r[iVeh] ?? "").trim() : "";
+    const rawPhone = iPhone >= 0 ? String(r[iPhone] ?? "").trim() : "";
+    const rawNote = iNote >= 0 ? String(r[iNote] ?? "").trim() : "";
+    if (iDate >= 0 && r[iDate]) {
+      const dParsed = xDate(r[iDate]);
+      if (dParsed) extracted.date = dParsed;
+    }
+
+    if (rawRef) lastRefName = rawRef;
+    if (rawProd) lastProdName = rawProd;
+
+    const effRef = rawRef || lastRefName;
+    const effProd = rawProd || lastProdName;
+
+    if (kind === "rates") {
+      if (!effRef && !effProd) continue;
+      if (valBasic === null || !(valBasic > 0)) continue;
+      extracted.rateRows.push({
+        refName: effRef || "General Refinery",
+        locName: rawLoc || "",
+        prodName: effProd || "Standard Product",
+        unit: /KL/i.test(rawUnit) ? "KL" : "MT",
+        cls: rawType || "White liquid",
+        basic: valBasic,
+        maxDiscount: valDisc,
+        note: rawNote
+      });
+    } else if (kind === "transport") {
+      if (!rawLoc && !rawDel && !effRef) continue;
+      extracted.routeRows.push({
+        transporterName: rawTrans,
+        loading: rawLoc || effRef || "",
+        delivery: rawDel || "",
+        prodName: effProd || (S.catalog?.products?.[0]?.name || "LDO"),
+        unit: /KL/i.test(rawUnit) ? "KL" : "MT",
+        company: rawRef ? rawRef.split(/\s+/)[0] : "",
+        rate: valFreight,
+        minQty: valMinQty,
+        note: rawNote
+      });
+    } else if (kind === "transporters") {
+      if (!rawTrans) continue;
+      extracted.transporters.push({
+        name: rawTrans,
+        phone: rawPhone,
+        notes: rawNote,
+        vehicleCategory: rawVeh || (valCap ? `${valCap} ${/MT/i.test(rawUnit) ? "MT" : "KL"} Tanker` : "20 KL Tanker"),
+        capacity: valCap || 20,
+        unit: /MT/i.test(rawUnit) ? "MT" : "KL"
+      });
+    } else if (kind === "catalog") {
+      if (rawRef) {
+        extracted.newSources.push({
+          name: rawRef,
+          loading: rawLoc || rawRef.split(/\s+/).slice(1).join(" ") || "Depot",
+          prodName: rawProd
+        });
+      }
+      if (rawProd) {
+        extracted.newProducts.push({
+          name: rawProd,
+          unit: /KL/i.test(rawUnit) ? "KL" : "MT",
+          cls: rawType || "White liquid"
+        });
+      }
+    }
+  }
+
+  return extracted;
+}
+
 async function uploadMaster(file) {
   if (!file) return;
-  if (!S.canWrite) { toast("Read-only access: Sign in as Admin to upload Master files."); return; }
+  if (!S.canWrite) { toast("Read-only access: Sign in as Admin to upload Excel files."); return; }
   if (!window.XLSX) { toast("Spreadsheet library didn't load. Please reload."); return; }
   let wb;
   try { wb = XLSX.read(await file.arrayBuffer(), { type: "array" }); } catch (e) { toast("Couldn't read that file: " + e.message); return; }
-  const pv = { file: file.name, parts: [] };
-  let tpList = null;
-  const r4 = rowsOf(wb, SH.transporters);
-  if (r4) {
-    const T = (S.transporters?.list || []).map(t => ({ ...t, vehicles: [] })); const seen = new Set();
-    for (const r of r4.slice(1)) {
-      const n = String(r?.[0] || "").trim(); if (!n) continue;
-      let t = T.find(x => norm(x.name) === norm(n)); if (!t) { t = { id: "t" + uid(), name: n, vehicles: [] }; T.push(t); }
-      seen.add(t.id);
-      if (r[1] != null) t.phone = String(r[1]); if (r[2] != null) t.notes = String(r[2]);
-      if (r[3] || num(r[4])) t.vehicles.push({ category: String(r[3] || ""), capacity: num(r[4]), unit: /MT/i.test(r[5]) ? "MT" : "KL" });
+
+  const sheetsAnalysis = [];
+
+  for (const sn of wb.SheetNames) {
+    if (/^(how to use|readme|instructions|rate history)$/i.test(sn.trim())) continue;
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets[sn], { header: 1, raw: true, defval: null });
+    if (!rows || rows.length < 2) continue;
+
+    // Check if this sheet is a multi-block circular ("PRICE REVISED EFF. ON dd-mm-yyyy")
+    const circularBlocks = [];
+    let curBlock = null, curCols = null, lastProd = null;
+    for (const r of rows) {
+      const a = r?.[0];
+      if (typeof a === "string" && /EFF/i.test(a) && /(\d{1,2})[-./](\d{1,2})[-./](\d{4})/.test(a)) {
+        const m = a.match(/(\d{1,2})[-./](\d{1,2})[-./](\d{4})/);
+        curBlock = { date: `${m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}`, rateRows: [] };
+        circularBlocks.push(curBlock);
+        curCols = null; lastProd = null;
+        continue;
+      }
+      if (!curBlock) continue;
+      if (typeof a === "string" && /SUPPLY|REFINERY|PLANT|LOCATION/i.test(a)) {
+        curCols = {};
+        r.forEach((h, i) => {
+          const t = key(h);
+          if (t.includes("BASIC") || t.includes("RATE") || t.includes("PRICE")) curCols.basic = i;
+          else if (t.includes("DISCOUNT") || t.includes("REBATE")) curCols.disc = i;
+          else if (t.includes("PRODUCT") || t.includes("GRADE") || t.includes("ITEM")) curCols.prod = i;
+          else if (t.includes("LOCATION") || t.includes("LOADING")) curCols.loc = i;
+        });
+        continue;
+      }
+      if (!a || !curCols) continue;
+      if (r[curCols.prod ?? 1]) lastProd = String(r[curCols.prod ?? 1]).trim();
+      const bVal = num(r[curCols.basic ?? 3]);
+      if (bVal > 0 && lastProd) {
+        curBlock.rateRows.push({
+          refName: String(a).trim(),
+          locName: curCols.loc !== undefined ? String(r[curCols.loc] || "").trim() : "",
+          prodName: lastProd,
+          unit: "MT",
+          cls: "White liquid",
+          basic: bVal,
+          maxDiscount: num(r[curCols.disc ?? 8]) || 0,
+          note: ""
+        });
+      }
     }
-    const list = T.filter(t => seen.has(t.id));
-    pv.parts.push({ kind: "transporters", list, on: true }); tpList = list;
-  }
-  const r1 = rowsOf(wb, SH.rates);
-  if (r1) {
-    const date = xDate(r1[0]?.[1]) || todayISO();
-    const hi = r1.findIndex(r => norm(r?.[0]) === "refinery"); const rows = [], bad = [];
-    if (hi >= 0) for (const r of r1.slice(hi + 1)) {
-      if (!r || !r[0]) continue;
-      const s = matchSource(r[0]), p = matchProduct(r[3]);
-      if (!s || !p) { bad.push(`${r[0]} · ${r[3]}`); continue; }
-      const note = String(r[7] || "");
-      rows.push({ sourceId: s.id, productId: p.id, basic: num(r[5]) > 0 ? num(r[5]) : null, maxDiscount: num(r[6]) || 0, ...(/RIL FO/i.test(note) ? { variant: "RIL FO" } : {}), ...(note.replace(/RIL FO;?\s*/i, "") ? { note: note.replace(/RIL FO;?\s*/i, "") } : {}) });
+
+    if (circularBlocks.length && circularBlocks.some(b => b.rateRows.length > 0)) {
+      circularBlocks.filter(b => b.rateRows.length > 0).forEach(b => {
+        sheetsAnalysis.push({
+          sheetName: `${sn} (${fmtDate(b.date)})`,
+          rawRows: rows,
+          headerIdx: 0,
+          colMap: [
+            { colIdx: 0, header: "Refinery / Supply Location", field: "refinery", confidence: 0.99 },
+            { colIdx: 1, header: "Product", field: "product", confidence: 0.99 },
+            { colIdx: 2, header: "Basic Price", field: "basic", confidence: 0.99 },
+            { colIdx: 3, header: "Max Discount", field: "discount", confidence: 0.99 }
+          ],
+          defaultDate: b.date,
+          extracted: {
+            kind: "rates",
+            date: b.date,
+            rateRows: b.rateRows,
+            routeRows: [],
+            transporters: [],
+            newSources: [],
+            newProducts: [],
+            ignoredCols: [],
+            matchedCols: []
+          },
+          on: true
+        });
+      });
+      continue;
     }
-    const prev = cyclesAsc().filter(c => c.effectiveDate < (date || "9")).pop(); const pi = priceIndex(prev);
-    const changed = rows.filter(x => { const o = num(pi[x.sourceId + "|" + x.productId]?.basic); return o != null && x.basic != null && Math.abs(o - x.basic) >= .5; }).length;
-    pv.parts.push({ kind: "rates", date, rows, bad, changed, exists: !!S.cycles.find(c => c.id === date), on: !!date && rows.length > 0 });
-  }
-  const r2 = rowsOf(wb, SH.transport);
-  if (r2) {
-    const rows = [], bad = []; const T = tpList || S.transporters?.list || []; const newT = []; const old = Object.fromEntries((S.routes?.rows || []).map(r => [r.id, r]));
-    for (const r of r2.slice(1)) {
-      if (!r || (!r[2] && !r[3])) continue;
-      const p = matchProduct(r[4]); if (!p) { bad.push(`${r[2]} → ${r[3]} · ${r[4]}`); continue; }
-      let tid = ""; const tn = String(r[1] || "").trim();
-      if (tn) { let t = T.find(x => norm(x.name) === norm(tn)) || newT.find(x => norm(x.name) === norm(tn)); if (!t) { t = { id: "t" + uid(), name: tn, phone: "", notes: "", vehicles: [] }; newT.push(t); } tid = t.id; }
-      const id = r[0] && old[String(r[0])] ? String(r[0]) : "r" + uid();
-      rows.push({ ...(old[id] || {}), id, transporterId: tid, loading: String(r[2] || "").trim(), delivery: String(r[3] || "").trim(), productId: p.id, company: String(r[5] || "").trim(), rate: num(r[6]), minQty: num(r[7]), note: String(r[8] || "") });
+
+    // Check if it's the Key-Value Credit Cost sheet
+    if (/credit/i.test(sn) && rows.some(r => /interest|gst/i.test(String(r?.[0] || "")))) {
+      const st = { ...settings() };
+      const map = { "interest rate % a year": ["interestPct", num], "days in year": ["daysInYear", num], "charge interest on": ["creditBase", v => /before/i.test(v) ? "pre" : "invoice"], "gst %": ["gstPct", num] };
+      for (const r of rows) {
+        const k = norm(r?.[0]);
+        if (map[k] && r[1] != null && r[1] !== "") {
+          const [f, cv] = map[k];
+          const v = cv(r[1]);
+          if (v !== null) st[f] = v;
+        }
+      }
+      sheetsAnalysis.push({
+        sheetName: sn,
+        isCreditKV: true,
+        st,
+        on: true,
+        extracted: { kind: "credit", ignoredCols: [], matchedCols: [{ header: "Parameter", field: "credit" }] }
+      });
+      continue;
     }
-    const ids = new Set(rows.map(r => r.id)); const added = rows.filter(r => !old[r.id]).length, removed = Object.keys(old).filter(k => !ids.has(k)).length;
-    const changed = rows.filter(r => old[r.id] && (num(old[r.id].rate) !== num(r.rate) || old[r.id].transporterId !== r.transporterId || old[r.id].delivery !== r.delivery || old[r.id].loading !== r.loading)).length;
-    pv.parts.push({ kind: "transport", rows, bad, added, removed, changed, newT, on: rows.length > 0 });
+
+    // Standard / Custom User Sheet -> Run Smart ML Header Detection!
+    let defaultDate = todayISO();
+    if (/eff|date/i.test(String(rows[0]?.[0] || "")) && rows[0]?.[1]) {
+      defaultDate = xDate(rows[0][1]) || defaultDate;
+    }
+    const headerIdx = detectHeaderRowIndex(rows);
+    const headerRow = rows[headerIdx] || [];
+    const dataSlice = rows.slice(headerIdx + 1, headerIdx + 30);
+
+    const colMap = headerRow.map((h, colIdx) => {
+      const colSamples = dataSlice.map(r => r?.[colIdx]);
+      const res = classifyExcelColumn(h, colSamples, headerRow);
+      return {
+        colIdx,
+        header: String(h ?? `Column ${colIdx + 1}`).trim(),
+        field: res.field,
+        confidence: res.confidence,
+        reason: res.reason
+      };
+    });
+
+    const extracted = extractSheetDataWithMapping(rows, headerIdx, colMap, defaultDate);
+    const hasData = extracted.rateRows.length + extracted.routeRows.length + extracted.transporters.length + extracted.newSources.length + extracted.newProducts.length > 0;
+    sheetsAnalysis.push({
+      sheetName: sn,
+      rawRows: rows,
+      headerIdx,
+      colMap,
+      defaultDate,
+      extracted,
+      on: hasData
+    });
   }
-  const r3 = rowsOf(wb, SH.credit);
-  if (r3) {
-    const st = { ...settings() };
-    const map = { "interest rate % a year": ["interestPct", num], "days in year": ["daysInYear", num], "charge interest on": ["creditBase", v => /before/i.test(v) ? "pre" : "invoice"], "gst %": ["gstPct", num], "default credit days": ["defaultCreditDays", num], "default margin ₹ per unit": ["defaultMargin", num], "refinery discount": ["applyDiscount", v => /none|no/i.test(v) ? "none" : "max"] };
-    const diffs = [];
-    for (const r of r3) { const k = norm(r?.[0]); if (map[k] && r[1] != null && r[1] !== "") { const [f, cv] = map[k]; const v = cv(r[1]); if (v != null && v !== st[f]) { diffs.push(`${r[0]}: ${st[f]} → ${v}`); st[f] = v; } } }
-    const hi = r3.findIndex(r => norm(r?.[0]) === "refinery"); const cds = [];
-    if (hi >= 0) for (const r of r3.slice(hi + 1)) { if (!r?.[0]) continue; const s = matchSource(r[0]); const d = num(r[1]) || 0; if (s && (s.creditDays || 0) !== d) { cds.push([s.id, d]); diffs.push(`${s.name} free credit: ${s.creditDays || 0} → ${d} days`); } }
-    pv.parts.push({ kind: "credit", st, cds, diffs, on: diffs.length > 0 });
-  }
-  if (!pv.parts.length) {
+
+  UI.masterPreview = {
+    file: file.name,
+    replaceCycles: false,
+    sheets: sheetsAnalysis
+  };
+
+  if (!location.hash.startsWith("#master")) {
     location.hash = "#master-rates";
-    setTimeout(() => importXlsx(file), 50);
-    return;
+  } else {
+    renderMasterPreview();
   }
-  UI.masterPreview = pv;
-  if (!UI.tab.startsWith("master")) location.hash = "#master-rates";
-  else renderMasterPreview();
+  toast(`🧠 Smart ML analyzed "${file.name}" (${sheetsAnalysis.length} sheet${sheetsAnalysis.length === 1 ? "" : "s"} detected)`);
 }
 
 function renderMasterPreview() {
-  const pv = UI.masterPreview, box = $("#mupload"); if (!box || !pv) return;
-  const line = p => {
-    if (p.kind === "rates") return `<b>Refinery rates</b> · new revision effective <b>${p.date ? fmtDate(p.date) : "date missing in B1"}</b> · ${p.rows.length} rates, ${p.changed} changed${p.exists ? ' <span class="pill warn">replaces the saved revision of that date</span>' : ""}${p.bad.length ? `<div class="tiny d-up">Not recognised: ${esc(p.bad.join("; "))}</div>` : ""}`;
-    if (p.kind === "transport") return `<b>Transport rates</b> · ${p.rows.length} routes · ${p.added} new, ${p.changed} changed, ${p.removed} removed${p.newT.length ? ` · new transporters: ${esc(p.newT.map(t => t.name).join(", "))}` : ""}${p.bad.length ? `<div class="tiny d-up">Product not recognised: ${esc(p.bad.join("; "))}</div>` : ""}`;
-    if (p.kind === "credit") return `<b>Credit cost</b> · ${p.diffs.length ? esc(p.diffs.join(" · ")) : "no changes"}`;
-    if (p.kind === "transporters") return `<b>Transporters</b> · ${p.list.length} transporters, ${p.list.reduce((a, t) => a + (t.vehicles || []).length, 0)} vehicles`;
-  };
-  box.innerHTML = `<div class="panel pad stack" style="gap:10px;margin-top:14px;border-color:var(--accent)"><div class="sechead"><h3>Check before applying · ${esc(pv.file)}</h3><button class="btn small" id="mpx" type="button">Cancel</button></div>
-   ${pv.parts.map((p, i) => `<label class="actions" style="align-items:flex-start"><input type="checkbox" data-mp="${i}" ${p.on ? "checked" : ""}><span>${line(p)}</span></label>`).join("")}
-   <label class="actions tiny" style="margin-top:4px"><input type="checkbox" id="mp-replace-cycles" ${pv.replaceCycles ? "checked" : ""}><span>Replace all older 15-day rate cycles with only this uploaded revision</span></label>
-   <div class="actions"><button class="btn primary" id="mpa" type="button" ${S.canWrite ? "" : "disabled"}>Apply &amp; Auto-Sync Across All Devices</button></div></div>`;
+  const pv = UI.masterPreview;
+  const box = $("#mupload") || $("#imp");
+  if (!box || !pv) return;
+
+  const fieldOptionsHtml = currentField => Object.entries(ML_FIELD_DEFS).map(([k, def]) =>
+    `<option value="${k}" ${k === currentField ? "selected" : ""}>${k === "ignore" ? "🚫 Ignore (Extra Data)" : "✓ " + def.label}</option>`
+  ).join("");
+
+  const sheetCards = (pv.sheets || []).map((sh, si) => {
+    if (sh.isCreditKV) {
+      return `<div class="p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-2">
+        <label class="actions font-bold text-xs"><input type="checkbox" data-sh-on="${si}" ${sh.on ? "checked" : ""}><span>📄 Sheet: <b>${esc(sh.sheetName)}</b> → <span class="pill info">Credit &amp; GST Settings</span></span></label>
+      </div>`;
+    }
+    const ex = sh.extracted;
+    const kindBadge =
+      ex.kind === "rates" ? `<span class="pill best">Refinery Rates (${ex.rateRows.length} rows)</span>` :
+      ex.kind === "transport" ? `<span class="pill info">Transport Routes (${ex.routeRows.length} rows)</span>` :
+      ex.kind === "transporters" ? `<span class="pill info">Transporters (${ex.transporters.length} rows)</span>` :
+      ex.kind === "catalog" ? `<span class="pill info">Refineries &amp; Products (${ex.newSources.length} refineries, ${ex.newProducts.length} products)</span>` :
+      `<span class="pill warn">Adjust column mapping below to import</span>`;
+
+    return `<div class="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-3">
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <label class="actions text-xs font-bold">
+          <input type="checkbox" data-sh-on="${si}" ${sh.on ? "checked" : ""}>
+          <span>📄 Sheet: <b>${esc(sh.sheetName)}</b> → ${kindBadge}</span>
+        </label>
+        ${ex.ignoredCols.length ? `<span class="text-[11px] text-slate-500">🚫 Auto-ignoring ${ex.ignoredCols.length} extra column(s): <b>${esc(ex.ignoredCols.slice(0, 5).join(", "))}${ex.ignoredCols.length > 5 ? "…" : ""}</b></span>` : ""}
+      </div>
+
+      <!-- Interactive ML Header Mapper Grid -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 pt-1">
+        ${sh.colMap.map((cm, ci) => {
+          const isIgnored = cm.field === "ignore";
+          return `<div class="p-2 rounded-lg border ${isIgnored ? "bg-slate-100/70 border-slate-200 opacity-75" : "bg-white border-indigo-300 shadow-2xs"} space-y-1">
+            <div class="flex items-center justify-between gap-1">
+              <span class="text-[11px] font-extrabold truncate" title="${esc(cm.header)}">Excel: "${esc(cm.header)}"</span>
+              <span class="text-[9px] font-mono px-1.5 py-0.5 rounded ${isIgnored ? "bg-slate-200 text-slate-600" : "bg-emerald-100 text-emerald-800 font-bold"}">${isIgnored ? "Ignored" : Math.round((cm.confidence || 0.85) * 100) + "% ML"}</span>
+            </div>
+            <select data-ml-map="${si}|${ci}" class="text-xs font-semibold py-1 px-2" style="padding:4px 7px;font-size:11.5px">
+              ${fieldOptionsHtml(cm.field)}
+            </select>
+          </div>`;
+        }).join("")}
+      </div>
+    </div>`;
+  }).join("");
+
+  box.innerHTML = `<div class="panel pad stack" style="gap:12px;margin-top:14px;border:2px solid var(--accent)">
+    <div class="sechead">
+      <div>
+        <h3 class="flex items-center gap-2"><span>🧠</span><span>Smart ML Excel Header Mapper · ${esc(pv.file)}</span></h3>
+        <p class="tiny" style="margin:2px 0 0">Matched headers are mapped to system fields automatically and extra columns are ignored. If you change any dropdown below, the ML engine learns and remembers that header name for future uploads.</p>
+      </div>
+      <button class="btn small" id="mpx" type="button">Cancel</button>
+    </div>
+    <div class="stack" style="gap:10px">${sheetCards}</div>
+    <label class="actions tiny" style="margin-top:2px">
+      <input type="checkbox" id="mp-replace-cycles" ${pv.replaceCycles ? "checked" : ""}>
+      <span>Replace older 15-day rate cycles with only this uploaded revision</span>
+    </label>
+    <div class="actions">
+      <button class="btn primary" id="mpa" type="button" ${S.canWrite ? "" : "disabled"}>⚡ Feed Matched Data &amp; Train ML Mapper</button>
+    </div>
+  </div>`;
+
   $("#mpx").onclick = () => { UI.masterPreview = null; box.innerHTML = ""; };
-  box.querySelectorAll("[data-mp]").forEach(c => c.onchange = () => pv.parts[+c.dataset.mp].on = c.checked);
-  const rc = $("#mp-replace-cycles"); if (rc) rc.onchange = () => pv.replaceCycles = rc.checked;
+  const rc = $("#mp-replace-cycles");
+  if (rc) rc.onchange = () => pv.replaceCycles = rc.checked;
+
+  box.querySelectorAll("[data-sh-on]").forEach(c => c.onchange = () => {
+    pv.sheets[+c.dataset.shOn].on = c.checked;
+  });
+
+  // When user adjusts any column mapping dropdown, train the ML dictionary & re-extract live!
+  box.querySelectorAll("[data-ml-map]").forEach(sel => sel.onchange = () => {
+    const [si, ci] = sel.getAttribute("data-ml-map").split("|").map(Number);
+    const sh = pv.sheets[si];
+    if (!sh) return;
+    const cm = sh.colMap[ci];
+    cm.field = sel.value;
+    cm.confidence = 1.0;
+    trainMlMapping(cm.header, sel.value);
+    sh.extracted = extractSheetDataWithMapping(sh.rawRows, sh.headerIdx, sh.colMap, sh.defaultDate);
+    sh.on = (sh.extracted.rateRows.length + sh.extracted.routeRows.length + sh.extracted.transporters.length + sh.extracted.newSources.length + sh.extracted.newProducts.length) > 0;
+    renderMasterPreview();
+    toast(`🧠 Learned: "${cm.header}" → ${ML_FIELD_DEFS[sel.value]?.label || "Ignored"}`);
+  });
+
   $("#mpa").onclick = applyMaster;
+}
+
+function ensureSourceInCatalog(C, refName, locName, prodId) {
+  const cleanRef = String(refName || "").trim();
+  if (!cleanRef) return null;
+  let s = C.sources.find(x => norm(x.id) === norm(cleanRef) || norm(x.name) === norm(cleanRef) || (x.aliases || []).map(norm).includes(norm(cleanRef)));
+  if (!s) {
+    const id = sourceIdFor(cleanRef);
+    const firstWord = cleanRef.split(/\s+/)[0] || "Refinery";
+    const initLoc = String(locName || cleanRef.split(/\s+/).slice(1).join(" ") || cleanRef).trim();
+    s = {
+      id,
+      company: firstWord,
+      name: cleanRef,
+      loading: initLoc,
+      locations: initLoc ? [initLoc] : [],
+      creditDays: 0,
+      active: true,
+      products: prodId ? [prodId] : [],
+      aliases: [cleanRef.toUpperCase()]
+    };
+    C.sources.push(s);
+  } else {
+    if (locName) {
+      const locs = getRefineryLocations(s);
+      if (!locs.some(l => norm(l) === norm(locName))) {
+        locs.push(String(locName).trim());
+        s.locations = locs;
+        s.loading = locs.join(", ");
+      }
+    }
+    if (prodId) {
+      s.products = Array.isArray(s.products) ? s.products : [];
+      if (!s.products.includes(prodId)) s.products.push(prodId);
+    }
+  }
+  return s;
+}
+
+function ensureProductInCatalog(C, prodName, unit = "MT", cls = "White liquid") {
+  const cleanProd = String(prodName || "").trim();
+  if (!cleanProd) return null;
+  let p = C.products.find(x => norm(x.id) === norm(cleanProd) || norm(x.name) === norm(cleanProd) || (x.aliases || []).map(norm).includes(norm(cleanProd)));
+  if (!p) {
+    // Also check if there is an unnamed placeholder product we can reuse
+    const emptyP = C.products.find(x => !(x.name || "").trim());
+    const id = productIdFor(cleanProd, "");
+    if (emptyP) {
+      emptyP.id = id;
+      emptyP.name = cleanProd;
+      emptyP.unit = unit || "MT";
+      emptyP.cls = cls || "White liquid";
+      emptyP.aliases = [cleanProd.toUpperCase()];
+      delete emptyP._autoCode;
+      p = emptyP;
+    } else {
+      p = {
+        id,
+        name: cleanProd,
+        unit: unit || "MT",
+        cls: cls || "White liquid",
+        aliases: [cleanProd.toUpperCase()]
+      };
+      C.products.push(p);
+    }
+  }
+  return p;
 }
 
 async function applyMaster() {
   if (!S.canWrite) return;
-  const pv = UI.masterPreview; const done = [];
+  const pv = UI.masterPreview;
+  if (!pv) return;
+  const done = [];
   try {
-    inflight++; setSync(); const by = (await myId()) || "";
-    for (const p of pv.parts.filter(p => p.on)) {
-      if (p.kind === "rates") {
-        if (!p.date) { toast("Put the effective date in cell B1 of Refinery rates"); continue; }
-        if (pv.replaceCycles) { S.cycles = []; saveLocal("cycles", S.cycles); }
-        await S.db.doc("cycles/" + p.date).set({ effectiveDate: p.date, note: "Uploaded from " + pv.file, by, savedAt: new Date().toISOString(), prices: p.rows });
-        done.push("refinery rates");
-      }
-      if (p.kind === "transport") {
-        if (p.newT.length) {
-          const cur = pv.parts.find(x => x.kind === "transporters" && x.on);
-          if (!cur) { const list = [...(S.transporters?.list || []), ...p.newT]; await S.db.doc("master/transporters").set({ list: JSON.parse(JSON.stringify(list)) }); }
-          else cur.list.push(...p.newT);
+    inflight++; setSync();
+    const by = (await myId()) || "";
+    const C = JSON.parse(JSON.stringify(S.catalog || { sources: [], products: [] }));
+    const TList = JSON.parse(JSON.stringify(S.transporters?.list || []));
+    const RRows = JSON.parse(JSON.stringify(S.routes?.rows || []));
+    let catalogChanged = false;
+    let transportersChanged = false;
+    let routesChanged = false;
+
+    if (pv.replaceCycles) {
+      S.cycles = [];
+      saveLocal("cycles", S.cycles);
+    }
+
+    for (const sh of (pv.sheets || []).filter(x => x.on)) {
+      // Save confirmed header mappings into S.mlMappings so the ML model learns from every upload
+      (sh.colMap || []).forEach(cm => {
+        if (cm.header && cm.field) {
+          S.mlMappings = S.mlMappings || {};
+          S.mlMappings[norm(cm.header)] = cm.field;
         }
-        await S.db.doc("master/routes").set({ rows: p.rows.map(r => JSON.parse(JSON.stringify(r))) });
-        done.push("transport rates");
+      });
+
+      if (sh.isCreditKV) {
+        S.settings = sh.st;
+        saveLocal("settings", S.settings);
+        done.push("credit rules");
+        continue;
       }
-      if (p.kind === "credit") {
-        await S.db.doc("master/settings").set(p.st);
-        if (p.cds.length) {
-          const C = JSON.parse(JSON.stringify(S.catalog));
-          p.cds.forEach(([id, d]) => { const s = C.sources.find(x => x.id === id); if (s) s.creditDays = d; });
-          await S.db.doc("master/catalog").set(C);
+
+      const ex = sh.extracted;
+      if (ex.kind === "rates" && ex.rateRows.length) {
+        const cid = ex.date || todayISO();
+        const existingCyc = S.cycles.find(c => c.id === cid);
+        const prices = existingCyc ? JSON.parse(JSON.stringify(existingCyc.prices || [])) : [];
+
+        for (const rr of ex.rateRows) {
+          const p = ensureProductInCatalog(C, rr.prodName, rr.unit, rr.cls);
+          const s = ensureSourceInCatalog(C, rr.refName, rr.locName, p?.id);
+          catalogChanged = true;
+          if (!s || !p) continue;
+          const line = { sourceId: s.id, productId: p.id, basic: rr.basic, maxDiscount: rr.maxDiscount || 0, ...(rr.note ? { note: rr.note } : {}) };
+          const idx = prices.findIndex(x => x.sourceId === s.id && x.productId === p.id);
+          if (idx >= 0) prices[idx] = line;
+          else prices.push(line);
         }
-        done.push("credit cost");
+
+        const cycDoc = { id: cid, effectiveDate: cid, note: "Smart ML Upload: " + pv.file, by, savedAt: new Date().toISOString(), prices };
+        const cIdx = S.cycles.findIndex(c => c.id === cid);
+        if (cIdx >= 0) S.cycles[cIdx] = cycDoc;
+        else S.cycles.push(cycDoc);
+        saveLocal("cycles", S.cycles);
+        done.push(`${ex.rateRows.length} refinery rates`);
+      }
+
+      if (ex.kind === "transport" && ex.routeRows.length) {
+        for (const rt of ex.routeRows) {
+          const p = ensureProductInCatalog(C, rt.prodName, rt.unit, "White liquid");
+          catalogChanged = true;
+          if (!p) continue;
+          let tid = "";
+          if (rt.transporterName) {
+            let t = TList.find(x => norm(x.name) === norm(rt.transporterName));
+            if (!t) {
+              t = { id: "t" + uid(), name: rt.transporterName, phone: "", notes: "", vehicles: [{ category: "20 KL Tanker", capacity: 20, unit: rt.unit || "KL" }] };
+              TList.push(t);
+              transportersChanged = true;
+            }
+            tid = t.id;
+          }
+          const existingIdx = RRows.findIndex(x =>
+            norm(x.loading) === norm(rt.loading) &&
+            norm(x.delivery) === norm(rt.delivery) &&
+            x.productId === p.id &&
+            (!tid || x.transporterId === tid)
+          );
+          const rowObj = {
+            id: existingIdx >= 0 ? RRows[existingIdx].id : "r" + uid(),
+            transporterId: tid,
+            loading: rt.loading,
+            delivery: rt.delivery,
+            productId: p.id,
+            company: rt.company || "",
+            rate: rt.rate,
+            minQty: rt.minQty,
+            note: rt.note || ""
+          };
+          if (existingIdx >= 0) RRows[existingIdx] = rowObj;
+          else RRows.push(rowObj);
+          routesChanged = true;
+        }
+        done.push(`${ex.routeRows.length} transport routes`);
+      }
+
+      if (ex.kind === "transporters" && ex.transporters.length) {
+        for (const tp of ex.transporters) {
+          let t = TList.find(x => norm(x.name) === norm(tp.name));
+          if (!t) {
+            t = { id: "t" + uid(), name: tp.name, phone: tp.phone || "", notes: tp.notes || "", vehicles: [] };
+            TList.push(t);
+          } else {
+            if (tp.phone) t.phone = tp.phone;
+            if (tp.notes) t.notes = tp.notes;
+          }
+          if (tp.vehicleCategory || tp.capacity) {
+            t.vehicles = t.vehicles || [];
+            t.vehicles.push({ category: tp.vehicleCategory, capacity: tp.capacity, unit: tp.unit });
+          }
+          transportersChanged = true;
+        }
+        done.push(`${ex.transporters.length} transporters`);
+      }
+
+      if (ex.kind === "catalog") {
+        for (const np of ex.newProducts) {
+          ensureProductInCatalog(C, np.name, np.unit, np.cls);
+          catalogChanged = true;
+        }
+        for (const ns of ex.newSources) {
+          const p = ns.prodName ? ensureProductInCatalog(C, ns.prodName) : null;
+          ensureSourceInCatalog(C, ns.name, ns.loading, p?.id);
+          catalogChanged = true;
+        }
+        done.push("refineries & products catalog");
       }
     }
-    const tp = pv.parts.find(p => p.kind === "transporters" && p.on);
-    if (tp) { await S.db.doc("master/transporters").set({ list: JSON.parse(JSON.stringify(tp.list)) }); done.push("transporters"); }
+
+    if (catalogChanged) {
+      S.catalog = C;
+      saveLocal("catalog", S.catalog);
+    }
+    if (transportersChanged) {
+      S.transporters = { list: TList };
+      saveLocal("transporters", S.transporters);
+    }
+    if (routesChanged) {
+      S.routes = { rows: RRows };
+      saveLocal("routes", S.routes);
+    }
+    saveLocal("mlMappings", S.mlMappings || {});
+
     UI.masterPreview = null;
     await pushAllToNeon(false, true);
-    toast(done.length ? "Updated & synced across all devices: " + done.join(", ") : "Nothing selected");
+    toast(done.length ? `🧠 Smart ML fed & synced: ${done.join(", ")}!` : "Nothing selected to import");
     render();
-  } catch (e) { toast("Upload failed: " + (e?.message || e?.code)); }
-  finally { inflight--; setSync(); }
+  } catch (e) {
+    toast("Upload failed: " + (e?.message || e?.code));
+  } finally {
+    inflight = Math.max(0, inflight - 1);
+    setSync();
+  }
 }
 
 /* ================= QUOTATION BASKET & BUILT-IN A4 PDF WRITER ================= */
@@ -4274,6 +4915,7 @@ async function boot() {
   S.cycles = loadLocal("cycles", DEFAULT_CYCLES);
   S.quotes = loadLocal("quotes", DEFAULT_QUOTES);
   S.quoteLogs = loadLocal("quoteLogs", []);
+  S.mlMappings = loadLocal("mlMappings", {});
   S.quoteSeq = loadLocal("quoteSeq", { "26-27": 1 });
   S.got = { all: true, catalog: true, routes: true, cycles: true, settings: true, transporters: true, quotes: true };
 

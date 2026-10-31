@@ -2825,7 +2825,11 @@ function viewCycles() {
   const cyc = cyclesAsc().reverse();
   V().innerHTML = `
    <div class="actions" style="justify-content:space-between;margin-bottom:12px"><div><h3>Refinery rate revisions</h3><p class="tiny" style="margin:2px 0 0">Refineries revise rates every 15 days. Each revision is kept, so price history and comparisons stay available.</p></div>
-   <div class="actions"><label class="btn ${S.canWrite ? "" : "opacity-50 pointer-events-none"}" for="xl">📄 Import refinery circular (.xlsx)</label><input type="file" id="xl" accept=".xlsx,.xls" hidden ${S.canWrite ? "" : "disabled"}><button class="btn primary" id="newc" ${S.canWrite ? "" : "disabled"}>＋ Enter new revision</button></div></div>
+   <div class="actions">
+     ${S.canWrite && cyc.length ? `<button class="btn danger" id="del-all-cycles" type="button">🗑️ Delete All Cycles (${cyc.length})</button>` : ""}
+     <label class="btn ${S.canWrite ? "" : "opacity-50 pointer-events-none"}" for="xl">📄 Upload Step 4: 15-Day Rates (.xlsx)</label><input type="file" id="xl" accept=".xlsx,.xls,.csv" hidden ${S.canWrite ? "" : "disabled"}>
+     <button class="btn primary" id="newc" type="button" ${S.canWrite ? "" : "disabled"}>＋ Enter new revision</button>
+   </div></div>
    <div id="imp"></div>
    <div class="tw"><table><thead><tr><th>Effective from</th><th class="n">Products priced</th><th class="n">Price changes vs previous</th><th>Note</th><th></th></tr></thead><tbody>
    ${cyc.map((c, i) => {
@@ -2864,7 +2868,17 @@ function viewCycles() {
     if (b.dataset.armed) { delDoc("cycles/" + b.dataset.del); toast("Cycle deleted"); }
     else { b.dataset.armed = 1; b.textContent = "Confirm delete"; setTimeout(() => { if (b.isConnected) { delete b.dataset.armed; b.textContent = "Delete"; } }, 3000); }
   });
-  $("#xl").onchange = e => importXlsx(e.target.files[0]);
+  const dac = $("#del-all-cycles");
+  if (dac) dac.onclick = async () => {
+    if (!S.canWrite) return;
+    if (!dac.dataset.armed) { dac.dataset.armed = "1"; dac.textContent = "⚠️ Confirm Delete All Cycles?"; return; }
+    S.cycles = [];
+    saveLocal("cycles", S.cycles);
+    await pushKeyToNeon("cycles", S.cycles);
+    viewCycles();
+    toast("🗑️ Deleted all 15-day rate cycles!");
+  };
+  $("#xl").onchange = e => { if (e.target.files?.[0]) uploadMaster(e.target.files[0], "rates"); e.target.value = ""; };
   if (UI.importBlocks) renderImport();
 }
 
@@ -2967,7 +2981,9 @@ function viewRoutes() {
        </select>
        <button type="button" id="btn-bulk-assign-tr" class="btn small primary">Apply</button>
      </div>` : ""}
-     <button class="btn primary" id="addr" ${dis}>＋ Add transport rate</button>
+     ${S.canWrite && rows.length ? `<button class="btn danger" id="del-all-routes" type="button">🗑️ Delete All Routes (${rows.length})</button>` : ""}
+     ${S.canWrite ? `<label class="btn" for="up-step-routes">⬆ Upload Routes (.xlsx)</label><input type="file" id="up-step-routes" accept=".xlsx,.xls,.csv" hidden>` : ""}
+     <button class="btn primary" id="addr" type="button" ${dis}>＋ Add transport rate</button>
    </div></div>
    <div class="toolbar">
      <div class="field"><label class="lbl" for="f-text">Search</label><input type="search" id="f-text" value="${esc(f.text)}" placeholder="Town, note, transporter"></div>
@@ -3023,6 +3039,17 @@ function viewRoutes() {
     viewRoutes();
     toast(`Assigned transporter to ${count} route(s)!`);
   };
+  const dar = $("#del-all-routes");
+  if (dar) dar.onclick = async () => {
+    if (!S.canWrite) return;
+    if (!dar.dataset.armed) { dar.dataset.armed = "1"; dar.textContent = "⚠️ Confirm Delete All Routes?"; return; }
+    S.routes = { rows: [] };
+    saveDoc("master/routes", S.routes, 0);
+    viewRoutes();
+    toast("🗑️ Deleted all transport routes!");
+  };
+  const usr = $("#up-step-routes");
+  if (usr) usr.onchange = e => { if (e.target.files?.[0]) uploadMaster(e.target.files[0], "transport"); e.target.value = ""; };
   $("#addr").onclick = () => {
     if (!S.canWrite) return;
     S.routes = S.routes || { rows: [] };
@@ -3038,8 +3065,12 @@ function viewTransporters() {
   const save = () => saveDoc("master/transporters", S.transporters, 500);
   const dis = S.canWrite ? "" : "disabled";
   V().innerHTML = `
-   <div class="actions" style="justify-content:space-between;margin-bottom:12px"><div><h3>Transporters and vehicles</h3><p class="tiny" style="margin:2px 0 0">Each transporter's contact and tanker fleet. Capacity sets how many trucks an order needs.</p></div>
-   <button class="btn primary" id="addt" ${dis}>＋ Add transporter</button></div>
+   <div class="actions" style="justify-content:space-between;margin-bottom:12px"><div><h3>Transporters and vehicles</h3><p class="tiny" style="margin:2px 0 0">Each transporter's contact, tanker fleet capacities, and delivery routes.</p></div>
+   <div class="actions">
+     ${S.canWrite && T.length ? `<button class="btn danger" id="del-all-transporters" type="button">🗑️ Delete All Transporters (${T.length})</button>` : ""}
+     ${S.canWrite ? `<label class="btn" for="up-step-transporters">⬆ Upload Step 3: Transporters (.xlsx)</label><input type="file" id="up-step-transporters" accept=".xlsx,.xls,.csv" hidden>` : ""}
+     <button class="btn primary" id="addt" type="button" ${dis}>＋ Add transporter</button>
+   </div></div>
    ${T.length ? `<div class="cards" data-live>${T.map((t, ti) => `<div class="panel pad stack" style="gap:10px">
      <div class="row2"><div class="field"><label class="lbl" for="tn${ti}">Name</label><input type="text" id="tn${ti}" data-t="${ti}" data-f="name" value="${esc(t.name)}" ${dis}></div>
        <div class="field"><label class="lbl" for="tp${ti}">Phone</label><input type="text" id="tp${ti}" data-t="${ti}" data-f="phone" value="${esc(t.phone || "")}" ${dis}></div></div>
@@ -3064,6 +3095,17 @@ function viewTransporters() {
   document.querySelectorAll("[data-vadd]").forEach(b => b.onclick = () => { if (!S.canWrite) return; const list = (S.transporters = S.transporters || { list: [] }).list; const t = list[+b.dataset.vadd]; if (!t) return; (t.vehicles = t.vehicles || []).push({ category: "", capacity: null, unit: "KL" }); saveDoc("master/transporters", S.transporters, 0); viewTransporters(); });
   document.querySelectorAll("[data-vdel]").forEach(b => b.onclick = () => { if (!S.canWrite) return; const list = (S.transporters = S.transporters || { list: [] }).list; const [a, c] = b.dataset.vdel.split(":").map(Number); list[a]?.vehicles?.splice(c, 1); saveDoc("master/transporters", S.transporters, 0); viewTransporters(); });
   document.querySelectorAll("[data-tdel]").forEach(b => b.onclick = () => { if (!S.canWrite) return; if (!b.dataset.armed) { b.dataset.armed = 1; b.textContent = "Confirm remove"; return; } const list = (S.transporters = S.transporters || { list: [] }).list; list.splice(+b.dataset.tdel, 1); saveDoc("master/transporters", S.transporters, 0); viewTransporters(); });
+  const dat = $("#del-all-transporters");
+  if (dat) dat.onclick = async () => {
+    if (!S.canWrite) return;
+    if (!dat.dataset.armed) { dat.dataset.armed = "1"; dat.textContent = "⚠️ Confirm Delete All Transporters?"; return; }
+    S.transporters = { list: [] };
+    saveDoc("master/transporters", S.transporters, 0);
+    viewTransporters();
+    toast("🗑️ Deleted all transporters!");
+  };
+  const ust = $("#up-step-transporters");
+  if (ust) ust.onchange = e => { if (e.target.files?.[0]) uploadMaster(e.target.files[0], "transporters"); e.target.value = ""; };
   $("#addt").onclick = () => { if (!S.canWrite) return; const list = (S.transporters = S.transporters || { list: [] }).list; list.push({ id: "t" + uid(), name: "", phone: "", notes: "", vehicles: [{ category: "20 KL Tanker", capacity: 20, unit: "KL" }] }); saveDoc("master/transporters", S.transporters, 0); viewTransporters(); };
 }
 
@@ -3086,16 +3128,124 @@ function masterBar() {
     "master-refineries": `${(S.catalog?.sources || []).length} supply points · ${(S.catalog?.products || []).length} products`,
     "master-template": tpl().signName ? "Ready" : "Add your details"
   };
+  const prodCount = (S.catalog?.products || []).filter(p => (p.name || "").trim()).length;
+  const refCount = (S.catalog?.sources || []).length;
+  const trCount = (S.transporters?.list || []).length;
+  const rtCount = (S.routes?.rows || []).length;
+  const cycCount = (S.cycles || []).length;
+
+  const stepFeederBar = S.currentUser?.role === "admin" ? `
+    <div class="mt-3 p-3.5 rounded-2xl bg-gradient-to-r from-indigo-950 via-slate-900 to-indigo-950 text-white border border-indigo-700/60 shadow-sm space-y-2.5">
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <div class="flex items-center gap-2">
+          <span class="px-2 py-0.5 rounded-full bg-amber-400 text-slate-950 text-[10px] font-extrabold uppercase">Pro Workflow</span>
+          <span class="text-xs font-extrabold">4-Step Sequential Data Feeder (Recommended Order for Clean Relational Data)</span>
+        </div>
+        <button type="button" id="btn-dl-clean-template" class="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-600 text-[11px] font-bold">⬇ Download 4-Step Excel Template (.xlsx)</button>
+      </div>
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 text-xs">
+        <div class="p-2.5 rounded-xl bg-slate-800/90 border ${prodCount ? "border-emerald-500/60" : "border-slate-700"} flex flex-col justify-between gap-2">
+          <div>
+            <div class="flex items-center justify-between">
+              <span class="font-extrabold text-amber-300">Step 1: Products</span>
+              <span class="text-[10px] px-1.5 py-0.5 rounded bg-slate-900 font-mono">${prodCount} saved</span>
+            </div>
+            <p class="text-[11px] text-slate-300 mt-0.5">Name, Unit (MT/KL) &amp; Color/Type (White, Yellow, Black, Bitumen)</p>
+          </div>
+          <label class="px-2.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-[11px] text-center cursor-pointer block">
+            ⬆ Feed Step 1: Products (.xlsx)
+            <input type="file" data-step-upload="products" accept=".xlsx,.xls,.csv" hidden>
+          </label>
+        </div>
+
+        <div class="p-2.5 rounded-xl bg-slate-800/90 border ${refCount ? "border-emerald-500/60" : "border-slate-700"} flex flex-col justify-between gap-2">
+          <div>
+            <div class="flex items-center justify-between">
+              <span class="font-extrabold text-emerald-300">Step 2: Refineries</span>
+              <span class="text-[10px] px-1.5 py-0.5 rounded bg-slate-900 font-mono">${refCount} saved</span>
+            </div>
+            <p class="text-[11px] text-slate-300 mt-0.5">Refinery Name, Multiple Locations &amp; Multiple Sold Products</p>
+          </div>
+          <label class="px-2.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-[11px] text-center cursor-pointer block">
+            ⬆ Feed Step 2: Refineries (.xlsx)
+            <input type="file" data-step-upload="refineries" accept=".xlsx,.xls,.csv" hidden>
+          </label>
+        </div>
+
+        <div class="p-2.5 rounded-xl bg-slate-800/90 border ${(trCount && rtCount) ? "border-emerald-500/60" : "border-slate-700"} flex flex-col justify-between gap-2">
+          <div>
+            <div class="flex items-center justify-between">
+              <span class="font-extrabold text-sky-300">Step 3: Transporters &amp; Routes</span>
+              <span class="text-[10px] px-1.5 py-0.5 rounded bg-slate-900 font-mono">${trCount} tr · ${rtCount} rt</span>
+            </div>
+            <p class="text-[11px] text-slate-300 mt-0.5">Transporter, Phone, Tanker Capacity, Delivery Locations &amp; Rates</p>
+          </div>
+          <label class="px-2.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-[11px] text-center cursor-pointer block">
+            ⬆ Feed Step 3: Transporters/Routes
+            <input type="file" data-step-upload="transport" accept=".xlsx,.xls,.csv" hidden>
+          </label>
+        </div>
+
+        <div class="p-2.5 rounded-xl bg-slate-800/90 border ${cycCount ? "border-emerald-500/60" : "border-slate-700"} flex flex-col justify-between gap-2">
+          <div>
+            <div class="flex items-center justify-between">
+              <span class="font-extrabold text-rose-300">Step 4: 15-Day Rates</span>
+              <span class="text-[10px] px-1.5 py-0.5 rounded bg-slate-900 font-mono">${cycCount} cycles</span>
+            </div>
+            <p class="text-[11px] text-slate-300 mt-0.5">Refinery Basic Prices &amp; Max Discounts for each Product</p>
+          </div>
+          <label class="px-2.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-[11px] text-center cursor-pointer block">
+            ⬆ Feed Step 4: 15-Day Rates (.xlsx)
+            <input type="file" data-step-upload="rates" accept=".xlsx,.xls,.csv" hidden>
+          </label>
+        </div>
+      </div>
+    </div>` : "";
+
   return `<div class="mhead">
-    <div class="sechead" style="align-items:flex-end"><div><div class="flex items-center gap-2 mb-1"><button type="button" id="m-back-home" class="btn small">🏠 Back to Calculator</button><h2 style="margin:0">Master File</h2></div><p class="sub" style="margin:0">Everything a quote is calculated from. Edit it here, or download it as Excel (.xlsx), update it, and upload it back.</p></div>
-      ${S.currentUser?.role === "admin" ? `<div class="actions"><button class="btn" id="mdl" type="button">⬇ Download master (.xlsx)</button><label class="btn lime" for="mup">⬆ Upload master (.xlsx)</label><input type="file" id="mup" accept=".xlsx,.xls" hidden></div>` : ""}</div>
+    <div class="sechead" style="align-items:flex-end"><div><div class="flex items-center gap-2 mb-1"><button type="button" id="m-back-home" class="btn small">🏠 Back to Calculator</button><h2 style="margin:0">Master File</h2></div><p class="sub" style="margin:0">Feed your master data step-by-step (Products → Refineries → Transporters &amp; Routes → 15-Day Rates) or edit any table below.</p></div>
+      ${S.currentUser?.role === "admin" ? `<div class="actions">
+        <button class="btn danger" id="btn-wipe-all-master" type="button" title="Delete all Refineries, Products, Transporters, Routes & Rate Cycles at once">🗑️ Delete All Master Data</button>
+        <button class="btn" id="mdl" type="button">⬇ Download master (.xlsx)</button>
+        <label class="btn lime" for="mup">⬆ Smart Upload (.xlsx)</label><input type="file" id="mup" accept=".xlsx,.xls,.csv" hidden>
+      </div>` : ""}</div>
+    ${stepFeederBar}
     <nav class="mtabs">${MTABS.map(([k, l, s]) => `<a href="#${k}" aria-current="${UI.tab === k ? "page" : "false"}"><b>${l}</b><span>${esc(meta[k] || s)}</span></a>`).join("")}</nav>
     ${addBar()}<div id="mupload"></div></div>`;
 }
 function bindMasterBar() {
   const bh = $("#m-back-home"); if (bh) bh.onclick = () => navigateToTab("quote");
   const d = $("#mdl"); if (d) d.onclick = downloadMaster;
+  const dt = $("#btn-dl-clean-template"); if (dt) dt.onclick = downloadMaster;
   const u = $("#mup"); if (u) u.onchange = e => { uploadMaster(e.target.files[0]); e.target.value = ""; };
+  document.querySelectorAll("[data-step-upload]").forEach(inp => {
+    inp.onchange = e => {
+      const mode = inp.getAttribute("data-step-upload");
+      if (e.target.files?.[0]) uploadMaster(e.target.files[0], mode);
+      e.target.value = "";
+    };
+  });
+  const wipeBtn = $("#btn-wipe-all-master");
+  if (wipeBtn) wipeBtn.onclick = async () => {
+    if (!S.canWrite) return;
+    if (!wipeBtn.dataset.armed) {
+      wipeBtn.dataset.armed = "1";
+      wipeBtn.textContent = "⚠️ Click Again to Confirm Wipe All Master Data";
+      setTimeout(() => { if (wipeBtn.isConnected) { delete wipeBtn.dataset.armed; wipeBtn.textContent = "🗑️ Delete All Master Data"; } }, 4000);
+      return;
+    }
+    S.catalog = { sources: [], products: [] };
+    S.routes = { rows: [] };
+    S.transporters = { list: [] };
+    S.cycles = [];
+    saveLocal("catalog", S.catalog);
+    saveLocal("routes", S.routes);
+    saveLocal("transporters", S.transporters);
+    saveLocal("cycles", S.cycles);
+    await pushAllToNeon(false, true);
+    render();
+    toast("🗑️ Wiped all Refineries, Products, Transporters, Routes & Rate Cycles! Ready for fresh step-by-step upload.");
+  };
   if (UI.masterPreview) renderMasterPreview();
   bindAddBar();
 }
@@ -3242,10 +3392,14 @@ function viewRefineries() {
    <section class="stack" style="gap:8px">
      <div class="sechead">
        <div>
-         <h3>Refineries and supply points</h3>
+         <h3>Step 2 · Refineries and supply points</h3>
          <p class="tiny" style="margin:2px 0 0">Enter each refinery/source once, then add multiple <b>Locations</b> and multiple <b>Products</b> directly inside its row.</p>
        </div>
-       <button class="btn small primary" id="adds" type="button" ${dis}>＋ Add refinery / source</button>
+       <div class="actions">
+         ${S.canWrite && (S.catalog.sources || []).length ? `<button class="btn small danger" id="del-all-sources" type="button">🗑️ Delete All Refineries (${S.catalog.sources.length})</button>` : ""}
+         ${S.canWrite ? `<label class="btn small" for="up-step-refineries">⬆ Upload Refineries (.xlsx)</label><input type="file" id="up-step-refineries" accept=".xlsx,.xls,.csv" hidden>` : ""}
+         <button class="btn small primary" id="adds" type="button" ${dis}>＋ Add refinery / source</button>
+       </div>
      </div>
      <div class="tw tbl-edit" data-live>
        <table>
@@ -3324,10 +3478,14 @@ function viewRefineries() {
    <section class="stack" style="gap:8px">
      <div class="sechead">
        <div>
-         <h3>Products</h3>
-         <p class="tiny" style="margin:2px 0 0">Manage all products, their unit (MT or KL), and write their type (e.g. White liquid, Yellow, Black).</p>
+         <h3>Step 1 · Products Master (Feed This First)</h3>
+         <p class="tiny" style="margin:2px 0 0">Feed your clean list of products, their unit (MT or KL), and color/type (White liquid, Yellow liquid, Black, Bitumen) first so Refineries, Routes, and Rates match them cleanly.</p>
        </div>
-       <button class="btn small primary" id="addp" type="button" ${dis}>＋ Add product</button>
+       <div class="actions">
+         ${S.canWrite && (S.catalog.products || []).length ? `<button class="btn small danger" id="del-all-products" type="button">🗑️ Delete All Products (${S.catalog.products.length})</button>` : ""}
+         ${S.canWrite ? `<label class="btn small" for="up-step-products">⬆ Upload Products (.xlsx)</label><input type="file" id="up-step-products" accept=".xlsx,.xls,.csv" hidden>` : ""}
+         <button class="btn small primary" id="addp" type="button" ${dis}>＋ Add product</button>
+       </div>
      </div>
      <datalist id="dl-product-types">
        <option value="White liquid">
@@ -3508,6 +3666,29 @@ function viewRefineries() {
     viewRefineries();
   });
 
+  const das = $("#del-all-sources");
+  if (das) das.onclick = () => {
+    if (!S.canWrite) return;
+    if (!das.dataset.armed) { das.dataset.armed = "1"; das.textContent = "⚠️ Confirm Delete All Refineries?"; return; }
+    S.catalog.sources = [];
+    saveC(0);
+    viewRefineries();
+    toast("🗑️ Deleted all refineries!");
+  };
+  const dap = $("#del-all-products");
+  if (dap) dap.onclick = () => {
+    if (!S.canWrite) return;
+    if (!dap.dataset.armed) { dap.dataset.armed = "1"; dap.textContent = "⚠️ Confirm Delete All Products?"; return; }
+    S.catalog.products = [];
+    (S.catalog.sources || []).forEach(s => { s.products = []; });
+    saveC(0);
+    viewRefineries();
+    toast("🗑️ Deleted all products!");
+  };
+  const usrRef = $("#up-step-refineries");
+  if (usrRef) usrRef.onchange = e => { if (e.target.files?.[0]) uploadMaster(e.target.files[0], "refineries"); e.target.value = ""; };
+  const usrProd = $("#up-step-products");
+  if (usrProd) usrProd.onchange = e => { if (e.target.files?.[0]) uploadMaster(e.target.files[0], "products"); e.target.value = ""; };
   $("#adds").onclick = () => {
     if (!S.canWrite) return;
     const defaultProds = (S.catalog.products || []).filter(p => (p.name || "").trim()).map(p => p.id);
@@ -3999,7 +4180,7 @@ function extractSheetDataWithMapping(sheetRows, headerIdx, colMap, defaultDate) 
   return extracted;
 }
 
-async function uploadMaster(file) {
+async function uploadMaster(file, forcedStepMode = null) {
   if (!file) return;
   if (!S.canWrite) { toast("Read-only access: Sign in as Admin to upload Excel files."); return; }
   if (!window.XLSX) { toast("Spreadsheet library didn't load. Please reload."); return; }
@@ -4140,8 +4321,20 @@ async function uploadMaster(file) {
     });
   }
 
+  if (forcedStepMode && typeof forcedStepMode === "string") {
+    sheetsAnalysis.forEach(sh => {
+      if (sh.isCreditKV) return;
+      if (forcedStepMode === "products" || forcedStepMode === "refineries") {
+        sh.extracted = extractSheetDataWithMapping(sh.rawRows, sh.headerIdx, sh.colMap, sh.defaultDate);
+        if (sh.extracted.kind === "unknown") sh.extracted.kind = "catalog";
+      }
+    });
+  }
+
   UI.masterPreview = {
     file: file.name,
+    forcedStepMode: typeof forcedStepMode === "string" ? forcedStepMode : null,
+    defaultTransporterId: "",
     replaceCycles: false,
     sheets: sheetsAnalysis
   };
@@ -4213,6 +4406,14 @@ function renderMasterPreview() {
       <button class="btn small" id="mpx" type="button">Cancel</button>
     </div>
     <div class="stack" style="gap:10px">${sheetCards}</div>
+    ${(pv.sheets || []).some(s => s.extracted?.kind === "transport") && (S.transporters?.list || []).length ? `
+    <div class="p-3 rounded-xl bg-amber-50 border border-amber-300 flex flex-wrap items-center justify-between gap-2 text-xs">
+      <span class="font-bold text-amber-950">🚚 If this Excel sheet does not have a Transporter column, assign unmatched routes to:</span>
+      <select id="mp-default-transporter" style="width:auto;min-width:220px;padding:5px 10px;font-weight:700">
+        <option value="">Auto-detect from sheet (or leave unset)</option>
+        ${(S.transporters?.list || []).map(t => `<option value="${t.id}" ${pv.defaultTransporterId === t.id ? "selected" : ""}>${esc(t.name)} ${t.phone ? `(${esc(t.phone)})` : ""}</option>`).join("")}
+      </select>
+    </div>` : ""}
     <label class="actions tiny" style="margin-top:2px">
       <input type="checkbox" id="mp-replace-cycles" ${pv.replaceCycles ? "checked" : ""}>
       <span>Replace older 15-day rate cycles with only this uploaded revision</span>
@@ -4225,6 +4426,8 @@ function renderMasterPreview() {
   $("#mpx").onclick = () => { UI.masterPreview = null; box.innerHTML = ""; };
   const rc = $("#mp-replace-cycles");
   if (rc) rc.onchange = () => pv.replaceCycles = rc.checked;
+  const dtr = $("#mp-default-transporter");
+  if (dtr) dtr.onchange = () => pv.defaultTransporterId = dtr.value;
 
   box.querySelectorAll("[data-sh-on]").forEach(c => c.onchange = () => {
     pv.sheets[+c.dataset.shOn].on = c.checked;
@@ -4246,6 +4449,45 @@ function renderMasterPreview() {
   });
 
   $("#mpa").onclick = applyMaster;
+}
+
+
+// Smart Decomposition: If Step 1 Products already exist (e.g. "MTO", "LDO", "FO", "CBFS"),
+// and a later sheet has "MTO BPC Bina" or "RIL LDO VIZAG" or "Nayara LDO", decompose it into { product, extractedRefOrLoc }!
+function matchOrDecomposeProduct(C, rawProdStr, rawRefStr = "", rawLocStr = "") {
+  const clean = String(rawProdStr || "").trim();
+  if (!clean) return { prodName: "", refHint: rawRefStr, locHint: rawLocStr };
+
+  // 1. Exact match in existing catalog products
+  const exact = (C.products || []).find(p => norm(p.name) === norm(clean) || norm(p.id) === norm(clean) || (p.aliases || []).map(norm).includes(norm(clean)));
+  if (exact) return { prodName: exact.name, existingProd: exact, refHint: rawRefStr, locHint: rawLocStr };
+
+  // 2. Check if clean string contains an existing product name plus refinery/city words (e.g. "MTO BPC Bina", "Nayara LDO", "RIL LDO VIZAG")
+  const hasRefOrCityWord = /\b(nayara|ril|reliance|bpc|bpcl|hpc|hpcl|ioc|iocl|cpcl|mrpl|bina|kochi|vizag|visakh|bhatinda|bathinda|vadinar|jamnagar|koyali|mumbai|haldia|mathura|chennai|raipur|imported|importerted)\b/i.test(clean);
+  if (hasRefOrCityWord && (C.products || []).length > 0) {
+    // Find longest matching existing product name/code inside clean
+    const sortedProds = [...(C.products || [])].filter(p => (p.name || "").trim()).sort((a, b) => b.name.length - a.name.length);
+    for (const p of sortedProds) {
+      const pNorm = norm(p.name);
+      const idNorm = norm(p.id);
+      const cNorm = norm(clean);
+      const regexP = new RegExp(`\\b${pNorm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, "i");
+      const regexId = new RegExp(`\\b${idNorm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, "i");
+      if ((pNorm.length >= 2 && regexP.test(cNorm)) || (idNorm.length >= 2 && regexId.test(cNorm))) {
+        const leftover = clean.replace(new RegExp(p.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), "ig"), "")
+                              .replace(new RegExp(p.id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), "ig"), "")
+                              .replace(/[-()/]+/g, " ").trim();
+        return {
+          prodName: p.name,
+          existingProd: p,
+          refHint: rawRefStr || leftover,
+          locHint: rawLocStr || extractCleanCityFromRefineryName(leftover, "")
+        };
+      }
+    }
+  }
+
+  return { prodName: clean, refHint: rawRefStr, locHint: rawLocStr };
 }
 
 function ensureSourceInCatalog(C, refName, locName, prodId) {
@@ -4398,8 +4640,9 @@ async function applyMaster() {
         const prices = existingCyc ? JSON.parse(JSON.stringify(existingCyc.prices || [])) : [];
 
         for (const rr of ex.rateRows) {
-          const p = ensureProductInCatalog(C, rr.prodName, rr.unit, rr.cls);
-          const s = ensureSourceInCatalog(C, rr.refName, rr.locName, p?.id);
+          const dec = matchOrDecomposeProduct(C, rr.prodName, rr.refName, rr.locName);
+          const p = dec.existingProd || ensureProductInCatalog(C, dec.prodName, rr.unit, rr.cls);
+          const s = ensureSourceInCatalog(C, dec.refHint || rr.refName, dec.locHint || rr.locName, p?.id);
           catalogChanged = true;
           if (!s || !p) continue;
           const line = { sourceId: s.id, productId: p.id, basic: rr.basic, maxDiscount: rr.maxDiscount || 0, ...(rr.note ? { note: rr.note } : {}) };
@@ -4418,7 +4661,8 @@ async function applyMaster() {
 
       if (ex.kind === "transport" && ex.routeRows.length) {
         for (const rt of ex.routeRows) {
-          const p = ensureProductInCatalog(C, rt.prodName, rt.unit, rt.cls);
+          const dec = matchOrDecomposeProduct(C, rt.prodName, rt.refName, rt.loading);
+          const p = dec.existingProd || ensureProductInCatalog(C, dec.prodName, rt.unit, rt.cls);
           if (rt.refName || rt.loading) {
             // Link product to any matching refinery in catalog!
             const matchSrc = C.sources.find(s =>
@@ -4444,10 +4688,12 @@ async function applyMaster() {
             }
             tid = t.id;
           } else {
-            // If transporter wasn't on this row, check if a route for this loading town already has a transporter assigned or use the first available transporter
-            const prevSameLoad = RRows.find(x => norm(x.loading) === norm(rt.loading) && x.transporterId);
-            if (prevSameLoad) tid = prevSameLoad.transporterId;
-            else if (TList.length === 1) tid = TList[0].id;
+            if (pv.defaultTransporterId) tid = pv.defaultTransporterId;
+            else {
+              const prevSameLoad = RRows.find(x => norm(x.loading) === norm(rt.loading) && x.transporterId);
+              if (prevSameLoad) tid = prevSameLoad.transporterId;
+              else if (TList.length === 1) tid = TList[0].id;
+            }
           }
           const existingIdx = RRows.findIndex(x =>
             norm(x.loading) === norm(rt.loading) &&

@@ -817,7 +817,20 @@ const $ = s => document.querySelector(s);
 const esc = v => String(v ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const norm = s => String(s ?? "").trim().toLowerCase().replace(/\s+/g, " ");
 const key = s => String(s ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
-const num = v => { if (v === "" || v === null || v === undefined) return null; const n = Number(v); return isFinite(n) ? n : null; };
+const num = v => {
+  if (v === "" || v === null || v === undefined || typeof v === "boolean") return null;
+  if (typeof v === "number") return isFinite(v) ? v : null;
+  const cleaned = String(v).replace(/,/g, "").replace(/₹|rs\.?|inr|\s+/gi, "").trim();
+  if (!cleaned) return null;
+  const direct = Number(cleaned);
+  if (isFinite(direct)) return direct;
+  const m = cleaned.match(/^([+-]?\d+(?:\.\d+)?)\s*(?:kl|mt|ton|tons|kg|ltr|l|\/-)?$/i);
+  if (m) {
+    const parsed = Number(m[1]);
+    return isFinite(parsed) ? parsed : null;
+  }
+  return null;
+};
 const inr = (n, d = 0) => n == null || !isFinite(n) ? "—" : "₹" + Number(n).toLocaleString("en-IN", { minimumFractionDigits: d, maximumFractionDigits: d });
 const nf = (n, d = 0) => n == null || !isFinite(n) ? "—" : Number(n).toLocaleString("en-IN", { minimumFractionDigits: d, maximumFractionDigits: d });
 const fmtDate = iso => { if (!iso) return "—"; const [y, m, d] = iso.split("-").map(Number); return new Date(y, m - 1, d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }); };
@@ -1140,6 +1153,7 @@ async function pullFromNeon(notify = false, force = false) {
       saveLocal("_stateRev", S.stateRev);
     }
 
+    if (autoHealCatalogAndRoutes()) { saveLocal("catalog", S.catalog); pushKeyToNeon("catalog", S.catalog); changed = true; }
     syncUserNamesMap();
     if (changed) dataChanged();
     setSync();
@@ -2059,6 +2073,122 @@ function clsDotColor(cls) {
   if (s.includes("black") || s.includes("dark") || s.includes("furnace")) return "var(--black-oil)";
   return CLS_DOT[cls] || "#6366f1";
 }
+
+function inferProductType(prodName, rawType = "") {
+  const rt = String(rawType || "").trim();
+  if (rt && !/^(white|white liquid)$/i.test(rt)) {
+    if (rt === "black") return "Black";
+    if (rt === "bitumen") return "Bitumen";
+    return rt;
+  }
+  const s = String(prodName || "").toLowerCase();
+  if (/\b(bitumen|bit\b|vg[\s-]*10|vg[\s-]*30|vg[\s-]*40|80\/100|60\/70|crmb|pmb|emulsion|asphalt)/i.test(s)) {
+    return "Bitumen";
+  }
+  if (/\b(furnace|fo\b|380\s*cst|180\s*cst|cbfs|lsfo|lshs|petcoke|pet\s*coke|slope\s*oil|slop\s*oil|bunker|mho|black|heavy\s*oil|tar|pitch)/i.test(s)) {
+    return "Black";
+  }
+  if (/\b(ldo|light\s*diesel|hsd|diesel|lho|ignite\s*oil|base\s*oil|group\s*1|group\s*2|sn\s*150|sn\s*500|yellow|lubricant|lube)/i.test(s)) {
+    return "Yellow liquid";
+  }
+  if (/\b(mto|turpentine|hexane|xyleen|xylene|c9|raffinate|c7|sko|kerosene|solvent|toluene|benzene|naphtha|pe\b|white)/i.test(s)) {
+    return "White liquid";
+  }
+  return rt || "White liquid";
+}
+
+function inferProductUnit(prodName, rawUnit = "") {
+  if (/KL/i.test(String(rawUnit || ""))) return "KL";
+  if (/MT|TON/i.test(String(rawUnit || ""))) return "MT";
+  const s = String(prodName || "").toLowerCase();
+  if (/\b(ldo|hsd|sko|mto|hexane|xyleen|xylene|c9|raffinate|solvent)\b/i.test(s) && !/\b(fo|bitumen|vg|cbfs|lsfo|lshs|petcoke)\b/i.test(s)) {
+    return "MT";
+  }
+  return "MT";
+}
+
+function extractCleanCityFromRefineryName(refName, rawLoc = "") {
+  if (rawLoc && norm(rawLoc) !== norm(refName)) return String(rawLoc).trim();
+  const s = String(refName || "").trim();
+  const words = s.split(/[\s,/-]+/).filter(Boolean);
+  for (const w of words) {
+    if (getCoordsForTown(w) && !/^(iocl|bpcl|hpcl|hpc|bpc|ioc|ril|nayara|cpcl|mrpl|hmel|ongc)$/i.test(w)) {
+      return w.charAt(0).toUpperCase() + w.slice(1).toLowerCase();
+    }
+  }
+  const stripped = s.replace(/\b(IOCL|BPCL|HPCL|HPC|BPC|IOC|RIL|RELIANCE|NAYARA|CPCL|MRPL|HMEL|ONGC|REFINERY|DEPOT|TERMINAL)\b/gi, "").trim();
+  if (stripped) return stripped;
+  return rawLoc || s;
+}
+
+// Automatically heal any products that were wrongly defaulted to "White liquid" and group refinery products/locations cleanly
+function autoHealCatalogAndRoutes() {
+  let changed = false;
+  if (S.catalog?.products) {
+    S.catalog.products.forEach(p => {
+      if (!p._userTypedCls && (!p.cls || p.cls === "White liquid" || p.cls === "white" || p.cls === "black" || p.cls === "bitumen")) {
+        const inferred = inferProductType(p.name, p.cls);
+        if (inferred && inferred !== p.cls) {
+          p.cls = inferred;
+          changed = true;
+        }
+      }
+    });
+  }
+
+  // Merge duplicate refineries (e.g. "RAIPUR HPCL" and "HPCL RAIPUR") and ensure their locations & products sold are grouped
+  if (S.catalog?.sources) {
+    const byNormName = new Map();
+    const mergedSources = [];
+    for (const s of S.catalog.sources) {
+      // Fix location if location is identical to full refinery name like "RAIPUR HPCL"
+      const locs = getRefineryLocations(s).map(l => norm(l) === norm(s.name) ? extractCleanCityFromRefineryName(s.name, l) : l);
+      if (JSON.stringify(locs) !== JSON.stringify(s.locations)) {
+        s.locations = [...new Set(locs.filter(Boolean))];
+        s.loading = s.locations.join(", ");
+        changed = true;
+      }
+      const keyTokens = norm(s.name).split(" ").sort().join(" ");
+      if (byNormName.has(keyTokens) && keyTokens) {
+        const target = byNormName.get(keyTokens);
+        const tLocs = getRefineryLocations(target);
+        s.locations.forEach(l => { if (!tLocs.some(x => norm(x) === norm(l))) tLocs.push(l); });
+        target.locations = tLocs;
+        target.loading = tLocs.join(", ");
+        const tProds = Array.isArray(target.products) ? target.products : [];
+        (s.products || []).forEach(pid => { if (!tProds.includes(pid)) tProds.push(pid); });
+        target.products = tProds;
+        changed = true;
+      } else {
+        byNormName.set(keyTokens, s);
+        mergedSources.push(s);
+      }
+    }
+    if (mergedSources.length !== S.catalog.sources.length) {
+      S.catalog.sources = mergedSources;
+    }
+
+    // Also link products from S.cycles and S.routes into each matching refinery's s.products list
+    S.catalog.sources.forEach(s => {
+      const sLocs = getRefineryLocations(s).map(norm);
+      const fromCycles = (S.cycles || []).flatMap(c => (c.prices || []).filter(p => p.sourceId === s.id && num(p.basic) > 0).map(p => p.productId));
+      const fromRoutes = (S.routes?.rows || []).filter(r => sLocs.includes(norm(r.loading)) || norm(r.loading) === norm(s.name)).map(r => r.productId).filter(Boolean);
+      const combined = [...new Set([...(Array.isArray(s.products) ? s.products : []), ...fromCycles, ...fromRoutes])];
+      // If s.products previously had ALL 30+ catalog products selected by default when only specific ones exist, narrow to actual or keep explicit
+      const allCount = (S.catalog.products || []).length;
+      if (allCount > 10 && Array.isArray(s.products) && s.products.length >= allCount - 2 && (fromCycles.length > 0 || fromRoutes.length > 0)) {
+        s.products = [...new Set([...fromCycles, ...fromRoutes])];
+        changed = true;
+      } else if (combined.length > (s.products || []).length && (fromCycles.length > 0 || fromRoutes.length > 0)) {
+        s.products = combined;
+        changed = true;
+      }
+    });
+  }
+
+  return changed;
+}
+
 function displayTypeLabel(cls) {
   if (!cls) return "White liquid";
   if (cls === "white") return "White liquid";
@@ -2824,9 +2954,21 @@ function viewRoutes() {
   const pend = rows.filter(r => num(r.rate) === null).length;
   const dis = S.canWrite ? "" : "disabled";
 
+  const unsetCount = vis.filter(({ r }) => !r.transporterId).length;
   V().innerHTML = `
-   <div class="actions" style="justify-content:space-between;margin-bottom:12px"><div><h3>Transport rates</h3><p class="tiny" style="margin:2px 0 0">Rate per MT or KL from each loading point to each delivery point. Edits save automatically.</p></div>
-   <button class="btn primary" id="addr" ${dis}>＋ Add transport rate</button></div>
+   <div class="actions" style="justify-content:space-between;margin-bottom:12px"><div><h3>Transport rates</h3><p class="tiny" style="margin:2px 0 0">Rate per MT or KL from each loading location to each delivery location. Edits save automatically.</p></div>
+   <div class="actions">
+     ${S.canWrite && unsetCount > 0 && T.length > 0 ? `
+     <div class="flex items-center gap-1.5 bg-amber-50 border border-amber-300 px-2.5 py-1 rounded-xl">
+       <span class="text-xs font-bold text-amber-900">${unsetCount} route(s) without transporter:</span>
+       <select id="bulk-assign-tr" style="width:auto;padding:4px 8px;font-size:12px">
+         <option value="">Assign transporter to shown routes…</option>
+         ${T.map(t => `<option value="${t.id}">${esc(t.name)}</option>`).join("")}
+       </select>
+       <button type="button" id="btn-bulk-assign-tr" class="btn small primary">Apply</button>
+     </div>` : ""}
+     <button class="btn primary" id="addr" ${dis}>＋ Add transport rate</button>
+   </div></div>
    <div class="toolbar">
      <div class="field"><label class="lbl" for="f-text">Search</label><input type="search" id="f-text" value="${esc(f.text)}" placeholder="Town, note, transporter"></div>
      <div class="field"><label class="lbl" for="f-prod">Product</label><select id="f-prod"><option value="">All products</option>${S.catalog.products.map(p => `<option value="${p.id}" ${f.product === p.id ? "selected" : ""}>${esc(p.name)}</option>`).join("")}</select></div>
@@ -2866,6 +3008,21 @@ function viewRoutes() {
     if (!b.dataset.armed) { b.dataset.armed = 1; b.textContent = "Delete?"; return; }
     S.routes.rows.splice(+b.dataset.rdel, 1); saveDoc("master/routes", S.routes, 0); viewRoutes();
   });
+  const batBtn = $("#btn-bulk-assign-tr");
+  if (batBtn) batBtn.onclick = () => {
+    const tid = $("#bulk-assign-tr")?.value;
+    if (!tid) { toast("Pick a transporter from the dropdown first"); return; }
+    let count = 0;
+    vis.forEach(({ r }) => {
+      if (!r.transporterId) { r.transporterId = tid; count++; }
+    });
+    if (!count) {
+      vis.forEach(({ r }) => { r.transporterId = tid; count++; });
+    }
+    saveDoc("master/routes", S.routes, 0);
+    viewRoutes();
+    toast(`Assigned transporter to ${count} route(s)!`);
+  };
   $("#addr").onclick = () => {
     if (!S.canWrite) return;
     S.routes = S.routes || { rows: [] };
@@ -3018,57 +3175,61 @@ function syncRefineryProductsToLatestCycle(sourceId, productIds) {
 
 function addInlineLocationToRefinery(si, rawLoc) {
   if (!S.canWrite) return;
-  const loc = String(rawLoc || "").trim();
-  if (!loc) { toast("Type a location name first"); return; }
+  const parts = String(rawLoc || "").split(",").map(x => x.trim()).filter(Boolean);
+  if (!parts.length) { toast("Type a location name first"); return; }
   const row = S.catalog.sources[si];
   if (!row) return;
   const locs = getRefineryLocations(row);
-  if (!locs.some(x => norm(x) === norm(loc))) {
-    locs.push(loc);
-  }
+  parts.forEach(loc => {
+    if (!locs.some(x => norm(x) === norm(loc))) locs.push(loc);
+  });
   row.locations = locs;
   row.loading = locs.join(", ");
   saveDoc("master/catalog", S.catalog, 0);
   viewRefineries();
-  toast(`Added location "${loc}" to ${row.name || "refinery"}`);
+  toast(`Added location(s) "${parts.join(", ")}" to ${row.name || "refinery"}`);
 }
 
 function addInlineProductToRefinery(si, rawProdName) {
   if (!S.canWrite) return;
-  const pName = String(rawProdName || "").trim();
-  if (!pName) { toast("Type a product name first (e.g. MTO, LDO)"); return; }
+  // Support adding multiple comma-separated products at once (e.g. "MTO, LDO, FO")
+  const names = String(rawProdName || "").split(",").map(x => x.trim()).filter(Boolean);
+  if (!names.length) { toast("Type a product name first (e.g. MTO, LDO)"); return; }
   const row = S.catalog.sources[si];
   if (!row) return;
-
-  // Check if product already exists in catalog (or reuse an empty placeholder row if one exists)
-  let prod = (S.catalog.products || []).find(p => norm(p.name) === norm(pName) || norm(p.id) === norm(pName));
-  if (!prod) {
-    // Check if there is an unnamed placeholder product row we can populate
-    const emptyProd = (S.catalog.products || []).find(p => !(p.name || "").trim());
-    const newId = productIdFor(pName, "");
-    if (emptyProd) {
-      emptyProd.id = newId;
-      emptyProd.name = pName;
-      emptyProd.unit = emptyProd.unit || "MT";
-      emptyProd.cls = emptyProd.cls || "White liquid";
-      emptyProd.aliases = [pName.toUpperCase()];
-      delete emptyProd._autoCode;
-      prod = emptyProd;
-    } else {
-      prod = { id: newId, name: pName, unit: "MT", cls: "White liquid", aliases: [pName.toUpperCase()] };
-      S.catalog.products.push(prod);
-    }
-  }
-
   const sold = getRefineryProducts(row);
-  if (!sold.includes(prod.id)) {
-    sold.push(prod.id);
+  const addedNames = [];
+
+  for (const pName of names) {
+    let prod = (S.catalog.products || []).find(p => norm(p.name) === norm(pName) || norm(p.id) === norm(pName));
+    if (!prod) {
+      const emptyProd = (S.catalog.products || []).find(p => !(p.name || "").trim());
+      const newId = productIdFor(pName, "");
+      const autoType = inferProductType(pName, "");
+      if (emptyProd) {
+        emptyProd.id = newId;
+        emptyProd.name = pName;
+        emptyProd.unit = emptyProd.unit || "MT";
+        emptyProd.cls = autoType;
+        emptyProd.aliases = [pName.toUpperCase()];
+        delete emptyProd._autoCode;
+        prod = emptyProd;
+      } else {
+        prod = { id: newId, name: pName, unit: "MT", cls: autoType, aliases: [pName.toUpperCase()] };
+        S.catalog.products.push(prod);
+      }
+    }
+    if (!sold.includes(prod.id)) {
+      sold.push(prod.id);
+      syncRefineryProductsToLatestCycle(row.id, [prod.id]);
+    }
+    addedNames.push(prod.name);
   }
+
   row.products = sold;
-  syncRefineryProductsToLatestCycle(row.id, [prod.id]);
   saveDoc("master/catalog", S.catalog, 0);
   viewRefineries();
-  toast(`Added product "${prod.name}" to ${row.name || "refinery"}`);
+  toast(`Added ${addedNames.join(", ")} to ${row.name || "refinery"}`);
 }
 
 function viewRefineries() {
@@ -3125,18 +3286,28 @@ function viewRefineries() {
              <td style="vertical-align:top">
                <div class="stack" style="gap:6px">
                  <div class="chips" style="gap:5px">
-                   ${namedProds.map(p => {
-                     const on = sold.includes(p.id);
-                     return `<button type="button" data-sprod="${i}|${esc(p.id)}" aria-pressed="${on}" class="chip" style="padding:3px 9px;font-size:11.5px" ${dis}>
-                       <span class="dot" style="background:${clsDotColor(p.cls)}"></span>
-                       <span>${esc(shortName(p))}</span>
-                     </button>`;
-                   }).join("") || `<span class="tiny">Type a product below to add</span>`}
+                   ${sold.map(pid => {
+                     const p = namedProds.find(x => x.id === pid);
+                     if (!p) return "";
+                     return `<span class="chip" style="padding:3px 10px;font-size:11.5px;background:var(--accent);border-color:var(--accent);color:#fff">
+                       <span class="dot" style="background:${clsDotColor(p.cls)};border:1px solid #fff"></span>
+                       <span>${esc(p.name)}</span>
+                       ${S.canWrite ? `<button type="button" data-sprod="${i}|${esc(p.id)}" class="ml-1 text-white/80 hover:text-white font-extrabold" title="Remove product from this refinery">×</button>` : ""}
+                     </span>`;
+                   }).join("") || `<span class="tiny">No products assigned yet — add or select below</span>`}
                  </div>
                  ${S.canWrite ? `
-                 <div class="flex items-center gap-1">
-                   <input type="text" data-addprod-in="${i}" placeholder="+ Add product (e.g. MTO, LDO)" style="padding:4px 8px;font-size:12px;min-width:150px">
-                   <button type="button" data-addprod-btn="${i}" class="btn small primary" style="padding:4px 9px">+ Add</button>
+                 <div class="flex flex-wrap items-center gap-1.5">
+                   <select data-pickprod-sel="${i}" style="width:auto;min-width:145px;padding:4px 8px;font-size:12px">
+                     <option value="">+ Select existing product…</option>
+                     ${namedProds.filter(p => !sold.includes(p.id)).map(p => `<option value="${esc(p.id)}">${esc(p.name)} (${p.unit})</option>`).join("")}
+                     <option value="__ALL__">✓ Add All Products (${namedProds.length})</option>
+                     <option value="__CLEAR__">✕ Clear All Products</option>
+                   </select>
+                   <div class="flex items-center gap-1">
+                     <input type="text" data-addprod-in="${i}" placeholder="Or type new (e.g. MTO, LDO)" style="padding:4px 8px;font-size:12px;min-width:155px">
+                     <button type="button" data-addprod-btn="${i}" class="btn small primary" style="padding:4px 9px">+ Add</button>
+                   </div>
                  </div>` : ""}
                </div>
              </td>
@@ -3235,7 +3406,7 @@ function viewRefineries() {
     }
   }));
 
-  // Toggle existing product chip on a refinery
+  // Remove product pill from a refinery
   document.querySelectorAll("[data-sprod]").forEach(btn => btn.onclick = () => {
     if (!S.canWrite) return;
     const [siStr, pid] = btn.getAttribute("data-sprod").split("|");
@@ -3244,13 +3415,32 @@ function viewRefineries() {
     const sold = getRefineryProducts(row);
     const idx = sold.indexOf(pid);
     if (idx >= 0) sold.splice(idx, 1);
-    else {
-      sold.push(pid);
-      syncRefineryProductsToLatestCycle(row.id, [pid]);
-    }
     row.products = sold;
-    btn.setAttribute("aria-pressed", String(sold.includes(pid)));
-    saveC(250);
+    saveC(0);
+    viewRefineries();
+  });
+
+  // Select existing product from dropdown to add to refinery
+  document.querySelectorAll("[data-pickprod-sel]").forEach(sel => sel.onchange = () => {
+    if (!S.canWrite || !sel.value) return;
+    const si = +sel.getAttribute("data-pickprod-sel");
+    const row = S.catalog.sources[si];
+    if (!row) return;
+    if (sel.value === "__ALL__") {
+      row.products = namedProds.map(p => p.id);
+      syncRefineryProductsToLatestCycle(row.id, row.products);
+    } else if (sel.value === "__CLEAR__") {
+      row.products = [];
+    } else {
+      const sold = getRefineryProducts(row);
+      if (!sold.includes(sel.value)) {
+        sold.push(sel.value);
+        syncRefineryProductsToLatestCycle(row.id, [sel.value]);
+      }
+      row.products = sold;
+    }
+    saveC(0);
+    viewRefineries();
   });
 
   // Inline "+ Add product" inside a refinery row (via button click or Enter key)
@@ -3274,7 +3464,15 @@ function viewRefineries() {
     if (!row) return;
     const field = inp.dataset.f;
     row[field] = e.target.value;
+    if (field === "cls") {
+      row._userTypedCls = true;
+    }
     if (field === "name") {
+      if (!row._userTypedCls) {
+        row.cls = inferProductType(e.target.value, "");
+        const clsInp = document.querySelector(`input[data-p="${idx}"][data-f="cls"]`);
+        if (clsInp && document.activeElement !== clsInp) clsInp.value = row.cls;
+      }
       const cleanName = e.target.value.trim();
       if (cleanName) {
         row.aliases = [cleanName.toUpperCase()];
@@ -3485,34 +3683,55 @@ function classifyExcelColumn(headerText, sampleValues, siblingHeaders = []) {
   const normH = norm(rawH);
   if (!normH) return { field: "ignore", confidence: 0, reason: "Empty header" };
 
-  // 1. Check learned user mappings first (100% confidence when trained by user!)
+  // 1. Check learned user mappings first
   const learned = S.mlMappings?.[normH];
   if (learned && (ML_FIELD_DEFS[learned] || learned === "ignore")) {
     return { field: learned, confidence: 1.0, reason: "Learned from your previous mapping" };
   }
 
-  // 2. Check explicit ignore patterns (e.g. GST, HSN, Sr No, Total, Net after discount)
+  // 2. Check explicit ignore patterns
   for (const ign of ML_FIELD_DEFS.ignore.synonyms) {
     if (normH === ign || (ign.length >= 4 && normH.includes(ign) && !normH.includes("discount"))) {
       return { field: "ignore", confidence: 0.92, reason: "Extra / calculated column ignored" };
     }
   }
 
-  // 3. Profile sample values in this column (numeric range, unit strings, city names, product names)
-  const nonEmpty = (sampleValues || []).filter(v => v !== null && v !== undefined && String(v).trim() !== "").slice(0, 25);
+  // 3. Profile sample values in this column
+  const nonEmpty = (sampleValues || []).filter(v => v !== null && v !== undefined && String(v).trim() !== "").slice(0, 30);
   const nums = nonEmpty.map(num).filter(n => n !== null);
   const numRatio = nonEmpty.length ? nums.length / nonEmpty.length : 0;
   const avgNum = nums.length ? nums.reduce((a, b) => a + b, 0) / nums.length : 0;
   const unitRatio = nonEmpty.length ? nonEmpty.filter(v => /^(MT|KL|KG|LTR|TON)$/i.test(String(v).trim())).length / nonEmpty.length : 0;
+  const capPatternRatio = nonEmpty.length ? nonEmpty.filter(v => /^\d+(\.\d+)?\s*(KL|MT|TON)/i.test(String(v).trim()) || (num(v) >= 5 && num(v) <= 60)).length / nonEmpty.length : 0;
+  const phoneRatio = nonEmpty.length ? nonEmpty.filter(v => /^[+\d\s()-]{8,16}$/.test(String(v).trim()) && String(v).replace(/\D/g, "").length >= 8).length / nonEmpty.length : 0;
   const knownTownRatio = nonEmpty.length ? nonEmpty.filter(v => !!getCoordsForTown(String(v))).length / nonEmpty.length : 0;
-  const knownProdRatio = nonEmpty.length ? nonEmpty.filter(v => !!matchProduct(String(v))).length / nonEmpty.length : 0;
-  const knownSrcRatio = nonEmpty.length ? nonEmpty.filter(v => !!matchSource(String(v)) || /^(IOCL|BPCL|HPCL|RIL|NAYARA|CPCL|MRPL|HMEL|ONGC)/i.test(String(v).trim())).length / nonEmpty.length : 0;
+  const knownProdRatio = nonEmpty.length ? nonEmpty.filter(v => !!matchProduct(String(v)) || /\b(FO|LDO|MTO|VG\s*10|VG\s*30|VG\s*40|CBFS|LSFO|LSHS|BITUMEN|HEXANE|XYLEEN|XYLENE|C9)\b/i.test(String(v))).length / nonEmpty.length : 0;
+  const knownSrcRatio = nonEmpty.length ? nonEmpty.filter(v => !!matchSource(String(v)) || /\b(IOCL|BPCL|HPCL|RIL|NAYARA|CPCL|MRPL|HMEL|ONGC)\b/i.test(String(v))).length / nonEmpty.length : 0;
+  const knownTransRatio = nonEmpty.length ? nonEmpty.filter(v =>
+    /\b(logistics|carrier|carriers|transport|transportation|transline|roadways|movers|fleet|cargo|express|lines|travels|bulk|tanker)\b/i.test(String(v)) ||
+    (S.transporters?.list || []).some(t => norm(t.name) === norm(String(v)))
+  ).length / nonEmpty.length : 0;
 
   const hasTransportSibling = siblingHeaders.some(h => /transport|freight|delivery|destination|unloading|transporter/i.test(String(h)));
   const hasRefineryRateSibling = siblingHeaders.some(h => /basic|discount|ex gate|revised/i.test(String(h)));
+  const hasPhoneOrCapSibling = siblingHeaders.some(h => /phone|mobile|contact|capacity|vehicle|tanker|category/i.test(String(h)));
+
+  // Direct high-confidence rules for unambiguous headers + data profiles
+  if (phoneRatio > 0.4 || /^(phone|mobile|contact|contact no|tel)/i.test(normH)) {
+    return { field: "phone", confidence: 0.98, reason: "Matched Contact Phone" };
+  }
+  if ((/^(transporter|transporter name|carrier|logistics|transport name|party name|vendor name)/i.test(normH) || (normH === "name" && hasPhoneOrCapSibling) || knownTransRatio > 0.35) && numRatio < 0.3) {
+    return { field: "transporter", confidence: 0.97, reason: "Matched Transporter Name" };
+  }
+  if (/^(capacity|tanker capacity|truck capacity|tanker size|load capacity)/i.test(normH) || (normH.includes("capacity") && capPatternRatio > 0.3)) {
+    return { field: "capacity", confidence: 0.96, reason: "Matched Vehicle Capacity" };
+  }
+  if (/^(vehicle|vehicle category|tanker type|truck type|category)/i.test(normH) && hasPhoneOrCapSibling) {
+    return { field: "vehicle", confidence: 0.95, reason: "Matched Vehicle Category" };
+  }
 
   let bestField = "ignore";
-  let bestScore = 0.38; // Threshold below which column is treated as extra/ignored
+  let bestScore = 0.38;
 
   for (const [fieldKey, def] of Object.entries(ML_FIELD_DEFS)) {
     if (fieldKey === "ignore") continue;
@@ -3522,33 +3741,37 @@ function classifyExcelColumn(headerText, sampleValues, siblingHeaders = []) {
       if (s > headerScore) headerScore = s;
     }
 
-    // Disambiguate generic "rate" or "price" using context & numeric distribution
     if (normH === "rate" || normH === "price" || normH.includes("rate")) {
-      if (fieldKey === "freight" && hasTransportSibling && !normH.includes("basic")) headerScore = Math.max(headerScore, 0.88);
-      if (fieldKey === "basic" && hasRefineryRateSibling && !normH.includes("transport") && !normH.includes("freight")) headerScore = Math.max(headerScore, 0.88);
+      if (fieldKey === "freight" && hasTransportSibling && !normH.includes("basic") && numRatio > 0.3) headerScore = Math.max(headerScore, 0.88);
+      if (fieldKey === "basic" && hasRefineryRateSibling && !normH.includes("transport") && !normH.includes("freight") && numRatio > 0.3) headerScore = Math.max(headerScore, 0.88);
     }
 
-    // Combine header similarity with data type feature boost
     let dataBoost = 0;
     if (fieldKey === "basic") {
-      if (numRatio > 0.6 && avgNum >= 15000 && avgNum <= 250000) dataBoost += 0.22;
-      else if (numRatio < 0.2 && nonEmpty.length > 2) dataBoost -= 0.35;
+      if (numRatio > 0.5 && avgNum >= 15000 && avgNum <= 250000) dataBoost += 0.25;
+      else if (numRatio < 0.2 && nonEmpty.length > 2) dataBoost -= 0.45;
     } else if (fieldKey === "freight") {
-      if (numRatio > 0.5 && avgNum >= 50 && avgNum < 25000) dataBoost += 0.20;
-      else if (numRatio < 0.2 && nonEmpty.length > 2) dataBoost -= 0.30;
+      // Freight MUST be numeric, never text names of transporters!
+      if (numRatio > 0.4 && avgNum >= 50 && avgNum < 25000 && phoneRatio < 0.2) dataBoost += 0.24;
+      else if (numRatio < 0.2 && nonEmpty.length > 1) dataBoost -= 0.55;
     } else if (fieldKey === "discount") {
       if (numRatio > 0.4 && avgNum >= 0 && avgNum <= 15000) dataBoost += 0.18;
+    } else if (fieldKey === "capacity") {
+      if (capPatternRatio > 0.4 && avgNum >= 5 && avgNum <= 80) dataBoost += 0.28;
     } else if (fieldKey === "unit") {
       if (unitRatio > 0.5) dataBoost += 0.35;
     } else if (fieldKey === "product") {
-      if (knownProdRatio > 0.3) dataBoost += 0.28;
-      if (numRatio > 0.7) dataBoost -= 0.40;
+      if (knownProdRatio > 0.25) dataBoost += 0.30;
+      if (numRatio > 0.7) dataBoost -= 0.45;
     } else if (fieldKey === "refinery") {
-      if (knownSrcRatio > 0.3) dataBoost += 0.28;
-      if (numRatio > 0.7) dataBoost -= 0.40;
+      if (knownSrcRatio > 0.25) dataBoost += 0.30;
+      if (numRatio > 0.7) dataBoost -= 0.45;
+    } else if (fieldKey === "transporter") {
+      if (knownTransRatio > 0.25) dataBoost += 0.35;
+      if (numRatio > 0.5) dataBoost -= 0.50;
     } else if (fieldKey === "location" || fieldKey === "delivery") {
-      if (knownTownRatio > 0.3) dataBoost += 0.22;
-      if (numRatio > 0.7) dataBoost -= 0.40;
+      if (knownTownRatio > 0.25) dataBoost += 0.22;
+      if (numRatio > 0.7) dataBoost -= 0.45;
     }
 
     const totalScore = Math.min(0.99, headerScore + dataBoost);
@@ -3574,7 +3797,6 @@ function trainMlMapping(headerText, targetField) {
   pushKeyToNeon("mlMappings", S.mlMappings);
 }
 
-// Find the best header row in any sheet (even if rows 1-5 have title banners or dates)
 function detectHeaderRowIndex(rows) {
   let bestIdx = 0;
   let bestCount = 0;
@@ -3591,7 +3813,36 @@ function detectHeaderRowIndex(rows) {
   return bestIdx;
 }
 
-// Parse a sheet using the current column mapping array
+// Parse vehicle capacity & category accurately from Excel cells (e.g. "25 KL", "18 KL, 24 KL", "30 MT Tanker")
+function parseVehiclesFromExcelRow(rawVeh, rawCap, rawUnit) {
+  const unitDefault = /MT|TON/i.test(String(rawUnit || "") + " " + String(rawCap || "") + " " + String(rawVeh || "")) ? "MT" : "KL";
+  const capStr = String(rawCap ?? "").trim();
+  const vehStr = String(rawVeh ?? "").trim();
+
+  // Check if multiple capacities are listed in one cell (e.g. "18, 20, 25" or "20 KL / 25 KL")
+  const multiMatches = [...(capStr || vehStr).matchAll(/(\d+(?:\.\d+)?)\s*(KL|MT|TON)?/gi)];
+  if (multiMatches.length > 1) {
+    return multiMatches.map(m => {
+      const c = Number(m[1]);
+      const u = /MT|TON/i.test(m[2] || unitDefault) ? "MT" : "KL";
+      return { category: `${c} ${u} Tanker`, capacity: c, unit: u };
+    });
+  }
+
+  const capNum = num(rawCap) ?? num(rawVeh);
+  if (capNum && capNum > 0) {
+    const u = /MT|TON/i.test(capStr + " " + vehStr + " " + String(rawUnit || "")) ? "MT" : "KL";
+    const cat = vehStr && !/^\d+(\.\d+)?$/.test(vehStr)
+      ? vehStr
+      : `${capNum} ${u} Tanker`;
+    return [{ category: cat, capacity: capNum, unit: u }];
+  }
+  if (vehStr) {
+    return [{ category: vehStr, capacity: null, unit: unitDefault }];
+  }
+  return [];
+}
+
 function extractSheetDataWithMapping(sheetRows, headerIdx, colMap, defaultDate) {
   const dataRows = sheetRows.slice(headerIdx + 1);
   const idxOf = f => colMap.findIndex(m => m.field === f);
@@ -3613,7 +3864,6 @@ function extractSheetDataWithMapping(sheetRows, headerIdx, colMap, defaultDate) 
   const iDate = idxOf("date");
   const iNote = idxOf("note");
 
-  // Decide table kind from mapped columns
   let kind = "unknown";
   if (iBasic >= 0 && (iRef >= 0 || iProd >= 0)) kind = "rates";
   else if (iFreight >= 0 || (iLoc >= 0 && iDel >= 0)) kind = "transport";
@@ -3632,12 +3882,14 @@ function extractSheetDataWithMapping(sheetRows, headerIdx, colMap, defaultDate) 
     matchedCols: colMap.filter(m => m.field !== "ignore" && m.header)
   };
 
+  // Carry-forward variables for merged cells in Excel!
   let lastRefName = "";
+  let lastLocName = "";
   let lastProdName = "";
+  let lastTransName = "";
 
   for (const r of dataRows) {
     if (!Array.isArray(r) || r.every(c => c === null || c === undefined || String(c).trim() === "")) continue;
-    // Skip total/summary footer rows
     const firstCell = String(r[0] ?? "").trim();
     if (/^(total|grand total|sub total|average|note:|terms)/i.test(firstCell)) continue;
 
@@ -3652,7 +3904,7 @@ function extractSheetDataWithMapping(sheetRows, headerIdx, colMap, defaultDate) 
     const valFreight = iFreight >= 0 ? num(r[iFreight]) : null;
     const rawTrans = iTrans >= 0 ? String(r[iTrans] ?? "").trim() : "";
     const valMinQty = iMinQty >= 0 ? num(r[iMinQty]) : null;
-    const valCap = iCap >= 0 ? num(r[iCap]) : null;
+    const rawCap = iCap >= 0 ? r[iCap] : null;
     const rawVeh = iVeh >= 0 ? String(r[iVeh] ?? "").trim() : "";
     const rawPhone = iPhone >= 0 ? String(r[iPhone] ?? "").trim() : "";
     const rawNote = iNote >= 0 ? String(r[iNote] ?? "").trim() : "";
@@ -3661,63 +3913,86 @@ function extractSheetDataWithMapping(sheetRows, headerIdx, colMap, defaultDate) 
       if (dParsed) extracted.date = dParsed;
     }
 
+    // Update merged-cell carry-forward state
     if (rawRef) lastRefName = rawRef;
+    if (rawLoc) lastLocName = rawLoc;
     if (rawProd) lastProdName = rawProd;
+    if (rawTrans) lastTransName = rawTrans;
 
     const effRef = rawRef || lastRefName;
+    const effLoc = rawLoc || lastLocName;
     const effProd = rawProd || lastProdName;
+    const effTrans = rawTrans || lastTransName;
 
     if (kind === "rates") {
       if (!effRef && !effProd) continue;
       if (valBasic === null || !(valBasic > 0)) continue;
-      extracted.rateRows.push({
-        refName: effRef || "General Refinery",
-        locName: rawLoc || "",
-        prodName: effProd || "Standard Product",
-        unit: /KL/i.test(rawUnit) ? "KL" : "MT",
-        cls: rawType || "White liquid",
-        basic: valBasic,
-        maxDiscount: valDisc,
-        note: rawNote
-      });
+      const prodList = effProd.split(",").map(x => x.trim()).filter(Boolean);
+      for (const pItem of (prodList.length ? prodList : ["Standard Product"])) {
+        extracted.rateRows.push({
+          refName: effRef || "General Refinery",
+          locName: effLoc || extractCleanCityFromRefineryName(effRef, ""),
+          prodName: pItem,
+          unit: inferProductUnit(pItem, rawUnit),
+          cls: inferProductType(pItem, rawType),
+          basic: valBasic,
+          maxDiscount: valDisc,
+          note: rawNote
+        });
+      }
     } else if (kind === "transport") {
-      if (!rawLoc && !rawDel && !effRef) continue;
-      extracted.routeRows.push({
-        transporterName: rawTrans,
-        loading: rawLoc || effRef || "",
-        delivery: rawDel || "",
-        prodName: effProd || (S.catalog?.products?.[0]?.name || "LDO"),
-        unit: /KL/i.test(rawUnit) ? "KL" : "MT",
-        company: rawRef ? rawRef.split(/\s+/)[0] : "",
-        rate: valFreight,
-        minQty: valMinQty,
-        note: rawNote
-      });
+      if (!effLoc && !rawDel && !effRef) continue;
+      const prodList = (effProd || (S.catalog?.products?.[0]?.name || "LDO")).split(",").map(x => x.trim()).filter(Boolean);
+      for (const pItem of prodList) {
+        extracted.routeRows.push({
+          transporterName: effTrans,
+          loading: effLoc || extractCleanCityFromRefineryName(effRef, "") || "",
+          refName: effRef || "",
+          delivery: rawDel || "",
+          prodName: pItem,
+          unit: inferProductUnit(pItem, rawUnit),
+          cls: inferProductType(pItem, rawType),
+          company: effRef ? effRef.split(/\s+/)[0] : "",
+          rate: valFreight,
+          minQty: valMinQty,
+          note: rawNote
+        });
+      }
     } else if (kind === "transporters") {
-      if (!rawTrans) continue;
+      if (!effTrans) continue;
+      const vehicles = parseVehiclesFromExcelRow(rawVeh, rawCap, rawUnit);
       extracted.transporters.push({
-        name: rawTrans,
+        name: effTrans,
         phone: rawPhone,
         notes: rawNote,
-        vehicleCategory: rawVeh || (valCap ? `${valCap} ${/MT/i.test(rawUnit) ? "MT" : "KL"} Tanker` : "20 KL Tanker"),
-        capacity: valCap || 20,
-        unit: /MT/i.test(rawUnit) ? "MT" : "KL"
+        vehicles
       });
     } else if (kind === "catalog") {
-      if (rawRef) {
-        extracted.newSources.push({
-          name: rawRef,
-          loading: rawLoc || rawRef.split(/\s+/).slice(1).join(" ") || "Depot",
-          prodName: rawProd
-        });
+      const prodList = rawProd ? rawProd.split(",").map(x => x.trim()).filter(Boolean) : [];
+      if (effRef) {
+        if (prodList.length) {
+          prodList.forEach(pItem => {
+            extracted.newSources.push({
+              name: effRef,
+              loading: effLoc || extractCleanCityFromRefineryName(effRef, ""),
+              prodName: pItem
+            });
+          });
+        } else if (rawRef || rawLoc) {
+          extracted.newSources.push({
+            name: effRef,
+            loading: effLoc || extractCleanCityFromRefineryName(effRef, ""),
+            prodName: ""
+          });
+        }
       }
-      if (rawProd) {
+      prodList.forEach(pItem => {
         extracted.newProducts.push({
-          name: rawProd,
-          unit: /KL/i.test(rawUnit) ? "KL" : "MT",
-          cls: rawType || "White liquid"
+          name: pItem,
+          unit: inferProductUnit(pItem, rawUnit),
+          cls: inferProductType(pItem, rawType)
         });
-      }
+      });
     }
   }
 
@@ -3976,17 +4251,24 @@ function renderMasterPreview() {
 function ensureSourceInCatalog(C, refName, locName, prodId) {
   const cleanRef = String(refName || "").trim();
   if (!cleanRef) return null;
-  let s = C.sources.find(x => norm(x.id) === norm(cleanRef) || norm(x.name) === norm(cleanRef) || (x.aliases || []).map(norm).includes(norm(cleanRef)));
+  const normTokens = norm(cleanRef).split(" ").sort().join(" ");
+  let s = C.sources.find(x =>
+    norm(x.id) === norm(cleanRef) ||
+    norm(x.name) === norm(cleanRef) ||
+    norm(x.name).split(" ").sort().join(" ") === normTokens ||
+    (x.aliases || []).map(norm).includes(norm(cleanRef))
+  );
+  const resolvedLoc = extractCleanCityFromRefineryName(cleanRef, locName);
   if (!s) {
     const id = sourceIdFor(cleanRef);
     const firstWord = cleanRef.split(/\s+/)[0] || "Refinery";
-    const initLoc = String(locName || cleanRef.split(/\s+/).slice(1).join(" ") || cleanRef).trim();
+    const initLocs = resolvedLoc ? resolvedLoc.split(",").map(x => x.trim()).filter(Boolean) : [];
     s = {
       id,
       company: firstWord,
       name: cleanRef,
-      loading: initLoc,
-      locations: initLoc ? [initLoc] : [],
+      loading: initLocs.join(", "),
+      locations: initLocs,
       creditDays: 0,
       active: true,
       products: prodId ? [prodId] : [],
@@ -3994,13 +4276,13 @@ function ensureSourceInCatalog(C, refName, locName, prodId) {
     };
     C.sources.push(s);
   } else {
-    if (locName) {
+    if (resolvedLoc) {
       const locs = getRefineryLocations(s);
-      if (!locs.some(l => norm(l) === norm(locName))) {
-        locs.push(String(locName).trim());
-        s.locations = locs;
-        s.loading = locs.join(", ");
-      }
+      resolvedLoc.split(",").map(x => x.trim()).filter(Boolean).forEach(l => {
+        if (!locs.some(existing => norm(existing) === norm(l))) locs.push(l);
+      });
+      s.locations = locs;
+      s.loading = locs.join(", ");
     }
     if (prodId) {
       s.products = Array.isArray(s.products) ? s.products : [];
@@ -4010,19 +4292,20 @@ function ensureSourceInCatalog(C, refName, locName, prodId) {
   return s;
 }
 
-function ensureProductInCatalog(C, prodName, unit = "MT", cls = "White liquid") {
+function ensureProductInCatalog(C, prodName, unit = "MT", cls = "") {
   const cleanProd = String(prodName || "").trim();
   if (!cleanProd) return null;
+  const resolvedCls = inferProductType(cleanProd, cls);
+  const resolvedUnit = inferProductUnit(cleanProd, unit);
   let p = C.products.find(x => norm(x.id) === norm(cleanProd) || norm(x.name) === norm(cleanProd) || (x.aliases || []).map(norm).includes(norm(cleanProd)));
   if (!p) {
-    // Also check if there is an unnamed placeholder product we can reuse
     const emptyP = C.products.find(x => !(x.name || "").trim());
     const id = productIdFor(cleanProd, "");
     if (emptyP) {
       emptyP.id = id;
       emptyP.name = cleanProd;
-      emptyP.unit = unit || "MT";
-      emptyP.cls = cls || "White liquid";
+      emptyP.unit = resolvedUnit;
+      emptyP.cls = resolvedCls;
       emptyP.aliases = [cleanProd.toUpperCase()];
       delete emptyP._autoCode;
       p = emptyP;
@@ -4030,12 +4313,14 @@ function ensureProductInCatalog(C, prodName, unit = "MT", cls = "White liquid") 
       p = {
         id,
         name: cleanProd,
-        unit: unit || "MT",
-        cls: cls || "White liquid",
+        unit: resolvedUnit,
+        cls: resolvedCls,
         aliases: [cleanProd.toUpperCase()]
       };
       C.products.push(p);
     }
+  } else if (!p._userTypedCls && (!p.cls || p.cls === "White liquid" || p.cls === "white") && resolvedCls !== "White liquid") {
+    p.cls = resolvedCls;
   }
   return p;
 }
@@ -4060,8 +4345,12 @@ async function applyMaster() {
       saveLocal("cycles", S.cycles);
     }
 
-    for (const sh of (pv.sheets || []).filter(x => x.on)) {
-      // Save confirmed header mappings into S.mlMappings so the ML model learns from every upload
+    // Process Transporters sheet FIRST so any new transporters are ready before Transport Routes are linked!
+    const orderedSheets = [...(pv.sheets || []).filter(x => x.on)].sort((a, b) =>
+      (a.extracted?.kind === "transporters" ? -1 : 1) - (b.extracted?.kind === "transporters" ? -1 : 1)
+    );
+
+    for (const sh of orderedSheets) {
       (sh.colMap || []).forEach(cm => {
         if (cm.header && cm.field) {
           S.mlMappings = S.mlMappings || {};
@@ -4077,6 +4366,32 @@ async function applyMaster() {
       }
 
       const ex = sh.extracted;
+      if (ex.kind === "transporters" && ex.transporters.length) {
+        for (const tp of ex.transporters) {
+          let t = TList.find(x => norm(x.name) === norm(tp.name));
+          if (!t) {
+            t = { id: "t" + uid(), name: tp.name, phone: tp.phone || "", notes: tp.notes || "", vehicles: [] };
+            TList.push(t);
+          } else {
+            if (tp.phone) t.phone = tp.phone;
+            if (tp.notes) t.notes = tp.notes;
+          }
+          if (tp.vehicles && tp.vehicles.length) {
+            // Remove generic placeholder if real vehicles are being imported
+            if (t.vehicles?.length === 1 && t.vehicles[0].category === "20 KL Tanker" && t.vehicles[0].capacity === 20 && tp.vehicles[0].capacity !== 20) {
+              t.vehicles = [];
+            }
+            t.vehicles = t.vehicles || [];
+            tp.vehicles.forEach(v => {
+              const dup = t.vehicles.find(ev => norm(ev.category) === norm(v.category) && num(ev.capacity) === num(v.capacity) && ev.unit === v.unit);
+              if (!dup) t.vehicles.push(v);
+            });
+          }
+          transportersChanged = true;
+        }
+        done.push(`${ex.transporters.length} transporters`);
+      }
+
       if (ex.kind === "rates" && ex.rateRows.length) {
         const cid = ex.date || todayISO();
         const existingCyc = S.cycles.find(c => c.id === cid);
@@ -4103,28 +4418,46 @@ async function applyMaster() {
 
       if (ex.kind === "transport" && ex.routeRows.length) {
         for (const rt of ex.routeRows) {
-          const p = ensureProductInCatalog(C, rt.prodName, rt.unit, "White liquid");
+          const p = ensureProductInCatalog(C, rt.prodName, rt.unit, rt.cls);
+          if (rt.refName || rt.loading) {
+            // Link product to any matching refinery in catalog!
+            const matchSrc = C.sources.find(s =>
+              norm(s.name) === norm(rt.refName || rt.loading) ||
+              getRefineryLocations(s).map(norm).includes(norm(rt.loading))
+            );
+            if (matchSrc && p) {
+              matchSrc.products = Array.isArray(matchSrc.products) ? matchSrc.products : [];
+              if (!matchSrc.products.includes(p.id)) matchSrc.products.push(p.id);
+            } else if (rt.refName) {
+              ensureSourceInCatalog(C, rt.refName, rt.loading, p?.id);
+            }
+          }
           catalogChanged = true;
           if (!p) continue;
           let tid = "";
           if (rt.transporterName) {
-            let t = TList.find(x => norm(x.name) === norm(rt.transporterName));
+            let t = TList.find(x => norm(x.name) === norm(rt.transporterName) || norm(x.name).includes(norm(rt.transporterName)) || norm(rt.transporterName).includes(norm(x.name)));
             if (!t) {
-              t = { id: "t" + uid(), name: rt.transporterName, phone: "", notes: "", vehicles: [{ category: "20 KL Tanker", capacity: 20, unit: rt.unit || "KL" }] };
+              t = { id: "t" + uid(), name: rt.transporterName, phone: "", notes: "", vehicles: [] };
               TList.push(t);
               transportersChanged = true;
             }
             tid = t.id;
+          } else {
+            // If transporter wasn't on this row, check if a route for this loading town already has a transporter assigned or use the first available transporter
+            const prevSameLoad = RRows.find(x => norm(x.loading) === norm(rt.loading) && x.transporterId);
+            if (prevSameLoad) tid = prevSameLoad.transporterId;
+            else if (TList.length === 1) tid = TList[0].id;
           }
           const existingIdx = RRows.findIndex(x =>
             norm(x.loading) === norm(rt.loading) &&
             norm(x.delivery) === norm(rt.delivery) &&
             x.productId === p.id &&
-            (!tid || x.transporterId === tid)
+            (!tid || !x.transporterId || x.transporterId === tid)
           );
           const rowObj = {
             id: existingIdx >= 0 ? RRows[existingIdx].id : "r" + uid(),
-            transporterId: tid,
+            transporterId: tid || (existingIdx >= 0 ? RRows[existingIdx].transporterId : ""),
             loading: rt.loading,
             delivery: rt.delivery,
             productId: p.id,
@@ -4138,25 +4471,6 @@ async function applyMaster() {
           routesChanged = true;
         }
         done.push(`${ex.routeRows.length} transport routes`);
-      }
-
-      if (ex.kind === "transporters" && ex.transporters.length) {
-        for (const tp of ex.transporters) {
-          let t = TList.find(x => norm(x.name) === norm(tp.name));
-          if (!t) {
-            t = { id: "t" + uid(), name: tp.name, phone: tp.phone || "", notes: tp.notes || "", vehicles: [] };
-            TList.push(t);
-          } else {
-            if (tp.phone) t.phone = tp.phone;
-            if (tp.notes) t.notes = tp.notes;
-          }
-          if (tp.vehicleCategory || tp.capacity) {
-            t.vehicles = t.vehicles || [];
-            t.vehicles.push({ category: tp.vehicleCategory, capacity: tp.capacity, unit: tp.unit });
-          }
-          transportersChanged = true;
-        }
-        done.push(`${ex.transporters.length} transporters`);
       }
 
       if (ex.kind === "catalog") {
@@ -4175,7 +4489,6 @@ async function applyMaster() {
 
     if (catalogChanged) {
       S.catalog = C;
-      saveLocal("catalog", S.catalog);
     }
     if (transportersChanged) {
       S.transporters = { list: TList };
@@ -4185,6 +4498,8 @@ async function applyMaster() {
       S.routes = { rows: RRows };
       saveLocal("routes", S.routes);
     }
+    autoHealCatalogAndRoutes();
+    saveLocal("catalog", S.catalog);
     saveLocal("mlMappings", S.mlMappings || {});
 
     UI.masterPreview = null;
@@ -4919,6 +5234,7 @@ async function boot() {
   S.quoteSeq = loadLocal("quoteSeq", { "26-27": 1 });
   S.got = { all: true, catalog: true, routes: true, cycles: true, settings: true, transporters: true, quotes: true };
 
+  autoHealCatalogAndRoutes();
   // 2. Initialize User/Admin session
   initAuthState();
 

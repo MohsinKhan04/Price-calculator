@@ -290,6 +290,51 @@
         </button>
       </div>
 
+      <!-- Dedicated Role Switcher Card (Effortless 1-Click Switch Between User & Admin like Image 2) -->
+      <div class="p-3 rounded-2xl bg-emerald-50/70 border border-emerald-200/90 space-y-2.5 shadow-2xs">
+        <div class="flex items-center gap-2.5">
+          <div class="w-10 h-10 rounded-full bg-white border-2 border-emerald-300 flex items-center justify-center text-slate-700 font-extrabold text-base shrink-0 shadow-2xs">
+            👤
+          </div>
+          <div class="min-w-0 flex-1">
+            <div id="sidebar-switch-name" class="text-xs font-extrabold text-slate-900 truncate">Admin Desk</div>
+            <div id="sidebar-switch-email" class="text-[10px] text-slate-500 font-mono truncate">admin@goverdhanenergy.com</div>
+            <span id="sidebar-switch-role-pill" class="inline-block mt-0.5 px-2 py-0.5 rounded-full text-[9px] font-extrabold uppercase bg-emerald-700 text-white">Admin</span>
+          </div>
+        </div>
+
+        <!-- Circular Action Pill Bar with "Switch Roles" Tooltip & Toggle Switch (Exact Match to Image 2) -->
+        <div class="p-1.5 rounded-full bg-white/90 border border-emerald-200 flex items-center justify-between gap-2 shadow-2xs">
+          <!-- Green Circular Switch Roles Button with Dark Tooltip on Hover -->
+          <div class="relative group flex items-center gap-2">
+            <button id="btn-effortless-role-switch" type="button" class="w-9 h-9 rounded-full bg-gradient-to-b from-lime-600 to-emerald-700 hover:from-lime-500 hover:to-emerald-600 text-white flex items-center justify-center shadow-md transition-transform active:scale-95 cursor-pointer" aria-label="Switch Roles">
+              <span class="text-base font-black leading-none">⇄</span>
+            </button>
+            <!-- Floating Dark Tooltip "Switch Roles" -->
+            <div class="pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity absolute -top-9 left-0 z-50 bg-slate-900 text-white text-[11px] font-bold px-2.5 py-1 rounded-lg shadow-lg whitespace-nowrap">
+              Switch Roles
+              <span class="absolute -bottom-1 left-3.5 w-2 h-2 bg-slate-900 rotate-45"></span>
+            </div>
+            <div class="leading-tight">
+              <div class="text-[10px] font-extrabold text-slate-800">Switch Roles</div>
+              <div id="sidebar-switch-mode-sub" class="text-[9px] text-emerald-700 font-bold">Admin ⇄ User</div>
+            </div>
+          </div>
+
+          <!-- Effortless Toggle Switch (Admin vs User Mode) -->
+          <button id="btn-role-toggle-pill" type="button" class="w-12 h-6 rounded-full bg-emerald-700 p-0.5 flex items-center transition-colors cursor-pointer shrink-0" title="Toggle between Admin and User dashboard">
+            <span id="role-toggle-knob" class="w-5 h-5 rounded-full bg-white shadow-sm transition-transform translate-x-6"></span>
+          </button>
+        </div>
+
+        <!-- Optional Sub-Selector for User Edit Permission vs Read-Only User -->
+        <div class="grid grid-cols-3 gap-1 pt-0.5">
+          <button type="button" data-fast-role="admin" class="fast-role-btn py-1 px-1.5 rounded-lg text-[10px] font-extrabold bg-emerald-700 text-white text-center transition-colors">👑 Admin</button>
+          <button type="button" data-fast-role="user-edit" class="fast-role-btn py-1 px-1.5 rounded-lg text-[10px] font-bold bg-white text-slate-700 border border-slate-200 text-center transition-colors" title="User Dashboard with Master File Edit Access (Hides SQL/Render/Add User)">✏️ User (Edit)</button>
+          <button type="button" data-fast-role="user-quote" class="fast-role-btn py-1 px-1.5 rounded-lg text-[10px] font-bold bg-white text-slate-700 border border-slate-200 text-center transition-colors" title="User Dashboard with Quote-Only Access (Master File Read-Only)">👤 User (Quote)</button>
+        </div>
+      </div>
+
       <!-- 1. Primary Home / Quote & Analysis Tabs -->
       <div class="space-y-1.5">
         <div class="px-2.5 text-[10px] font-extrabold uppercase tracking-wider text-slate-400">Home &amp; Quote Desk</div>
@@ -1530,7 +1575,32 @@ function applyUserSession(userObj) {
   if (mUser) mUser.textContent = `${userObj.name} (${userObj.email || userObj.username})`;
   if (mRole) mRole.textContent = `Role: ${userObj.role.toUpperCase()} · ${S.canWrite ? "Full Master & Quote Edit" : S.canQuote ? "Can Quote & Save PDFs (Master Read-Only)" : "Read-Only"}`;
 
-  // Strictly hide Admin-only sections (Neon/Render panel, Multi-PC Sync card, Brand/Logo customizer, User Management, Master Upload) from non-admins
+  // Update Sidebar Dedicated Role Switcher Card
+  const swName = $("#sidebar-switch-name"); if (swName) swName.textContent = userObj.name || formatNameFromEmail(userObj.email || userObj.username);
+  const swEmail = $("#sidebar-switch-email"); if (swEmail) swEmail.textContent = userObj.email || (userObj.username ? userObj.username + "@goverdhanenergy.com" : "");
+  const swPill = $("#sidebar-switch-role-pill");
+  if (swPill) {
+    swPill.textContent = isAdmin ? "👑 Admin" : S.canWrite ? "✏️ User (Can Edit)" : "👤 User (Quote Only)";
+    swPill.className = "inline-block mt-0.5 px-2 py-0.5 rounded-full text-[9px] font-extrabold uppercase " +
+      (isAdmin ? "bg-emerald-700 text-white" : S.canWrite ? "bg-indigo-600 text-white" : "bg-slate-600 text-white");
+  }
+  const swSub = $("#sidebar-switch-mode-sub");
+  if (swSub) swSub.textContent = isAdmin ? "Active: Admin" : S.canWrite ? "Active: User (Editor)" : "Active: User (Quote)";
+  const toggleBtn = $("#btn-role-toggle-pill");
+  const toggleKnob = $("#role-toggle-knob");
+  if (toggleBtn && toggleKnob) {
+    toggleBtn.className = "w-12 h-6 rounded-full p-0.5 flex items-center transition-colors cursor-pointer shrink-0 " + (isAdmin ? "bg-emerald-700" : "bg-slate-400");
+    toggleKnob.className = "w-5 h-5 rounded-full bg-white shadow-sm transition-transform " + (isAdmin ? "translate-x-6" : "translate-x-0");
+  }
+  const activeFastMode = isAdmin ? "admin" : S.canWrite ? "user-edit" : "user-quote";
+  document.querySelectorAll("[data-fast-role]").forEach(b => {
+    const on = b.getAttribute("data-fast-role") === activeFastMode;
+    b.className = on
+      ? "fast-role-btn py-1 px-1.5 rounded-lg text-[10px] font-extrabold bg-emerald-700 text-white text-center transition-colors shadow-2xs"
+      : "fast-role-btn py-1 px-1.5 rounded-lg text-[10px] font-bold bg-white text-slate-700 border border-slate-200 hover:border-emerald-400 text-center transition-colors";
+  });
+
+  // Strictly hide Admin-only sections (Neon/Render SQL panel, Multi-PC Sync card, Brand/Logo customizer, Add/Manage Users) from ALL non-admins (even Users with canEditMaster!)
   const adminSec = $("#sidebar-admin-section"); if (adminSec) adminSec.hidden = !isAdmin;
   const syncCard = $("#sidebar-multisync-card"); if (syncCard) syncCard.hidden = !isAdmin;
   const brandSec = $("#sidebar-brand-section"); if (brandSec) brandSec.hidden = !isAdmin;
@@ -2133,8 +2203,9 @@ function formatSupplyPointDisplayName(brand, loc) {
 
 function getSourceBrandName(s) {
   if (!s) return "";
-  if (s.brandName && String(s.brandName).trim()) return String(s.brandName).trim();
+  if (s.brandName !== undefined && s.brandName !== null) return String(s.brandName);
   const rawName = String(s.name || s.company || "").trim();
+  if (!rawName) return "";
   const loc = String(s.loading || (s.locations && s.locations[0]) || "").trim();
   if (loc && rawName.toLowerCase().endsWith(`(${loc.toLowerCase()})`)) {
     return rawName.slice(0, rawName.length - loc.length - 2).trim();
@@ -2142,7 +2213,7 @@ function getSourceBrandName(s) {
   if (loc && norm(rawName) !== norm(loc) && rawName.toLowerCase().endsWith(" " + loc.toLowerCase())) {
     return rawName.slice(0, rawName.length - loc.length - 1).trim();
   }
-  return s.company || rawName || "Refinery";
+  return s.company || rawName;
 }
 
 function autoHealCatalogAndRoutes() {
@@ -2206,12 +2277,14 @@ function autoHealCatalogAndRoutes() {
       }
     }
 
-    // Deduplicate any identical (brandName, loading) supply points, merging their products
+    // Deduplicate any identical non-empty (brandName, loading) supply points, merging their products
     const byBrandLoc = new Map();
     const deduped = [];
     for (const s of expanded) {
-      const keyStr = `${norm(getSourceBrandName(s))}|${norm(s.loading || "")}`;
-      if (byBrandLoc.has(keyStr) && s.loading) {
+      const bNorm = norm(getSourceBrandName(s));
+      const lNorm = norm(s.loading || "");
+      const keyStr = `${bNorm}|${lNorm}`;
+      if (bNorm && lNorm && byBrandLoc.has(keyStr)) {
         const existing = byBrandLoc.get(keyStr);
         const mergedProds = [...new Set([...(existing.products || []), ...(s.products || [])])];
         existing.products = mergedProds;
@@ -2877,7 +2950,7 @@ function viewCycles() {
   V().innerHTML = `
    <div class="actions" style="justify-content:space-between;margin-bottom:12px"><div><h3>Refinery rate revisions</h3><p class="tiny" style="margin:2px 0 0">Refineries revise rates every 15 days. Each revision is kept, so price history and comparisons stay available.</p></div>
    <div class="actions">
-     ${S.canWrite && cyc.length ? `<button class="btn danger" id="del-all-cycles" type="button">🗑️ Delete All Cycles (${cyc.length})</button>` : ""}
+     ${S.currentUser?.role === "admin" && cyc.length ? `<button class="btn danger" id="del-all-cycles" type="button">🗑️ Delete All Cycles (${cyc.length})</button>` : ""}
      <label class="btn ${S.canWrite ? "" : "opacity-50 pointer-events-none"}" for="xl">📄 Upload Step 4: 15-Day Rates (.xlsx)</label><input type="file" id="xl" accept=".xlsx,.xls,.csv" hidden ${S.canWrite ? "" : "disabled"}>
      <button class="btn primary" id="newc" type="button" ${S.canWrite ? "" : "disabled"}>＋ Enter new revision</button>
    </div></div>
@@ -3032,7 +3105,7 @@ function viewRoutes() {
        </select>
        <button type="button" id="btn-bulk-assign-tr" class="btn small primary">Apply</button>
      </div>` : ""}
-     ${S.canWrite && rows.length ? `<button class="btn danger" id="del-all-routes" type="button">🗑️ Delete All Routes (${rows.length})</button>` : ""}
+     ${S.currentUser?.role === "admin" && rows.length ? `<button class="btn danger" id="del-all-routes" type="button">🗑️ Delete All Routes (${rows.length})</button>` : ""}
      ${S.canWrite ? `<label class="btn" for="up-step-routes">⬆ Upload Routes (.xlsx)</label><input type="file" id="up-step-routes" accept=".xlsx,.xls,.csv" hidden>` : ""}
      <button class="btn primary" id="addr" type="button" ${dis}>＋ Add transport rate</button>
    </div></div>
@@ -3118,7 +3191,7 @@ function viewTransporters() {
   V().innerHTML = `
    <div class="actions" style="justify-content:space-between;margin-bottom:12px"><div><h3>Transporters and vehicles</h3><p class="tiny" style="margin:2px 0 0">Each transporter's contact, tanker fleet capacities, and delivery routes.</p></div>
    <div class="actions">
-     ${S.canWrite && T.length ? `<button class="btn danger" id="del-all-transporters" type="button">🗑️ Delete All Transporters (${T.length})</button>` : ""}
+     ${S.currentUser?.role === "admin" && T.length ? `<button class="btn danger" id="del-all-transporters" type="button">🗑️ Delete All Transporters (${T.length})</button>` : ""}
      ${S.canWrite ? `<label class="btn" for="up-step-transporters">⬆ Upload Step 3: Transporters (.xlsx)</label><input type="file" id="up-step-transporters" accept=".xlsx,.xls,.csv" hidden>` : ""}
      <button class="btn primary" id="addt" type="button" ${dis}>＋ Add transporter</button>
    </div></div>
@@ -3378,25 +3451,67 @@ function getRefineryBrandGroups() {
   const groups = [];
   const map = new Map();
   (S.catalog?.sources || []).forEach((s, sourceIndex) => {
-    const brand = getSourceBrandName(s) || "";
-    const gKey = norm(brand) || ("__unnamed_" + sourceIndex);
+    const brand = getSourceBrandName(s);
+    // Keep a stable groupId on each source so typing into a blank row NEVER changes its group identity!
+    if (!s._groupId) {
+      s._groupId = norm(brand) ? ("grp_" + norm(brand)) : ("grp_new_" + (s.id || sourceIndex));
+    }
+    const gKey = norm(brand) || s._groupId;
     if (!map.has(gKey)) {
-      const g = { brandKey: gKey, brandName: brand, items: [] };
+      const g = { brandKey: gKey, brandName: brand, items: [], indices: [] };
       map.set(gKey, g);
       groups.push(g);
     }
-    map.get(gKey).items.push({ s, sourceIndex });
+    const grp = map.get(gKey);
+    grp.items.push({ s, sourceIndex });
+    grp.indices.push(sourceIndex);
   });
   return groups;
 }
 
-function addLocationToBrandGroup(brandKey, rawLoc) {
+// Before any button click re-renders viewRefineries(), flush all current DOM input values into S.catalog so zero typed letters are ever lost!
+function flushRefineriesDomToCatalog() {
+  document.querySelectorAll("[data-brand-indices]").forEach(inp => {
+    const indices = (inp.getAttribute("data-brand-indices") || "").split(",").filter(Boolean).map(Number);
+    const val = inp.value;
+    const firstWord = val.trim().split(/\s+/)[0] || "";
+    indices.forEach(idx => {
+      const s = S.catalog?.sources?.[idx];
+      if (s) {
+        s.brandName = val;
+        if (firstWord) s.company = firstWord;
+        s.name = formatSupplyPointDisplayName(val, s.loading);
+      }
+    });
+  });
+  document.querySelectorAll("[data-sp-loc]").forEach(inp => {
+    const idx = +inp.getAttribute("data-sp-loc");
+    const s = S.catalog?.sources?.[idx];
+    if (s) {
+      const loc = inp.value.trim();
+      s.loading = loc;
+      s.locations = loc ? [loc] : [];
+      s.name = formatSupplyPointDisplayName(getSourceBrandName(s), loc);
+    }
+  });
+  document.querySelectorAll("[data-p]").forEach(inp => {
+    const idx = +inp.getAttribute("data-p");
+    const p = S.catalog?.products?.[idx];
+    if (p && inp.dataset.f) {
+      p[inp.dataset.f] = inp.value;
+    }
+  });
+}
+
+function addLocationToBrandGroup(indicesStr, rawLoc) {
   if (!S.canWrite) return;
+  flushRefineriesDomToCatalog();
   const parts = String(rawLoc || "").split(",").map(x => x.trim()).filter(Boolean);
   if (!parts.length) { toast("Type a location name first (e.g. Bina, Kochi)"); return; }
-  const groups = getRefineryBrandGroups();
-  const g = groups.find(x => x.brandKey === brandKey);
-  if (!g) return;
+  const idxs = String(indicesStr || "").split(",").filter(Boolean).map(Number);
+  const items = idxs.map(i => ({ s: S.catalog.sources[i], sourceIndex: i })).filter(x => x.s);
+  if (!items.length) return;
+  const g = { items, brandName: getSourceBrandName(items[0].s) };
   const brand = g.brandName || "Refinery";
 
   parts.forEach(loc => {
@@ -3433,6 +3548,7 @@ function addLocationToBrandGroup(brandKey, rawLoc) {
 
 function addInlineProductToSupplyPoint(si, rawProdName) {
   if (!S.canWrite) return;
+  flushRefineriesDomToCatalog();
   const names = String(rawProdName || "").split(",").map(x => x.trim()).filter(Boolean);
   if (!names.length) { toast("Type a product name first (e.g. MTO, LDO)"); return; }
   const row = S.catalog.sources[si];
@@ -3488,7 +3604,7 @@ function viewRefineries() {
          <p class="tiny" style="margin:2px 0 0">Each refinery (e.g. <b>BPCL</b>, <b>IOCL</b>, <b>Nayara</b>) can have multiple locations (e.g. <b>Kochi</b>, <b>Mumbai</b>, <b>Bina</b>), and <b>each location has its own Products Sold list</b> so calculation and transport matching are 100% accurate per location.</p>
        </div>
        <div class="actions">
-         ${S.canWrite && (S.catalog.sources || []).length ? `<button class="btn small danger" id="del-all-sources" type="button">🗑️ Delete All Refineries (${brandGroups.length})</button>` : ""}
+         ${S.currentUser?.role === "admin" && (S.catalog.sources || []).length ? `<button class="btn small danger" id="del-all-sources" type="button">🗑️ Delete All Refineries (${brandGroups.length})</button>` : ""}
          ${S.canWrite ? `<label class="btn small" for="up-step-refineries">⬆ Upload Refineries (.xlsx)</label><input type="file" id="up-step-refineries" accept=".xlsx,.xls,.csv" hidden>` : ""}
          <button class="btn small primary" id="adds" type="button" ${dis}>＋ Add refinery / source</button>
        </div>
@@ -3509,14 +3625,14 @@ function viewRefineries() {
                <div class="stack" style="gap:8px">
                  <div>
                    <label class="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 block mb-1">Refinery Brand / Company</label>
-                   <input type="text" data-brand-key="${esc(g.brandKey)}" value="${esc(g.brandName)}" placeholder="e.g. BPCL, IOCL, NAYARA Energy" style="font-weight:800;font-size:14px" ${dis}>
+                   <input type="text" data-brand-indices="${g.indices.join(",")}" value="${esc(g.brandName)}" placeholder="e.g. BPCL, IOCL, NAYARA Energy" style="font-weight:800;font-size:14px" ${dis}>
                  </div>
                  ${S.canWrite ? `
                  <div class="p-2 rounded-xl bg-slate-50 border border-slate-200 space-y-1.5">
                    <span class="text-[10px] font-bold text-indigo-700 block">+ Add Location under ${esc(g.brandName || "this refinery")}:</span>
                    <div class="flex items-center gap-1">
-                     <input type="text" data-add-brand-loc-in="${gi}" data-bkey="${esc(g.brandKey)}" list="dl-all-locs" placeholder="e.g. Bina, Kochi, Mumbai" style="padding:4px 8px;font-size:12px">
-                     <button type="button" data-add-brand-loc-btn="${gi}" data-bkey="${esc(g.brandKey)}" class="btn small primary" style="padding:4px 9px">+ Add</button>
+                     <input type="text" data-add-brand-loc-in="${gi}" data-bindices="${g.indices.join(",")}" list="dl-all-locs" placeholder="e.g. Bina, Kochi, Mumbai" style="padding:4px 8px;font-size:12px">
+                     <button type="button" data-add-brand-loc-btn="${gi}" data-bindices="${g.indices.join(",")}" class="btn small primary" style="padding:4px 9px">+ Add</button>
                    </div>
                  </div>` : ""}
                </div>
@@ -3580,7 +3696,7 @@ function viewRefineries() {
                </div>
              </td>
              <td style="vertical-align:top;padding-top:12px">
-               <button class="btn small danger" type="button" data-bdel="${esc(g.brandKey)}" title="Delete entire ${esc(g.brandName)} refinery group" ${dis}>✕ All</button>
+               <button class="btn small danger" type="button" data-bdel="${g.indices.join(",")}" title="Delete entire ${esc(g.brandName)} refinery group" ${dis}>✕ All</button>
              </td>
            </tr>`;
          }).join("") || `<tr><td colspan="3" class="empty">No refineries added yet. Click <b>＋ Add refinery / source</b> above.</td></tr>`}
@@ -3597,7 +3713,7 @@ function viewRefineries() {
          <p class="tiny" style="margin:2px 0 0">Feed your clean list of products, their unit (MT or KL), and color/type (White liquid, Yellow liquid, Black, Bitumen) first so Refineries, Routes, and Rates match them cleanly.</p>
        </div>
        <div class="actions">
-         ${S.canWrite && (S.catalog.products || []).length ? `<button class="btn small danger" id="del-all-products" type="button">🗑️ Delete All Products (${S.catalog.products.length})</button>` : ""}
+         ${S.currentUser?.role === "admin" && (S.catalog.products || []).length ? `<button class="btn small danger" id="del-all-products" type="button">🗑️ Delete All Products (${S.catalog.products.length})</button>` : ""}
          ${S.canWrite ? `<label class="btn small" for="up-step-products">⬆ Upload Products (.xlsx)</label><input type="file" id="up-step-products" accept=".xlsx,.xls,.csv" hidden>` : ""}
          <button class="btn small primary" id="addp" type="button" ${dis}>＋ Add product</button>
        </div>
@@ -3633,25 +3749,18 @@ function viewRefineries() {
    </section>
   </div>`;
 
-  // 1. Refinery Brand Name input listener (updates brandName on all locations in that group in-place)
-  document.querySelectorAll("[data-brand-key]").forEach(inp => inp.addEventListener("input", e => {
+  // 1. Refinery Brand Name input listener — mutates exact source indices in-place so typing NEVER loses characters!
+  document.querySelectorAll("[data-brand-indices]").forEach(inp => inp.addEventListener("input", e => {
     if (!S.canWrite) return;
-    const oldKey = inp.getAttribute("data-brand-key");
+    const indices = (inp.getAttribute("data-brand-indices") || "").split(",").filter(Boolean).map(Number);
     const newBrand = e.target.value;
-    const firstWord = newBrand.trim().split(/\s+/)[0] || "Refinery";
-    (S.catalog.sources || []).forEach(s => {
-      if ((norm(getSourceBrandName(s)) || "") === oldKey || (!oldKey.startsWith("__unnamed_") && norm(s.brandName) === oldKey)) {
-        s.brandName = newBrand;
-        s.company = firstWord;
-        s.name = formatSupplyPointDisplayName(newBrand, s.loading);
-      } else if (oldKey.startsWith("__unnamed_")) {
-        const idx = +oldKey.replace("__unnamed_", "");
-        if (S.catalog.sources[idx] === s) {
-          s.brandName = newBrand;
-          s.company = firstWord;
-          s.name = formatSupplyPointDisplayName(newBrand, s.loading);
-        }
-      }
+    const firstWord = newBrand.trim().split(/\s+/)[0] || "";
+    indices.forEach(idx => {
+      const s = S.catalog.sources[idx];
+      if (!s) return;
+      s.brandName = newBrand;
+      s.company = firstWord;
+      s.name = formatSupplyPointDisplayName(newBrand, s.loading);
     });
     saveC(500);
   }));
@@ -3683,14 +3792,14 @@ function viewRefineries() {
   // 4. "+ Add Location under Brand" button & Enter key
   document.querySelectorAll("[data-add-brand-loc-btn]").forEach(btn => btn.onclick = () => {
     const gi = btn.getAttribute("data-add-brand-loc-btn");
-    const bkey = btn.getAttribute("data-bkey");
+    const bindices = btn.getAttribute("data-bindices");
     const inp = document.querySelector(`input[data-add-brand-loc-in="${gi}"]`);
-    if (inp) addLocationToBrandGroup(bkey, inp.value);
+    if (inp) addLocationToBrandGroup(bindices, inp.value);
   });
   document.querySelectorAll("[data-add-brand-loc-in]").forEach(inp => inp.addEventListener("keydown", e => {
     if (e.key === "Enter") {
       e.preventDefault();
-      addLocationToBrandGroup(inp.getAttribute("data-bkey"), inp.value);
+      addLocationToBrandGroup(inp.getAttribute("data-bindices"), inp.value);
     }
   }));
 
@@ -3754,9 +3863,10 @@ function viewRefineries() {
   });
   document.querySelectorAll("[data-bdel]").forEach(b => b.onclick = () => {
     if (!S.canWrite) return;
+    flushRefineriesDomToCatalog();
     if (!b.dataset.armed) { b.dataset.armed = 1; b.textContent = "Del All?"; return; }
-    const bkey = b.getAttribute("data-bdel");
-    S.catalog.sources = (S.catalog.sources || []).filter(s => (norm(getSourceBrandName(s)) || "") !== bkey);
+    const delSet = new Set((b.getAttribute("data-bdel") || "").split(",").filter(Boolean).map(Number));
+    S.catalog.sources = (S.catalog.sources || []).filter((_, idx) => !delSet.has(idx));
     saveC(0);
     viewRefineries();
   });
@@ -3831,15 +3941,18 @@ function viewRefineries() {
 
   $("#adds").onclick = () => {
     if (!S.canWrite) return;
-    S.catalog.sources.push({ id: "s_new_" + uid(), brandName: "", company: "", name: "", loading: "", locations: [], creditDays: 0, active: true, products: [], aliases: [] });
+    flushRefineriesDomToCatalog();
+    const nid = "s_new_" + uid();
+    S.catalog.sources.push({ id: nid, _groupId: "grp_new_" + nid, brandName: "", company: "", name: "", loading: "", locations: [], creditDays: 0, active: true, products: [], aliases: [] });
     saveC(0);
     viewRefineries();
-    const allBrandInps = document.querySelectorAll("[data-brand-key]");
+    const allBrandInps = document.querySelectorAll("[data-brand-indices]");
     allBrandInps[allBrandInps.length - 1]?.focus();
   };
 
   $("#addp").onclick = () => {
     if (!S.canWrite) return;
+    flushRefineriesDomToCatalog();
     const tempId = "P_" + uid().toUpperCase().slice(0, 5);
     S.catalog.products.push({ id: tempId, name: "", unit: "MT", cls: "White liquid", aliases: [], _autoCode: true });
     saveC(0);
@@ -5665,6 +5778,47 @@ async function boot() {
   // Sidebar Cloud Sync Buttons
   $("#btn-sidebar-pull")?.addEventListener("click", () => pullFromNeon(true, true));
   $("#btn-sidebar-push")?.addEventListener("click", () => pushAllToNeon(true));
+
+  // Effortless Sidebar Role Switcher Wiring (1-Click Switch Between Admin, User with Edit Access, and User Quote-Only)
+  function switchRoleMode(mode) {
+    S.users = S.users || DEFAULT_USERS;
+    if (mode === "admin") {
+      let adm = S.users.find(u => u.role === "admin") || S.users[0];
+      adm.role = "admin"; adm.canEditMaster = true; adm.canQuote = true;
+      applyUserSession(adm);
+      toast("👑 Switched to Admin Mode (Full System & Master Access)");
+    } else if (mode === "user-edit") {
+      let usr = S.users.find(u => u.role === "user") || { id: "u-sales", username: "sales", email: "sales@goverdhanenergy.com", name: "Sales User (Editor)", role: "user", active: true };
+      usr.role = "user";
+      usr.canEditMaster = true;
+      usr.canQuote = true;
+      applyUserSession(usr);
+      toast("✏️ Switched to User Dashboard (Can Edit Master Files · Admin SQL/Users Hidden)");
+    } else {
+      let usr = S.users.find(u => u.role === "user") || { id: "u-sales", username: "sales", email: "sales@goverdhanenergy.com", name: "Sales User", role: "user", active: true };
+      usr.role = "user";
+      usr.canEditMaster = false;
+      usr.canQuote = true;
+      applyUserSession(usr);
+      toast("👤 Switched to User Dashboard (Quote & PDF Only · Master Read-Only)");
+    }
+  }
+
+  const toggleRoleClick = () => {
+    const isCurrentlyAdmin = S.currentUser?.role === "admin";
+    // Flip effortlessly between Admin and User (preserving user's configured canEditMaster or toggling to User Editor)
+    if (isCurrentlyAdmin) {
+      const salesUser = (S.users || []).find(u => u.role === "user");
+      switchRoleMode(salesUser?.canEditMaster ? "user-edit" : "user-edit");
+    } else {
+      switchRoleMode("admin");
+    }
+  };
+  $("#btn-effortless-role-switch")?.addEventListener("click", toggleRoleClick);
+  $("#btn-role-toggle-pill")?.addEventListener("click", toggleRoleClick);
+  document.querySelectorAll("[data-fast-role]").forEach(btn => {
+    btn.addEventListener("click", () => switchRoleMode(btn.getAttribute("data-fast-role")));
+  });
 
   // Auth Modal Wiring
   $("#btn-open-auth-modal")?.addEventListener("click", () => { $("#modal-auth").hidden = false; });

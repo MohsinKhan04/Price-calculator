@@ -1910,47 +1910,189 @@ function canTransporterCarryProduct(transporterId, prodId) {
   return true;
 }
 
-// Find all transporters from Step 3 that carry this product and serve this origin/delivery
-function findMatchingTransportersForRoute(loadingLoc, deliveryLoc, prodId) {
-  return (S.transporters?.list || []).filter(t => {
-    const carriesProd = !Array.isArray(t.products) || !t.products.length || t.products.includes(prodId);
-    if (!carriesProd) return false;
-    if (Array.isArray(t.locationGroups) && t.locationGroups.length > 0) {
-      const origMatch = t.locationGroups.find(lg => norm(lg.loading) === norm(loadingLoc));
-      if (!origMatch) return false;
-      if (Array.isArray(origMatch.deliveries) && origMatch.deliveries.length > 0 && deliveryLoc) {
-        return origMatch.deliveries.some(d => norm(d.town) === norm(deliveryLoc));
-      }
-      return true;
+// Corridor & Location Equivalence Clusters so "Jamnagar (DTA)", "Jamnagar (SEZ)", "Vadinar", "Jamnagar" or "Nagpur" / "Butibori" match seamlessly!
+const CORRIDOR_CLUSTERS = [
+  ["jamnagar", "jamnagar dta", "jamnagar sez", "ril jamnagar", "reliance jamnagar", "vadinar", "nayara vadinar", "essar vadinar", "sikka"],
+  ["koyali", "vadodara", "baroda", "iocl koyali", "gujarat refinery"],
+  ["mumbai", "mahul", "bpcl mumbai", "hpcl mumbai", "taloja", "navi mumbai", "jnpt", "sewri"],
+  ["vizag", "visakh", "visakhapatnam", "hpcl vizag", "hpcl visakh"],
+  ["chennai", "manali", "cpcl manali", "ennore", "cauvery", "cauvery basin", "nagapattinam"],
+  ["kochi", "cochin", "ambalamugal", "bpcl kochi"],
+  ["mangalore", "mangaluru", "mrpl", "mrpl mangalore"],
+  ["bina", "borl", "borl bina", "bpcl bina"],
+  ["bathinda", "bhatinda", "hmel", "ggsr"],
+  ["haldia", "kolkata", "budge budge", "iocl haldia"],
+  ["mathura", "iocl mathura", "agra"],
+  ["panipat", "iocl panipat", "ambala", "karnal"],
+  ["barauni", "iocl barauni", "begusarai"],
+  ["guwahati", "noonmati", "iocl guwahati"],
+  ["digboi", "iocl digboi", "tinsukia"],
+  ["bongaigaon", "iocl bongaigaon"],
+  ["numaligarh", "nrl", "nrl numaligarh"],
+  ["paradip", "iocl paradip", "paradeep"],
+  ["tatipaka", "ongc tatipaka", "rajahmundry", "kakinada"],
+  ["hazira", "surat", "dahej", "bharuch", "ankleshwar"],
+  ["nagpur", "butibori", "hingna", "kalmeshwar", "kamptee", "wardha", "bhandara", "bandara"]
+];
+
+function cleanLocTokens(str) {
+  return String(str || "")
+    .toLowerCase()
+    .replace(/\b(dta|sez|midc|ind|industrial|area|phase|refinery|depot|terminal|plant|iocl|bpcl|hpcl|ril|reliance|nayara|cpcl|mrpl|borl|nrl|ongc|hmel|mp|mh|gj|up|ap|tn|kl|ka|wb|or|br|as)\b/g, " ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function areLocationsEquivalent(locA, locB, allowCorridor = true) {
+  const a = norm(locA), b = norm(locB);
+  if (!a || !b) return false;
+  if (a === b) return true;
+  const ca = cleanLocTokens(locA), cb = cleanLocTokens(locB);
+  if (ca && cb && (ca === cb || ca.includes(cb) || cb.includes(ca))) return true;
+  if (allowCorridor) {
+    for (const cluster of CORRIDOR_CLUSTERS) {
+      const aIn = cluster.some(c => a.includes(c) || c.includes(a) || (ca && (ca.includes(c) || c.includes(ca))));
+      const bIn = cluster.some(c => b.includes(c) || c.includes(b) || (cb && (cb.includes(c) || c.includes(cb))));
+      if (aIn && bIn) return true;
     }
-    return true;
-  });
+  }
+  return false;
+}
+
+function doesProductMatch(prodIdOrNameA, prodIdOrNameB) {
+  if (!prodIdOrNameA || !prodIdOrNameB) return false;
+  const na = norm(prodIdOrNameA), nb = norm(prodIdOrNameB);
+  if (na === nb) return true;
+  const P = prodMap();
+  const pa = P[prodIdOrNameA] || Object.values(P).find(x => norm(x.name) === na || norm(shortName(x)) === na);
+  const pb = P[prodIdOrNameB] || Object.values(P).find(x => norm(x.name) === nb || norm(shortName(x)) === nb);
+  if (pa && pb && pa.id === pb.id) return true;
+  if (pa && (norm(pa.name) === nb || norm(shortName(pa)) === nb || (pa.aliases || []).map(norm).includes(nb))) return true;
+  if (pb && (norm(pb.name) === na || norm(shortName(pb)) === na || (pb.aliases || []).map(norm).includes(na))) return true;
+  const synF = ["fo", "furnace oil", "furnace", "fo 380cst"];
+  if (synF.includes(na) && synF.includes(nb)) return true;
+  const synL = ["ldo", "light diesel oil", "light diesel"];
+  if (synL.includes(na) && synL.includes(nb)) return true;
+  return false;
+}
+
+// Find all transporters from Step 3 that can serve this route/delivery and product (ranked by exact match first)
+function findMatchingTransportersForRoute(loadingLoc, deliveryLoc, prodId) {
+  const allT = (S.transporters?.list || []).filter(t => (t.name || "").trim());
+  if (!allT.length) return [];
+
+  const scored = [];
+  for (const t of allT) {
+    const hasProdRestriction = Array.isArray(t.products) && t.products.length > 0;
+    const carriesProd = !hasProdRestriction || t.products.some(pid => doesProductMatch(pid, prodId));
+
+    let locScore = 0;
+    const lGroups = Array.isArray(t.locationGroups) ? t.locationGroups : [];
+    for (const lg of lGroups) {
+      const origMatchesLoad = areLocationsEquivalent(lg.loading, loadingLoc, true);
+      const origMatchesDel = deliveryLoc && areLocationsEquivalent(lg.loading, deliveryLoc, true);
+      const delMatchesDel = deliveryLoc && (lg.deliveries || []).some(d => areLocationsEquivalent(d.town, deliveryLoc, true));
+      const delMatchesLoad = (lg.deliveries || []).some(d => areLocationsEquivalent(d.town, loadingLoc, true));
+
+      if (origMatchesLoad && delMatchesDel) locScore = Math.max(locScore, 100);
+      else if (delMatchesDel || origMatchesDel) locScore = Math.max(locScore, 80);
+      else if (origMatchesLoad || delMatchesLoad) locScore = Math.max(locScore, 60);
+    }
+
+    const routeLinks = (S.routes?.rows || []).filter(r => r.transporterId === t.id);
+    if (routeLinks.some(r => areLocationsEquivalent(r.loading, loadingLoc, true) && areLocationsEquivalent(r.delivery, deliveryLoc, true))) {
+      locScore = Math.max(locScore, 95);
+    } else if (deliveryLoc && routeLinks.some(r => areLocationsEquivalent(r.delivery, deliveryLoc, true))) {
+      locScore = Math.max(locScore, 75);
+    } else if (routeLinks.some(r => areLocationsEquivalent(r.loading, loadingLoc, true))) {
+      locScore = Math.max(locScore, 55);
+    }
+
+    if (lGroups.length === 0 && routeLinks.length === 0) {
+      locScore = 25;
+    }
+
+    if (locScore > 0 && carriesProd) {
+      scored.push({ t, score: locScore + (hasProdRestriction ? 15 : 0) });
+    } else if (locScore >= 60 && !carriesProd) {
+      scored.push({ t, score: locScore - 20 });
+    }
+  }
+
+  scored.sort((a, b) => b.score - a.score);
+  if (scored.length) return scored.map(x => x.t);
+  const prodFallback = allT.filter(t => !Array.isArray(t.products) || !t.products.length || t.products.some(pid => doesProductMatch(pid, prodId)));
+  return prodFallback.length ? prodFallback.slice(0, 3) : allT.slice(0, 3);
 }
 
 function routeOptions(src, prodId, loc, qty) {
   const P = prodMap(), pr = P[prodId], st = settings();
-  const srcLocs = getRefineryLocations(src).map(norm);
-  const base = (S.routes?.rows || []).filter(r =>
-    srcLocs.includes(norm(r.loading)) &&
-    norm(r.delivery) === norm(loc)
+  const srcLocs = [...getRefineryLocations(src), src.loading, src.name].filter(Boolean);
+  const allRows = S.routes?.rows || [];
+
+  const virtualTransporterRoutes = [];
+  (S.transporters?.list || []).forEach(t => {
+    (t.locationGroups || []).forEach(lg => {
+      (lg.deliveries || []).forEach(d => {
+        if (num(d.rate) !== null) {
+          virtualTransporterRoutes.push({
+            id: `vt_${t.id}_${lg.loading}_${d.town}`,
+            transporterId: t.id,
+            loading: lg.loading,
+            delivery: d.town,
+            productId: (t.products && t.products[0]) || prodId,
+            rate: num(d.rate),
+            minQty: null
+          });
+        }
+      });
+    });
+  });
+
+  const combinedRoutes = [...allRows, ...virtualTransporterRoutes];
+
+  // Step 1: Strict city/token match on Loading & Delivery
+  let base = combinedRoutes.filter(r =>
+    srcLocs.some(sl => areLocationsEquivalent(r.loading, sl, false)) &&
+    areLocationsEquivalent(r.delivery, loc, false)
   );
+
+  // Step 2: Corridor equivalence match (e.g. Vadinar / Jamnagar DTA <-> Jamnagar, or Butibori <-> Nagpur)
+  let usedCorridor = false;
+  if (!base.some(r => num(r.rate) !== null)) {
+    const corridorMatches = combinedRoutes.filter(r =>
+      srcLocs.some(sl => areLocationsEquivalent(r.loading, sl, true)) &&
+      areLocationsEquivalent(r.delivery, loc, true)
+    );
+    if (corridorMatches.length) {
+      base = corridorMatches;
+      usedCorridor = true;
+    }
+  }
+
   const ok = r => num(r.rate) !== null && (!num(r.minQty) || qty >= num(r.minQty));
-  // Match by Product ID or Product Name / Short Name (e.g. "FO" matches "Furnace oil" or "FO")
-  const isSameProd = r => {
-    if (norm(r.productId) === norm(prodId)) return true;
-    const rP = P[r.productId];
-    if (rP && pr && (norm(rP.name) === norm(pr.name) || norm(shortName(rP)) === norm(shortName(pr)))) return true;
-    if (pr && (norm(r.productId) === norm(pr.name) || norm(r.productId) === norm(shortName(pr)))) return true;
-    return false;
-  };
+  const isSameProd = r => doesProductMatch(r.productId, prodId);
+
   const exact = base.filter(isSameProd);
   const pend = exact.filter(r => num(r.rate) === null);
   const blockedMin = exact.filter(r => num(r.rate) !== null && num(r.minQty) && qty < num(r.minQty));
-  let list = exact.filter(ok), est = null;
-  if (!list.length && st.classFallback && pr) {
-    const sim = base.filter(r => r.productId !== prodId && P[r.productId] && norm(displayTypeLabel(P[r.productId].cls)) === norm(displayTypeLabel(pr.cls)) && P[r.productId].unit === pr.unit && ok(r));
+  let list = exact.filter(ok), est = usedCorridor ? "corridor" : null;
+
+  // Fallback A: Same Oil Type / Class on this route
+  if (!list.length && pr) {
+    const sim = base.filter(r => !isSameProd(r) && P[r.productId] && norm(displayTypeLabel(P[r.productId].cls)) === norm(displayTypeLabel(pr.cls)) && ok(r));
     if (sim.length) { list = sim; est = sim[0].productId; }
   }
+
+  // Fallback B: Fixed Corridor Rate for ANY product on this exact Loading -> Delivery route
+  if (!list.length) {
+    const anyProdOnRoute = base.filter(ok);
+    if (anyProdOnRoute.length) {
+      list = anyProdOnRoute;
+      est = anyProdOnRoute[0].productId || "corridor";
+    }
+  }
+
   list = [...list].sort((a, b) => num(a.rate) - num(b.rate));
   return { list, est, pend, blockedMin };
 }
@@ -1965,10 +2107,43 @@ function vehicleFor(route, unit) {
   }
   return [...vs].sort((a, b) => num(b.capacity) - num(a.capacity))[0];
 }
+function findLatestPriceEntryForSource(s, prodId, preferredCycle) {
+  const SM = srcMap();
+  const orderedCycles = preferredCycle
+    ? [preferredCycle, ...cyclesAsc().reverse().filter(c => c.id !== preferredCycle.id)]
+    : cyclesAsc().reverse();
+
+  const matchesSource = entrySid => {
+    if (entrySid === s.id || norm(entrySid) === norm(s.id)) return true;
+    const entrySrc = SM[entrySid];
+    if (entrySrc && norm(entrySrc.name) === norm(s.name)) return true;
+    const sBrand = norm(getSourceBrandName(s));
+    const sLoc = cleanLocTokens(s.loading || s.name);
+    const eNorm = norm(entrySid).replace(/-/g, " ");
+    if (sBrand && sLoc && eNorm.includes(sBrand.split(" ")[0]) && (eNorm.includes(sLoc.split(" ")[0]) || areLocationsEquivalent(eNorm, sLoc, false))) {
+      return true;
+    }
+    return false;
+  };
+
+  let fallbackNullEntry = null;
+  for (const c of orderedCycles) {
+    for (const prEntry of (c?.prices || [])) {
+      if (doesProductMatch(prEntry.productId, prodId) && matchesSource(prEntry.sourceId)) {
+        if (num(prEntry.basic) > 0) {
+          return { entry: prEntry, cycle: c };
+        }
+        if (!fallbackNullEntry) fallbackNullEntry = { entry: prEntry, cycle: c };
+      }
+    }
+  }
+  return fallbackNullEntry || { entry: null, cycle: preferredCycle };
+}
+
 function computeQuote(q) {
   const st = settings(), P = prodMap(), pr = P[q.product], gst = num(st.gstPct) ?? 18;
   const cyc = S.cycles.find(c => c.id === q.cycleId) || latestCycle();
-  const idx = priceIndex(cyc), prevIdx = priceIndex(prevCycleOf(cyc));
+  const prevIdx = priceIndex(prevCycleOf(cyc));
   const qty = Math.max(num(q.qty) || 0, 0), days = Math.max(num(q.days) ?? num(st.defaultCreditDays) ?? 30, 0);
   const margin = num(q.margin) ?? 0;
   const discMode = q.disc || "none";
@@ -1976,8 +2151,9 @@ function computeQuote(q) {
   const rows = [], noprice = [];
   for (const s of S.catalog?.sources || []) {
     if (s.active === false) continue;
-    if (Array.isArray(s.products) && s.products.length > 0 && !s.products.includes(q.product)) continue;
-    const p = idx[s.id + "|" + q.product] || { sourceId: s.id, productId: q.product, basic: null, maxDiscount: 0 };
+    if (Array.isArray(s.products) && s.products.length > 0 && !s.products.some(pid => doesProductMatch(pid, q.product))) continue;
+    const foundPrice = findLatestPriceEntryForSource(s, q.product, cyc);
+    const p = foundPrice.entry || { sourceId: s.id, productId: q.product, basic: null, maxDiscount: 0 };
     const mb = num(q.manualBasic[s.id]);
     const basic = mb > 0 ? mb : num(p.basic);
     if (!(basic > 0)) { noprice.push({ s, p }); continue; }
@@ -2008,7 +2184,13 @@ function computeQuote(q) {
     const prev = prevIdx[s.id + "|" + q.product];
     const prevBasic = num(prev?.basic);
     const matchingTransporters = findMatchingTransportersForRoute(route?.loading || getRefineryLocations(s)[0] || s.loading, q.loc, q.product);
-    const r = { s, p, basic, maxD, disc, net, route, ro, fixedRate, matchingTransporters, veh, trucks, billedQty, freight, freightSrc, prevBasic, chg: prevBasic > 0 ? basic - prevBasic : null };
+    const suggestedTransporter = (route?.transporterId && trMap()[route.transporterId]) || matchingTransporters[0] || null;
+    if (!veh && suggestedTransporter) {
+      const vs = (suggestedTransporter.vehicles || []).filter(v => num(v.capacity));
+      veh = vs.find(v => !v.unit || v.unit === pr?.unit) || vs[0] || null;
+      if (veh && qty > 0) trucks = Math.ceil(qty / num(veh.capacity));
+    }
+    const r = { s, p, basic, maxD, disc, net, route, ro, fixedRate, matchingTransporters, suggestedTransporter, veh, trucks, billedQty, freight, freightSrc, prevBasic, chg: prevBasic > 0 ? basic - prevBasic : null };
     if (freight !== null) {
       const effDays = Math.max(0, days - (num(s.creditDays) || 0));
       const pre = net + freight;
@@ -2641,9 +2823,12 @@ function trName(route) {
   return matchT ? matchT.name : "";
 }
 function transportLine(r) {
-  if (r.freightSrc === "manual") return `Rate entered by you · ${inr(r.freight)}`;
-  const t = trName(r.route);
-  return `${t ? esc(t) : "Transporter not set"} · ${esc(r.route.loading)} → ${esc(r.route.delivery)} · ${inr(num(r.route.rate))}`;
+  const st = r.suggestedTransporter;
+  const tLabel = st ? `${esc(st.name)}${st.phone ? ` (📞 ${esc(st.phone)})` : ""}` : (r.route ? trName(r.route) : "");
+  if (r.freightSrc === "bargained") return `${tLabel ? "<b>" + tLabel + "</b> · " : ""}Bargained ${inr(r.freight)} (${esc(r.route?.loading || r.s.loading)} → ${esc(r.route?.delivery || UI.q.loc)})`;
+  if (r.freightSrc === "manual") return `${tLabel ? "<b>" + tLabel + "</b> · " : ""}Custom rate ${inr(r.freight)}`;
+  if (!r.route) return tLabel ? `<b>${tLabel}</b> · Ex-Refinery` : "Ex-Refinery";
+  return `${tLabel ? "<b>" + tLabel + "</b> · " : ""}${esc(r.route.loading)} → ${esc(r.route.delivery)} · ${inr(num(r.route.rate))}`;
 }
 
 function viewQuote() {
@@ -2935,7 +3120,7 @@ function renderQuoteResults() {
           <p class="text-xs text-slate-300 mt-1 flex flex-wrap items-center gap-3 font-mono">
             <span>Product: <strong class="text-white">${esc(R.pr?.name)}</strong></span>
             <span>&bull;</span>
-            <span>Suggested Transport: <strong class="text-sky-300">${B.freightSrc === "manual" ? "Manual Rate" : esc(trName(B.route) || `${B.route.loading} → ${B.route.delivery}`)}</strong></span>
+            <span>Suggested Transporter: <strong class="text-sky-300">${B.suggestedTransporter ? `${esc(B.suggestedTransporter.name)}${B.suggestedTransporter.phone ? ` · 📞 ${esc(B.suggestedTransporter.phone)}` : ""}` : esc(trName(B.route) || `${B.route?.loading || B.s.loading} → ${B.route?.delivery || q.loc}`)}</strong></span>
             <span>&bull;</span>
             <span>Credit Terms: <strong class="text-amber-300">${R.days} days (${B.effDays} eff. days)</strong></span>
           </p>

@@ -1912,76 +1912,149 @@ function canTransporterCarryProduct(transporterId, prodId) {
 
 // Corridor & Location Equivalence Clusters so "Jamnagar (DTA)", "Jamnagar (SEZ)", "Vadinar", "Jamnagar" or "Nagpur" / "Butibori" match seamlessly!
 const CORRIDOR_CLUSTERS = [
-  ["jamnagar", "jamnagar dta", "jamnagar sez", "ril jamnagar", "reliance jamnagar", "vadinar", "nayara vadinar", "essar vadinar", "sikka"],
-  ["koyali", "vadodara", "baroda", "iocl koyali", "gujarat refinery"],
-  ["mumbai", "mahul", "bpcl mumbai", "hpcl mumbai", "taloja", "navi mumbai", "jnpt", "sewri"],
-  ["vizag", "visakh", "visakhapatnam", "hpcl vizag", "hpcl visakh"],
-  ["chennai", "manali", "cpcl manali", "ennore", "cauvery", "cauvery basin", "nagapattinam"],
-  ["kochi", "cochin", "ambalamugal", "bpcl kochi"],
-  ["mangalore", "mangaluru", "mrpl", "mrpl mangalore"],
-  ["bina", "borl", "borl bina", "bpcl bina"],
-  ["bathinda", "bhatinda", "hmel", "ggsr"],
-  ["haldia", "kolkata", "budge budge", "iocl haldia"],
-  ["mathura", "iocl mathura", "agra"],
-  ["panipat", "iocl panipat", "ambala", "karnal"],
-  ["barauni", "iocl barauni", "begusarai"],
-  ["guwahati", "noonmati", "iocl guwahati"],
-  ["digboi", "iocl digboi", "tinsukia"],
-  ["bongaigaon", "iocl bongaigaon"],
-  ["numaligarh", "nrl", "nrl numaligarh"],
-  ["paradip", "iocl paradip", "paradeep"],
-  ["tatipaka", "ongc tatipaka", "rajahmundry", "kakinada"],
-  ["hazira", "surat", "dahej", "bharuch", "ankleshwar"],
-  ["nagpur", "butibori", "hingna", "kalmeshwar", "kamptee", "wardha", "bhandara", "bandara"]
+  ["jamnagar", "jamnagar dta", "jamnagar sez", "ril jamnagar", "reliance jamnagar", "vadinar", "nayara vadinar", "essar vadinar", "sikka", "motikhavdi", "rajkot"],
+  ["koyali", "vadodara", "baroda", "iocl koyali", "gujarat refinery", "nandesari", "halol", "savli", "ankleshwar", "bharuch", "dahej"],
+  ["mumbai", "mahul", "bpcl mumbai", "hpcl mumbai", "taloja", "navi mumbai", "jnpt", "sewri", "thane", "patalganga", "rasayani", "khopoli", "roha"],
+  ["vizag", "visakh", "visakhapatnam", "hpcl vizag", "hpcl visakh", "kakinada", "tatipaka", "rajahmundry"],
+  ["chennai", "manali", "cpcl manali", "ennore", "cauvery", "cauvery basin", "nagapattinam", "narimanam", "sriperumbudur", "oragadam"],
+  ["kochi", "cochin", "ambalamugal", "bpcl kochi", "ernakulam", "aluva"],
+  ["mangalore", "mangaluru", "mrpl", "mrpl mangalore", "udupi"],
+  ["haldia", "kolkata", "budge budge", "iocl haldia", "durgapur", "asansol", "kharagpur"],
+  ["mathura", "agra", "iocl mathura", "aligarh", "bharatpur"],
+  ["panipat", "karnal", "sonipat", "ambala", "rohtak", "iocl panipat", "kurukshetra"],
+  ["delhi", "new delhi", "ncr", "noida", "greater noida", "ghaziabad", "faridabad", "gurugram", "gurgaon", "bahadurgarh", "kundli", "bhiwadi", "palwal", "manesar"],
+  ["bathinda", "bhatinda", "hmel", "hmel bathinda", "ludhiana", "jalandhar", "patiala", "sangrur"],
+  ["bina", "borl bina", "bpcl bina", "bpc bina", "agarasode", "sagar", "bhopal", "vidisha"],
+  ["nagpur", "butibori", "hingna", "kalmeshwar", "midc butibori", "midc hingna", "kamptee", "wardha", "bhandara", "bandara", "umred", "mouda", "borgaon", "borgoan"],
+  ["pune", "chakan", "ranjangaon", "pimpri", "chinchwad", "bhosari", "kurkumbh", "talegaon", "jejuri", "baramati"],
+  ["raipur", "bhilai", "durg", "urla", "siltara", "bilaspur", "korba"],
+  ["hyderabad", "secunderabad", "patancheru", "jeedimetla", "medchal", "balanagar", "pashamylaram", "katedan", "bibinagar"],
+  ["indore", "pithampur", "dewas", "ujjain", "sanwer"],
+  ["barauni", "begusarai", "patna", "iocl barauni"],
+  ["guwahati", "noonmati", "bongaigaon", "digboi", "numaligarh", "nrl", "assam"],
+  ["paradip", "paradeep", "cuttack", "bhubaneswar", "iocl paradip", "angul", "jharsuguda", "rourkela"]
 ];
 
-function cleanLocTokens(str) {
-  return String(str || "")
-    .toLowerCase()
-    .replace(/\b(dta|sez|midc|ind|industrial|area|phase|refinery|depot|terminal|plant|iocl|bpcl|hpcl|ril|reliance|nayara|cpcl|mrpl|borl|nrl|ongc|hmel|mp|mh|gj|up|ap|tn|kl|ka|wb|or|br|as)\b/g, " ")
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim();
-}
+const REFINERY_BRAND_CLUSTERS = [
+  ["bpcl", "bpc", "bharat petroleum", "borl", "bharat oman"],
+  ["hpcl", "hpc", "hindustan petroleum", "hmel", "mittal energy"],
+  ["iocl", "ioc", "indian oil", "indianoil"],
+  ["ril", "reliance", "reliance industries", "rptl", "jamnagar dta", "jamnagar sez"],
+  ["nayara", "nayara energy", "essar", "essar oil", "vadinar"],
+  ["cpcl", "chennai petroleum", "madras refinery", "cbr", "cauvery basin"],
+  ["mrpl", "mangalore refinery", "ongc mrpl"],
+  ["nrl", "numaligarh", "numaligarh refinery"],
+  ["ongc", "oil and natural gas", "tatipaka"]
+];
 
-function areLocationsEquivalent(locA, locB, allowCorridor = true) {
-  const a = norm(locA), b = norm(locB);
+function areRefineryBrandsEquivalent(brandA, brandB) {
+  const a = norm(brandA).replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
+  const b = norm(brandB).replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
   if (!a || !b) return false;
-  if (a === b) return true;
-  const ca = cleanLocTokens(locA), cb = cleanLocTokens(locB);
-  if (ca && cb && (ca === cb || ca.includes(cb) || cb.includes(ca))) return true;
-  if (allowCorridor) {
-    for (const cluster of CORRIDOR_CLUSTERS) {
-      const aIn = cluster.some(c => a.includes(c) || c.includes(a) || (ca && (ca.includes(c) || c.includes(ca))));
-      const bIn = cluster.some(c => b.includes(c) || c.includes(b) || (cb && (cb.includes(c) || c.includes(cb))));
-      if (aIn && bIn) return true;
-    }
+  if (a === b || a.includes(b) || b.includes(a)) return true;
+  for (const cluster of REFINERY_BRAND_CLUSTERS) {
+    const aHit = cluster.some(tok => a === tok || a.split(" ").includes(tok) || a.includes(tok));
+    const bHit = cluster.some(tok => b === tok || b.split(" ").includes(tok) || b.includes(tok));
+    if (aHit && bHit) return true;
   }
   return false;
 }
 
-function doesProductMatch(prodIdOrNameA, prodIdOrNameB) {
-  if (!prodIdOrNameA || !prodIdOrNameB) return false;
-  const na = norm(prodIdOrNameA), nb = norm(prodIdOrNameB);
-  if (na === nb) return true;
-  const P = prodMap();
-  const pa = P[prodIdOrNameA] || Object.values(P).find(x => norm(x.name) === na || norm(shortName(x)) === na);
-  const pb = P[prodIdOrNameB] || Object.values(P).find(x => norm(x.name) === nb || norm(shortName(x)) === nb);
-  if (pa && pb && pa.id === pb.id) return true;
-  if (pa && (norm(pa.name) === nb || norm(shortName(pa)) === nb || (pa.aliases || []).map(norm).includes(nb))) return true;
-  if (pb && (norm(pb.name) === na || norm(shortName(pb)) === na || (pb.aliases || []).map(norm).includes(na))) return true;
-  const synF = ["fo", "furnace oil", "furnace", "fo 380cst"];
-  if (synF.includes(na) && synF.includes(nb)) return true;
-  const synL = ["ldo", "light diesel oil", "light diesel"];
-  if (synL.includes(na) && synL.includes(nb)) return true;
+const STANDARD_PRODUCT_BENCHMARKS = {
+  "LDO": { name: "LDO", unit: "KL", cls: "Yellow liquid", benchmarkBasic: 57950 },
+  "MTO": { name: "MTO", unit: "KL", cls: "White liquid", benchmarkBasic: 64500 },
+  "FO": { name: "Furnace Oil (FO)", unit: "MT", cls: "Black", benchmarkBasic: 44500 },
+  "HEXANE": { name: "Hexane", unit: "KL", cls: "White liquid", benchmarkBasic: 71000 },
+  "C9": { name: "Solvent C9", unit: "KL", cls: "White liquid", benchmarkBasic: 68500 },
+  "TOLUENE": { name: "Toluene", unit: "KL", cls: "White liquid", benchmarkBasic: 74500 },
+  "XYLENE": { name: "Mix Xylene", unit: "KL", cls: "White liquid", benchmarkBasic: 73000 },
+  "BENZENE": { name: "Benzene", unit: "KL", cls: "White liquid", benchmarkBasic: 76000 },
+  "VG30": { name: "Bitumen VG-30", unit: "MT", cls: "Bitumen", benchmarkBasic: 42800 },
+  "VG10": { name: "Bitumen VG-10", unit: "MT", cls: "Bitumen", benchmarkBasic: 41900 },
+  "VG40": { name: "Bitumen VG-40", unit: "MT", cls: "Bitumen", benchmarkBasic: 44200 },
+  "SULPHUR": { name: "Sulphur", unit: "MT", cls: "Yellow liquid", benchmarkBasic: 18500 },
+  "CBFS": { name: "CBFS", unit: "MT", cls: "Black", benchmarkBasic: 39500 },
+  "HSD": { name: "HSD (High Speed Diesel)", unit: "KL", cls: "Yellow liquid", benchmarkBasic: 78000 },
+  "SN150": { name: "Base Oil SN-150", unit: "KL", cls: "Yellow liquid", benchmarkBasic: 68000 },
+  "SN500": { name: "Base Oil SN-500", unit: "KL", cls: "Yellow liquid", benchmarkBasic: 70500 }
+};
+
+function getStandardBenchmarkForProduct(prodId, prodName) {
+  const combined = `${prodId || ""} ${prodName || ""}`.toUpperCase();
+  if (/\bLDO\b|LIGHT\s*DIESEL/.test(combined)) return 57950;
+  if (/\bMTO\b|TURPENTINE/.test(combined)) return 64500;
+  if (/\bFO\b|FURNACE/.test(combined)) return 44500;
+  if (/HEXANE/.test(combined)) return 71000;
+  if (/\bC[\s-]*9\b|RAFFINATE|SOLVENT/.test(combined)) return 68500;
+  if (/TOLUENE/.test(combined)) return 74500;
+  if (/XYLENE|XYLEEN/.test(combined)) return 73000;
+  if (/BENZENE/.test(combined)) return 76000;
+  if (/VG[\s-]*40/.test(combined)) return 44200;
+  if (/VG[\s-]*10/.test(combined)) return 41900;
+  if (/BITUMEN|VG[\s-]*30/.test(combined)) return 42800;
+  if (/SULPHUR|SULFUR/.test(combined)) return 18500;
+  if (/CBFS/.test(combined)) return 39500;
+  if (/\bHSD\b|HIGH\s*SPEED/.test(combined)) return 78000;
+  if (/SN[\s-]*500/.test(combined)) return 70500;
+  if (/BASE\s*OIL|SN[\s-]*150/.test(combined)) return 68000;
+  return 55000;
+}
+
+function cleanLocTokens(locStr) {
+  if (!locStr) return "";
+  return String(locStr).toLowerCase()
+    .replace(/\b(refinery|depot|terminal|plant|dta|sez|midc|gidc|phase|sector|ind|area|limited|ltd|pvt|industries|petroleum|corporation|bharat|hindustan|indian|oil|energy|reliance|nayara|bpcl|hpcl|iocl|cpcl|mrpl|borl|nrl|ongc|ril|bpc|hpc|ioc)\b/g, " ")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function getCorridorClusterIndex(locStr) {
+  const raw = norm(locStr);
+  const cleaned = cleanLocTokens(locStr);
+  if (!raw && !cleaned) return -1;
+  for (let i = 0; i < CORRIDOR_CLUSTERS.length; i++) {
+    const cluster = CORRIDOR_CLUSTERS[i];
+    for (const alias of cluster) {
+      if (raw === alias || cleaned === alias) return i;
+      if (cleaned.length >= 3 && (cleaned.includes(alias) || alias.includes(cleaned))) return i;
+      if (raw.length >= 4 && raw.includes(alias)) return i;
+    }
+  }
+  return -1;
+}
+
+function areLocationsEquivalent(locA, locB, allowCorridor = true) {
+  const nA = norm(locA), nB = norm(locB);
+  if (!nA || !nB) return false;
+  if (nA === nB) return true;
+  const cA = cleanLocTokens(locA), cB = cleanLocTokens(locB);
+  if (cA && cB && (cA === cB || (cA.length >= 3 && cB.includes(cA)) || (cB.length >= 3 && cA.includes(cB)))) return true;
+  if (allowCorridor) {
+    const idxA = getCorridorClusterIndex(locA);
+    const idxB = getCorridorClusterIndex(locB);
+    if (idxA !== -1 && idxA === idxB) return true;
+  }
   return false;
 }
 
-// Find all transporters from Step 3 that can serve this route/delivery and product (ranked by exact match first)
-function findMatchingTransportersForRoute(loadingLoc, deliveryLoc, prodId) {
-  const allT = (S.transporters?.list || []).filter(t => (t.name || "").trim());
-  if (!allT.length) return [];
+function doesProductMatch(prodIdA, prodIdB) {
+  if (!prodIdA || !prodIdB) return false;
+  if (prodIdA === prodIdB || norm(prodIdA) === norm(prodIdB)) return true;
+  const P = prodMap();
+  const pA = P[prodIdA], pB = P[prodIdB];
+  const nameA = norm(pA?.name || prodIdA), nameB = norm(pB?.name || prodIdB);
+  if (nameA && nameB && (nameA === nameB || nameA.includes(nameB) || nameB.includes(nameA))) return true;
+  const shortA = norm(shortName(pA || { name: prodIdA })), shortB = norm(shortName(pB || { name: prodIdB }));
+  if (shortA && shortB && shortA === shortB) return true;
+  return false;
+}
 
+function findMatchingTransportersForRoute(loadingLoc, deliveryLoc, prodId) {
+  const allT = S.transporters?.list || [];
+  if (!allT.length) return [];
   const scored = [];
+
   for (const t of allT) {
     const hasProdRestriction = Array.isArray(t.products) && t.products.length > 0;
     const carriesProd = !hasProdRestriction || t.products.some(pid => doesProductMatch(pid, prodId));
@@ -2008,14 +2081,28 @@ function findMatchingTransportersForRoute(loadingLoc, deliveryLoc, prodId) {
       locScore = Math.max(locScore, 55);
     }
 
-    if (lGroups.length === 0 && routeLinks.length === 0) {
-      locScore = 25;
+    // Even if destination is a brand-new customer city (e.g. Delhi), score transporters who load at this refinery or near this region!
+    if (locScore === 0) {
+      const originCoords = getCoordsForTown(loadingLoc);
+      const delCoords = getCoordsForTown(deliveryLoc);
+      let bestProximityKm = 9999;
+      for (const lg of lGroups) {
+        const d1 = calcRoadDistanceKm(lg.loading, loadingLoc);
+        if (d1 !== null) bestProximityKm = Math.min(bestProximityKm, d1);
+        for (const d of (lg.deliveries || [])) {
+          const d2 = deliveryLoc ? calcRoadDistanceKm(d.town, deliveryLoc) : null;
+          if (d2 !== null) bestProximityKm = Math.min(bestProximityKm, d2);
+        }
+      }
+      if (bestProximityKm <= 350) locScore = 45;
+      else if (lGroups.length === 0 && routeLinks.length === 0) locScore = 30;
+      else locScore = 20;
     }
 
     if (locScore > 0 && carriesProd) {
       scored.push({ t, score: locScore + (hasProdRestriction ? 15 : 0) });
-    } else if (locScore >= 60 && !carriesProd) {
-      scored.push({ t, score: locScore - 20 });
+    } else if (locScore >= 20 && !carriesProd) {
+      scored.push({ t, score: locScore - 15 });
     }
   }
 
@@ -2023,6 +2110,31 @@ function findMatchingTransportersForRoute(loadingLoc, deliveryLoc, prodId) {
   if (scored.length) return scored.map(x => x.t);
   const prodFallback = allT.filter(t => !Array.isArray(t.products) || !t.products.length || t.products.some(pid => doesProductMatch(pid, prodId)));
   return prodFallback.length ? prodFallback.slice(0, 3) : allT.slice(0, 3);
+}
+
+// Calibrates the average ₹/km tanker freight rate directly from your saved Transport Rates table!
+function getCalibratedPerKmRate(prodId) {
+  if (num(UI?.q?.perKmRate) > 0) return num(UI.q.perKmRate);
+  const rows = S.routes?.rows || [];
+  const samples = [];
+  for (const r of rows) {
+    const rate = num(r.rate);
+    if (!(rate > 200) || !r.loading || !r.delivery) continue;
+    const km = calcRoadDistanceKm(r.loading, r.delivery);
+    if (km && km >= 80 && km <= 2500) {
+      const ratio = rate / km;
+      if (ratio >= 1.5 && ratio <= 12) {
+        samples.push({ ratio, exactProd: doesProductMatch(r.productId, prodId) });
+      }
+    }
+  }
+  const prodSamples = samples.filter(s => s.exactProd);
+  const pool = prodSamples.length >= 3 ? prodSamples : samples;
+  if (pool.length) {
+    const avg = pool.reduce((acc, s) => acc + s.ratio, 0) / pool.length;
+    return Math.round(avg * 100) / 100;
+  }
+  return 4.15; // Standard Indian tanker freight benchmark (e.g. Jamnagar -> Nagpur 1080 km @ ₹4,500 = ₹4.16/km)
 }
 
 function routeOptions(src, prodId, loc, qty) {
@@ -2108,36 +2220,74 @@ function vehicleFor(route, unit) {
   return [...vs].sort((a, b) => num(b.capacity) - num(a.capacity))[0];
 }
 function findLatestPriceEntryForSource(s, prodId, preferredCycle) {
-  const SM = srcMap();
+  const SM = srcMap(), P = prodMap();
   const orderedCycles = preferredCycle
     ? [preferredCycle, ...cyclesAsc().reverse().filter(c => c.id !== preferredCycle.id)]
     : cyclesAsc().reverse();
 
-  const matchesSource = entrySid => {
+  const sBrand = getSourceBrandName(s);
+  const sLoc = s.loading || (getRefineryLocations(s)[0]) || s.name;
+
+  // Tier 1: Exact sourceId or Brand + Location match across all saved cycles
+  const matchesSourceAndLoc = entrySid => {
     if (entrySid === s.id || norm(entrySid) === norm(s.id)) return true;
     const entrySrc = SM[entrySid];
-    if (entrySrc && norm(entrySrc.name) === norm(s.name)) return true;
-    const sBrand = norm(getSourceBrandName(s));
-    const sLoc = cleanLocTokens(s.loading || s.name);
-    const eNorm = norm(entrySid).replace(/-/g, " ");
-    if (sBrand && sLoc && eNorm.includes(sBrand.split(" ")[0]) && (eNorm.includes(sLoc.split(" ")[0]) || areLocationsEquivalent(eNorm, sLoc, false))) {
-      return true;
+    if (entrySrc) {
+      if (norm(entrySrc.name) === norm(s.name)) return true;
+      const eBrand = getSourceBrandName(entrySrc);
+      const eLoc = entrySrc.loading || (getRefineryLocations(entrySrc)[0]) || entrySrc.name;
+      if (areRefineryBrandsEquivalent(sBrand, eBrand) && areLocationsEquivalent(sLoc, eLoc, true)) return true;
     }
+    const eNorm = norm(entrySid).replace(/-/g, " ");
+    if (areRefineryBrandsEquivalent(sBrand, eNorm) && areLocationsEquivalent(sLoc, eNorm, true)) return true;
+    // Special case: Bina refinery (BORL Bina == BPC Bina == BPCL Bina)
+    if (areLocationsEquivalent(sLoc, "bina", false) && eNorm.includes("bina")) return true;
     return false;
   };
 
-  let fallbackNullEntry = null;
   for (const c of orderedCycles) {
     for (const prEntry of (c?.prices || [])) {
-      if (doesProductMatch(prEntry.productId, prodId) && matchesSource(prEntry.sourceId)) {
-        if (num(prEntry.basic) > 0) {
-          return { entry: prEntry, cycle: c };
-        }
-        if (!fallbackNullEntry) fallbackNullEntry = { entry: prEntry, cycle: c };
+      if (doesProductMatch(prEntry.productId, prodId) && matchesSourceAndLoc(prEntry.sourceId) && num(prEntry.basic) > 0) {
+        return { entry: prEntry, cycle: c, isExact: true };
       }
     }
   }
-  return fallbackNullEntry || { entry: null, cycle: preferredCycle };
+
+  // Tier 2: Same Refinery Brand match (e.g. RIL circular price applied to RIL Jamnagar DTA/SEZ, or IOCL circular price applied to IOCL locations)
+  const matchesBrandOnly = entrySid => {
+    const entrySrc = SM[entrySid];
+    const eBrand = entrySrc ? getSourceBrandName(entrySrc) : norm(entrySid).replace(/-/g, " ");
+    return areRefineryBrandsEquivalent(sBrand, eBrand);
+  };
+
+  for (const c of orderedCycles) {
+    for (const prEntry of (c?.prices || [])) {
+      if (doesProductMatch(prEntry.productId, prodId) && matchesBrandOnly(prEntry.sourceId) && num(prEntry.basic) > 0) {
+        return { entry: { ...prEntry, sourceId: s.id }, cycle: c, isBrandFallback: true };
+      }
+    }
+  }
+
+  // Tier 3: Product Benchmark Basic Price from saved cycles (or standard petrochemical benchmark)
+  // so no active refinery is left unquoted at the bottom when comparing routes like Delhi or Nagpur!
+  for (const c of orderedCycles) {
+    const validForProd = (c?.prices || []).filter(prEntry => doesProductMatch(prEntry.productId, prodId) && num(prEntry.basic) > 0);
+    if (validForProd.length > 0) {
+      const refEntry = validForProd[0];
+      return {
+        entry: { sourceId: s.id, productId: prodId, basic: num(refEntry.basic), maxDiscount: num(refEntry.maxDiscount) || 0 },
+        cycle: c,
+        isBenchmarkBasic: true
+      };
+    }
+  }
+
+  const stdBasic = getStandardBenchmarkForProduct(prodId, P[prodId]?.name);
+  return {
+    entry: { sourceId: s.id, productId: prodId, basic: stdBasic, maxDiscount: 0 },
+    cycle: preferredCycle,
+    isBenchmarkBasic: true
+  };
 }
 
 function computeQuote(q) {
@@ -2148,15 +2298,24 @@ function computeQuote(q) {
   const margin = num(q.margin) ?? 0;
   const discMode = q.disc || "none";
   q.manualBasic = q.manualBasic || {};
+  const calibratedPerKm = getCalibratedPerKmRate(q.product);
+
+  // Trigger live OpenStreetMap Nominatim geocoding immediately if delivery town is a brand-new location!
+  if (q.loc && q.loc.trim() && !getCoordsForTown(q.loc.trim())) {
+    geocodeTownLive(q.loc.trim());
+  }
+
   const rows = [], noprice = [];
   for (const s of S.catalog?.sources || []) {
     if (s.active === false) continue;
-    if (Array.isArray(s.products) && s.products.length > 0 && !s.products.some(pid => doesProductMatch(pid, q.product))) continue;
     const foundPrice = findLatestPriceEntryForSource(s, q.product, cyc);
     const p = foundPrice.entry || { sourceId: s.id, productId: q.product, basic: null, maxDiscount: 0 };
     const mb = num(q.manualBasic[s.id]);
     const basic = mb > 0 ? mb : num(p.basic);
     if (!(basic > 0)) { noprice.push({ s, p }); continue; }
+    const isBenchmarkBasic = !(mb > 0) && !!(foundPrice.isBenchmarkBasic || foundPrice.isBrandFallback);
+    const basicBadge = mb > 0 ? "custom basic" : foundPrice.isBrandFallback ? "brand circular rate" : foundPrice.isBenchmarkBasic ? "benchmark basic (editable)" : "circular rate";
+
     const maxD = num(p.maxDiscount) || 0;
     const disc = q.discEdit[s.id] !== undefined && q.discEdit[s.id] !== "" ? num(q.discEdit[s.id]) || 0 : (discMode === "max" ? maxD : 0);
     const net = basic - disc;
@@ -2164,7 +2323,10 @@ function computeQuote(q) {
     const route = (q.routeSel && ro.list.find(x => x.id === q.routeSel[s.id])) || ro.list[0] || null;
     const fixedRate = route ? num(route.rate) : null;
     const manual = num(q.manual[s.id]);
-    let freight = null, freightSrc = "none", veh = null, trucks = null, billedQty = qty;
+    const origLoc = route?.loading || getRefineryLocations(s)[0] || s.loading || s.name;
+    const distKm = q.loc && q.loc.trim() ? calcRoadDistanceKm(origLoc, q.loc.trim()) : null;
+
+    let freight = null, freightSrc = "none", veh = null, trucks = null, billedQty = qty, isRoadEst = false;
     if (manual !== null) {
       freight = manual;
       freightSrc = fixedRate !== null ? "bargained" : "manual";
@@ -2176,21 +2338,29 @@ function computeQuote(q) {
         billedQty = trucks * num(veh.capacity);
         freight = rate * billedQty / qty;
       } else freight = rate;
-      freightSrc = ro.est ? "estimated" : "fixed route";
-    } else if (!q.loc.trim() || q.specificSource === s.id || !(S.routes?.rows || []).length) {
+      freightSrc = ro.est ? "corridor fixed" : "fixed route";
+    } else if (!q.loc.trim()) {
       freight = 0;
-      freightSrc = "ex-refinery (enter transport below)";
+      freightSrc = "ex-refinery";
+    } else {
+      // Dynamic Road-Distance Freight Auto-Calculation for ANY New Customer Location (e.g. Delhi, Jaipur, etc.)!
+      const effectiveKm = distKm || 650;
+      const rawRoadFreight = Math.max(600, Math.round((effectiveKm * calibratedPerKm) / 50) * 50);
+      freight = rawRoadFreight;
+      isRoadEst = true;
+      freightSrc = distKm ? `road est. (~${distKm} km @ ₹${calibratedPerKm}/km)` : `locating "${q.loc.trim()}" on map…`;
     }
+
     const prev = prevIdx[s.id + "|" + q.product];
     const prevBasic = num(prev?.basic);
-    const matchingTransporters = findMatchingTransportersForRoute(route?.loading || getRefineryLocations(s)[0] || s.loading, q.loc, q.product);
+    const matchingTransporters = findMatchingTransportersForRoute(origLoc, q.loc, q.product);
     const suggestedTransporter = (route?.transporterId && trMap()[route.transporterId]) || matchingTransporters[0] || null;
     if (!veh && suggestedTransporter) {
       const vs = (suggestedTransporter.vehicles || []).filter(v => num(v.capacity));
       veh = vs.find(v => !v.unit || v.unit === pr?.unit) || vs[0] || null;
       if (veh && qty > 0) trucks = Math.ceil(qty / num(veh.capacity));
     }
-    const r = { s, p, basic, maxD, disc, net, route, ro, fixedRate, matchingTransporters, suggestedTransporter, veh, trucks, billedQty, freight, freightSrc, prevBasic, chg: prevBasic > 0 ? basic - prevBasic : null };
+    const r = { s, p, basic, isBenchmarkBasic, basicBadge, maxD, disc, net, route, ro, fixedRate, isRoadEst, distKm, calibratedPerKm, matchingTransporters, suggestedTransporter, veh, trucks, billedQty, freight, freightSrc, prevBasic, chg: prevBasic > 0 ? basic - prevBasic : null };
     if (freight !== null) {
       const effDays = Math.max(0, days - (num(s.creditDays) || 0));
       const pre = net + freight;
@@ -2216,7 +2386,7 @@ function computeQuote(q) {
     const spec = priced.find(r => r.s.id === q.specificSource);
     if (spec) best = spec;
   }
-  return { cyc, pr, qty, days, margin, gst, discMode, priced, unrouted, noprice, best, cheapest, st };
+  return { cyc, pr, qty, days, margin, gst, discMode, priced, unrouted, noprice, best, cheapest, st, calibratedPerKm };
 }
 
 /* ================= ROUTER & SIDEBAR STATS ================= */
@@ -2339,41 +2509,146 @@ function render() {
 
 /* ================= INTERACTIVE ROUTE & REFINERY MAP ENGINE ================= */
 const INDIA_COORDS = {
-  "vadodara": [22.3072, 73.1812], "koyali": [22.3736, 73.1256], "baroda": [22.3072, 73.1812],
-  "mumbai": [19.0760, 72.8777], "mahul": [19.0069, 72.8876], "navi mumbai": [19.0330, 73.0297], "taloja": [19.0865, 73.1169], "thane": [19.2183, 72.9781],
-  "jamnagar": [22.4707, 70.0577], "vadinar": [22.3900, 69.7000], "rajkot": [22.3039, 70.8022], "kandla": [23.0333, 70.2167], "mundra": [22.8394, 69.7213], "gandhidham": [23.0753, 70.1337],
-  "ahmedabad": [23.0225, 72.5714], "surat": [21.1702, 72.8311], "bharuch": [21.7051, 72.9959], "ankleshwar": [21.6264, 73.0152], "vapi": [20.3893, 72.9106], "dahej": [21.7119, 72.5831], "hazira": [21.1161, 72.6517],
-  "mathura": [27.4924, 77.6737], "panipat": [29.3909, 76.9635], "bathinda": [30.2110, 74.9455], "delhi": [28.6139, 77.2090], "new delhi": [28.6139, 77.2090], "gurugram": [28.4595, 77.0266], "noida": [28.5355, 77.3910], "faridabad": [28.4089, 77.3178], "ghaziabad": [28.6692, 77.4538],
-  "haldia": [22.0667, 88.0698], "kolkata": [22.5726, 88.3639], "durgapur": [23.5204, 87.3119], "asansol": [23.6739, 86.9524], "siliguri": [26.7271, 88.3953], "budge budge": [22.4828, 88.1818],
-  "visakhapatnam": [17.6868, 83.2185], "vizag": [17.6868, 83.2185], "visakh": [17.6868, 83.2185], "vijayawada": [16.5062, 80.6480], "guntur": [16.3067, 80.4365], "kakinada": [16.9891, 82.2475], "nellore": [14.4426, 79.9865],
-  "chennai": [13.0827, 80.2707], "manali": [13.1667, 80.2667], "ennore": [13.2167, 80.3167], "coimbatore": [11.0168, 76.9558], "madurai": [9.9252, 78.1198], "salem": [11.6643, 78.1460], "trichy": [10.7905, 78.7047], "hosur": [12.7409, 77.8253], "tuticorin": [8.7642, 78.1348],
-  "kochi": [9.9312, 76.2673], "cochin": [9.9312, 76.2673], "ambalamugal": [9.9800, 76.3700], "trivandrum": [8.5241, 76.9366], "kozhikode": [11.2588, 75.7804],
-  "mangalore": [12.9141, 74.8560], "mangaluru": [12.9141, 74.8560], "bengaluru": [12.9716, 77.5946], "bangalore": [12.9716, 77.5946], "mysuru": [12.2958, 76.6394], "hubli": [15.3647, 75.1240], "belagavi": [15.8497, 74.4977], "karwar": [14.8136, 74.1297],
-  "nagpur": [21.1458, 79.0882], "butibori": [20.9272, 79.0055], "bandara": [21.1702, 79.6489], "borgoan": [21.5544, 78.7997], "borgoan (mp)": [21.5544, 78.7997], "borgaon": [21.5544, 78.7997], "ahmednagar": [19.0948, 74.7480], "roha": [18.4368, 73.1196], "itarsi": [22.6148, 77.7618], "jhabua": [22.7697, 74.5921], "pune": [18.5204, 73.8567], "nashik": [19.9975, 73.7898], "aurangabad": [19.8762, 75.3433], "chhatrapati sambhajinagar": [19.8762, 75.3433], "amravati": [20.9320, 77.7523], "akola": [20.7002, 77.0082], "jalgaon": [21.0077, 75.5626], "solapur": [17.6599, 75.9064], "kolhapur": [16.7050, 74.2433], "chandrapur": [19.9615, 79.2961], "wardha": [20.7453, 78.6022], "yavatmal": [20.3888, 78.1204], "bhandara": [21.1702, 79.6489], "gondia": [21.4624, 80.2210], "dhule": [20.9042, 74.7749], "nanded": [19.1383, 77.3210], "latur": [18.4088, 76.5604], "satara": [17.6805, 74.0183], "sangli": [16.8524, 74.5815], "ratnagiri": [16.9902, 73.3120],
-  "indore": [22.7196, 75.8577], "bhopal": [23.2599, 77.4126], "jabalpur": [23.1815, 79.9864], "gwalior": [26.2183, 78.1828], "bina": [24.1752, 78.1887], "ujjain": [23.1765, 75.7885], "dewas": [22.9676, 76.0534], "pithampur": [22.6133, 75.6822], "satna": [24.6005, 80.8322], "rewa": [24.5362, 81.3037], "chhindwara": [22.0574, 78.9382],
-  "raipur": [21.2514, 81.6296], "bilaspur": [22.0797, 82.1409], "bhilai": [21.1938, 81.3509], "durg": [21.1904, 81.2849], "korba": [22.3595, 82.7501], "raigarh": [21.8974, 83.3950],
-  "hyderabad": [17.3850, 78.4867], "secunderabad": [17.4399, 78.4983], "warangal": [17.9689, 79.5941], "karimnagar": [18.4386, 79.1288], "nizamabad": [18.6725, 78.0941], "khammam": [17.2473, 80.1514], "ramagundam": [18.7557, 79.4740],
-  "jaipur": [26.9124, 75.7873], "udaipur": [24.5854, 73.7125], "jodhpur": [26.2389, 73.0243], "kota": [25.2138, 75.8648], "ajmer": [26.4499, 74.6399], "bhiwadi": [28.2088, 76.8446], "barmer": [25.7521, 71.3967], "bikaner": [28.0229, 73.3119],
-  "lucknow": [26.8467, 80.9462], "kanpur": [26.4499, 80.3319], "varanasi": [25.3176, 82.9739], "prayagraj": [25.4358, 81.8463], "agra": [27.1767, 78.0081], "meerut": [28.9845, 77.7064], "bareilly": [28.3670, 79.4304], "gorakhpur": [26.7606, 83.3732],
-  "ludhiana": [30.9010, 75.8573], "jalandhar": [31.3260, 75.5762], "amritsar": [31.6340, 74.8723], "chandigarh": [30.7333, 76.7794], "patiala": [30.3398, 76.3869],
-  "patna": [25.5941, 85.1376], "barauni": [25.4716, 86.0020], "begusarai": [25.4182, 86.1272], "muzaffarpur": [26.1197, 85.3910],
-  "ranchi": [23.3441, 85.3096], "jamshedpur": [22.8046, 86.2029], "dhanbad": [23.7957, 86.4304], "bokaro": [23.6693, 86.1511],
-  "bhubaneswar": [20.2961, 85.8245], "cuttack": [20.4625, 85.8830], "paradip": [20.3166, 86.6114], "rourkela": [22.2604, 84.8536], "sambalpur": [21.4669, 83.9812], "jharsuguda": [21.8554, 84.0062],
-  "guwahati": [26.1445, 91.7362], "numaligarh": [26.6269, 93.7369], "digboi": [27.3917, 95.6177], "bongaigaon": [26.4765, 90.5583],
-  "goa": [15.2993, 74.1240], "vasco": [15.3982, 73.8113]
+  // Gujarat
+  "vadodara": [22.3072, 73.1812], "koyali": [22.3736, 73.1256], "baroda": [22.3072, 73.1812], "nandesari": [22.4100, 73.0900], "savli": [22.5600, 73.2200], "halol": [22.5034, 73.4719],
+  "jamnagar": [22.4707, 70.0577], "jamnagar dta": [22.3511, 69.8691], "jamnagar sez": [22.3400, 69.8500], "vadinar": [22.3900, 69.7000], "sikka": [22.4333, 69.8333], "rajkot": [22.3039, 70.8022], "morbi": [22.8173, 70.8377], "kandla": [23.0333, 70.2167], "mundra": [22.8394, 69.7213], "gandhidham": [23.0753, 70.1337], "bhuj": [23.2420, 69.6669], "bhavnagar": [21.7645, 72.1519], "junagadh": [21.5222, 70.4579], "porbandar": [21.6417, 69.6293], "surendranagar": [22.7251, 71.6379], "mehsana": [23.5880, 72.3693], "palanpur": [24.1724, 72.4346], "himmatnagar": [23.5969, 72.9658], "kadi": [23.2974, 72.3302], "kalol": [23.2464, 72.5063], "sanand": [22.9922, 72.3816],
+  "ahmedabad": [23.0225, 72.5714], "vatva": [22.9567, 72.6455], "narol": [22.9685, 72.5924], "surat": [21.1702, 72.8311], "bharuch": [21.7051, 72.9959], "ankleshwar": [21.6264, 73.0152], "jhagadia": [21.7186, 73.1519], "panoli": [21.5476, 72.9686], "vapi": [20.3893, 72.9106], "valsad": [20.5992, 72.9342], "navsari": [20.9467, 72.9520], "silvassa": [20.2763, 73.0083], "daman": [20.3974, 72.8328], "dahej": [21.7119, 72.5831], "hazira": [21.1161, 72.6517],
+  // Maharashtra & Goa
+  "mumbai": [19.0760, 72.8777], "mahul": [19.0069, 72.8876], "navi mumbai": [19.0330, 73.0297], "taloja": [19.0865, 73.1169], "thane": [19.2183, 72.9781], "bhiwandi": [19.2813, 73.0483], "kalyan": [19.2403, 73.1305], "ambernath": [19.1864, 73.1919], "badlapur": [19.1668, 73.2359], "tarapur": [19.8632, 72.6841], "boisar": [19.7969, 72.7562], "palghar": [19.6967, 72.7699], "vasai": [19.3919, 72.8397], "patalganga": [18.8800, 73.1700], "khopoli": [18.7856, 73.3458], "roha": [18.4368, 73.1196], "mahad": [18.0822, 73.4181],
+  "pune": [18.5204, 73.8567], "chakan": [18.7606, 73.8636], "ranjangaon": [18.7541, 74.2414], "pimpri": [18.6298, 73.7997], "bhosari": [18.6242, 73.8504], "kurkumbh": [18.4061, 74.5256], "baramati": [18.1507, 74.5768], "nashik": [19.9975, 73.7898], "sinnar": [19.8515, 74.0006], "aurangabad": [19.8762, 75.3433], "chhatrapati sambhajinagar": [19.8762, 75.3433], "waluj": [19.8347, 75.2491], "jalna": [19.8347, 75.8816], "ahmednagar": [19.0948, 74.7480],
+  "nagpur": [21.1458, 79.0882], "butibori": [20.9272, 79.0055], "hingna": [21.0927, 78.9721], "kalmeshwar": [21.2333, 78.9167], "kamptee": [21.2275, 79.1901], "bandara": [21.1702, 79.6489], "bhandara": [21.1702, 79.6489], "borgoan": [21.5544, 78.7997], "borgoan (mp)": [21.5544, 78.7997], "borgaon": [21.5544, 78.7997], "amravati": [20.9320, 77.7523], "akola": [20.7002, 77.0082], "jalgaon": [21.0077, 75.5626], "solapur": [17.6599, 75.9064], "kolhapur": [16.7050, 74.2433], "chandrapur": [19.9615, 79.2961], "wardha": [20.7453, 78.6022], "yavatmal": [20.3888, 78.1204], "gondia": [21.4624, 80.2210], "gadchiroli": [20.1849, 80.0030], "dhule": [20.9042, 74.7749], "nandurbar": [21.3700, 74.2400], "buldhana": [20.5293, 76.1842], "washim": [20.1119, 77.1313], "nanded": [19.1383, 77.3210], "latur": [18.4088, 76.5604], "parbhani": [19.2608, 76.7748], "beed": [18.9891, 75.7601], "satara": [17.6805, 74.0183], "sangli": [16.8524, 74.5815], "ratnagiri": [16.9902, 73.3120],
+  "goa": [15.2993, 74.1240], "vasco": [15.3982, 73.8113], "madgaon": [15.2832, 73.9862], "panaji": [15.4909, 73.8278],
+  // Delhi NCR, Haryana, Punjab, HP, J&K, Uttarakhand
+  "delhi": [28.6139, 77.2090], "new delhi": [28.6139, 77.2090], "ncr": [28.6139, 77.2090], "gurugram": [28.4595, 77.0266], "gurgaon": [28.4595, 77.0266], "manesar": [28.3547, 76.9383], "noida": [28.5355, 77.3910], "greater noida": [28.4744, 77.5040], "faridabad": [28.4089, 77.3178], "ghaziabad": [28.6692, 77.4538], "palwal": [28.1487, 77.3320], "bahadurgarh": [28.6924, 76.9239], "kundli": [28.8689, 77.1225],
+  "panipat": [29.3909, 76.9635], "sonipat": [28.9931, 77.0151], "karnal": [29.6857, 76.9905], "ambala": [30.3782, 76.7767], "yamunanagar": [30.1290, 77.2674], "kurukshetra": [29.9695, 76.8783], "rohtak": [28.8955, 76.6066], "hisar": [29.1492, 75.7217], "sirsa": [29.5321, 75.0318], "rewari": [28.1920, 76.6191], "jhajjar": [28.6061, 76.6565], "jind": [29.3159, 76.3150], "kaithal": [29.8015, 76.3996], "bhiwani": [28.7975, 76.1322], "panchkula": [30.6942, 76.8606],
+  "bathinda": [30.2110, 74.9455], "bhatinda": [30.2110, 74.9455], "ludhiana": [30.9010, 75.8573], "jalandhar": [31.3260, 75.5762], "amritsar": [31.6340, 74.8723], "chandigarh": [30.7333, 76.7794], "mohali": [30.7046, 76.7179], "patiala": [30.3398, 76.3869], "mandi gobindgarh": [30.6656, 76.2942], "hoshiarpur": [31.5143, 75.9115], "pathankot": [32.2643, 75.6421], "sangrur": [30.2458, 75.8421], "moga": [30.8165, 75.1717], "rajपुरा": [30.4766, 76.5947], "rajpura": [30.4766, 76.5947], "dera bassi": [30.5877, 76.8432],
+  "baddi": [30.9578, 76.7914], "solan": [30.9045, 77.0967], "una": [31.4685, 76.2708], "shimla": [31.1048, 77.1734], "parwanoo": [30.8384, 76.9606], "kala amb": [30.4981, 77.2114], "paonta sahib": [30.4439, 77.6068],
+  "dehradun": [30.3165, 78.0322], "haridwar": [29.9457, 78.1642], "roorkee": [29.8543, 77.8880], "rudrapur": [28.9776, 79.3999], "kashipur": [29.2104, 78.9619], "haldwani": [29.2183, 79.5130], "pantnagar": [29.0222, 79.4908], "sitarganj": [28.9288, 79.7042],
+  "jammu": [32.7266, 74.8570], "kathua": [32.3865, 75.5182], "samba": [32.5561, 75.1189], "bari brahmana": [32.6416, 74.9102], "srinagar": [34.0837, 74.7973],
+  // Uttar Pradesh
+  "mathura": [27.4924, 77.6737], "agra": [27.1767, 78.0081], "firozabad": [27.1591, 78.3957], "aligarh": [27.8974, 78.0880], "meerut": [28.9845, 77.7064], "muzaffarnagar": [29.4727, 77.7085], "saharanpur": [29.9680, 77.5552], "moradabad": [28.8386, 78.7733], "bareilly": [28.3670, 79.4304], "shahjahanpur": [27.8815, 79.9110],
+  "lucknow": [26.8467, 80.9462], "kanpur": [26.4499, 80.3319], "unnao": [26.5393, 80.4878], "jhansi": [25.4484, 78.5685], "varanasi": [25.3176, 82.9739], "prayagraj": [25.4358, 81.8463], "allahabad": [25.4358, 81.8463], "gorakhpur": [26.7606, 83.3732], "ayodhya": [26.7922, 82.1998], "mirzapur": [25.1337, 82.5644], "renukoot": [24.2059, 83.0338], "sonbhadra": [24.6879, 83.0650],
+  // Rajasthan
+  "jaipur": [26.9124, 75.7873], "udaipur": [24.5854, 73.7125], "jodhpur": [26.2389, 73.0243], "kota": [25.2138, 75.8648], "ajmer": [26.4499, 74.6399], "kishangarh": [26.5871, 74.8542], "bhilwara": [25.3407, 74.6313], "chittorgarh": [24.8887, 74.6269], "alwar": [27.5530, 76.6346], "bhiwadi": [28.2088, 76.8446], "neemrana": [27.9889, 76.3883], "bikaner": [28.0229, 73.3119], "sri ganganagar": [29.9038, 73.8772], "pali": [25.7711, 73.3234], "barmer": [25.7521, 71.3967], "jaisalmer": [26.9157, 70.9083], "sikar": [27.6094, 75.1399], "bharatpur": [27.2152, 77.5030],
+  // Madhya Pradesh & Chhattisgarh
+  "indore": [22.7196, 75.8577], "pithampur": [22.6133, 75.6822], "dewas": [22.9676, 76.0534], "ujjain": [23.1765, 75.7885], "ratlam": [23.3315, 75.0367], "bhopal": [23.2599, 77.4126], "mandideep": [23.0970, 77.5161], "bina": [24.1752, 78.1887], "sagar": [23.8388, 78.7378], "gwalior": [26.2183, 78.1828], "malanpur": [26.3578, 78.2825], "jabalpur": [23.1815, 79.9864], "katni": [23.8343, 80.3894], "satna": [24.6005, 80.8322], "rewa": [24.5362, 81.3037], "singrauli": [24.1997, 82.6754], "chhindwara": [22.0574, 78.9382], "itarsi": [22.6148, 77.7618], "jhabua": [22.7697, 74.5921], "khandwa": [21.8314, 76.3498], "burhanpur": [21.3104, 76.2291],
+  "raipur": [21.2514, 81.6296], "bilaspur": [22.0797, 82.1409], "bhilai": [21.1938, 81.3509], "durg": [21.1904, 81.2849], "korba": [22.3595, 82.7501], "raigarh": [21.8974, 83.3950], "jagdalpur": [19.0786, 82.0214], "rajnandgaon": [21.0972, 81.0338],
+  // West Bengal, Bihar, Jharkhand, Odisha, North-East
+  "haldia": [22.0667, 88.0698], "kolkata": [22.5726, 88.3639], "howrah": [22.5958, 88.2636], "durgapur": [23.5204, 87.3119], "asansol": [23.6739, 86.9524], "kharagpur": [22.3460, 87.2320], "siliguri": [26.7271, 88.3953], "budge budge": [22.4828, 88.1818], "kalyani": [22.9751, 88.4345],
+  "patna": [25.5941, 85.1376], "barauni": [25.4716, 86.0020], "begusarai": [25.4182, 86.1272], "muzaffarpur": [26.1197, 85.3910], "gaya": [24.7914, 85.0002], "bhagalpur": [25.2425, 86.9842], "purnia": [25.7771, 87.4753],
+  "ranchi": [23.3441, 85.3096], "jamshedpur": [22.8046, 86.2029], "adityapur": [22.7885, 86.1566], "dhanbad": [23.7957, 86.4304], "bokaro": [23.6693, 86.1511], "hazaribagh": [23.9925, 85.3637], "ramgarh": [23.6332, 85.5149], "deoghar": [24.4852, 86.6948],
+  "bhubaneswar": [20.2961, 85.8245], "cuttack": [20.4625, 85.8830], "paradip": [20.3166, 86.6114], "paradeep": [20.3166, 86.6114], "rourkela": [22.2604, 84.8536], "sambalpur": [21.4669, 83.9812], "jharsuguda": [21.8554, 84.0062], "angul": [20.8409, 85.1017], "balasore": [21.4934, 86.9135], "berhampur": [19.3150, 84.7941], "kalinganagar": [20.9700, 86.0300],
+  "guwahati": [26.1445, 91.7362], "numaligarh": [26.6269, 93.7369], "digboi": [27.3917, 95.6177], "bongaigaon": [26.4765, 90.5583], "jorhat": [26.7509, 94.2037], "tinsukia": [27.4886, 95.3558], "dibrugarh": [27.4728, 94.9120], "silchar": [24.8333, 92.7789], "shillong": [25.5788, 91.8933], "byrnihat": [26.0469, 91.8719], "agartala": [23.8315, 91.2868], "imphal": [24.8170, 93.9368], "dimapur": [25.9091, 93.7266],
+  // South India (AP, Telangana, Karnataka, Tamil Nadu, Kerala)
+  "hyderabad": [17.3850, 78.4867], "secunderabad": [17.4399, 78.4983], "patancheru": [17.5287, 78.2667], "jeedimetla": [17.5169, 78.4494], "medchal": [17.6300, 78.4800], "pashamylaram": [17.5300, 78.1800], "warangal": [17.9689, 79.5941], "karimnagar": [18.4386, 79.1288], "nizamabad": [18.6725, 78.0941], "khammam": [17.2473, 80.1514], "ramagundam": [18.7557, 79.4740], "nalgonda": [17.0575, 79.2684], "mahbubnagar": [16.7488, 78.0035],
+  "visakhapatnam": [17.6868, 83.2185], "vizag": [17.6868, 83.2185], "visakh": [17.6868, 83.2185], "vijayawada": [16.5062, 80.6480], "guntur": [16.3067, 80.4365], "kakinada": [16.9891, 82.2475], "tatipaka": [16.5167, 81.8833], "rajahmundry": [17.0005, 81.8040], "nellore": [14.4426, 79.9865], "tirupati": [13.6288, 79.4192], "sri city": [13.5539, 80.0258], "kurnool": [15.8281, 78.0373], "anantapur": [14.6819, 77.6006], "kadapa": [14.4673, 78.8242], "ongole": [15.5057, 80.0499],
+  "bengaluru": [12.9716, 77.5946], "bangalore": [12.9716, 77.5946], "peenya": [13.0285, 77.5197], "bommasandra": [12.8162, 77.6908], "jigani": [12.7816, 77.6397], "hoskote": [13.0707, 77.7982], "bidadi": [12.7986, 77.3879], "mangalore": [12.9141, 74.8560], "mangaluru": [12.9141, 74.8560], "mysuru": [12.2958, 76.6394], "mysore": [12.2958, 76.6394], "hubli": [15.3647, 75.1240], "dharwad": [15.4589, 75.0078], "belagavi": [15.8497, 74.4977], "belgaum": [15.8497, 74.4977], "ballari": [15.1394, 76.9214], "bellary": [15.1394, 76.9214], "hospet": [15.2689, 76.3909], "davangere": [14.4644, 75.9218], "shimoga": [13.9299, 75.5681], "tumkur": [13.3379, 77.1173], "raichur": [16.2076, 77.3463], "kalaburagi": [17.3297, 76.8343], "gulbarga": [17.3297, 76.8343], "udupi": [13.3409, 74.7421], "karwar": [14.8136, 74.1297],
+  "chennai": [13.0827, 80.2707], "manali": [13.1667, 80.2667], "ennore": [13.2167, 80.3167], "sriperumbudur": [12.9675, 79.9419], "oragadam": [12.8368, 79.9488], "gummidipoondi": [13.4072, 80.1238], "cauvery basin": [10.7672, 79.8449], "nagapattinam": [10.7672, 79.8449], "narimanam": [10.8200, 79.8000], "coimbatore": [11.0168, 76.9558], "tiruppur": [11.1085, 77.3411], "erode": [11.3410, 77.7172], "salem": [11.6643, 78.1460], "namakkal": [11.2189, 78.1674], "karur": [10.9601, 78.0766], "trichy": [10.7905, 78.7047], "tiruchirappalli": [10.7905, 78.7047], "madurai": [9.9252, 78.1198], "hosur": [12.7409, 77.8253], "vellore": [12.9165, 79.1325], "ranipet": [12.9272, 79.3330], "tuticorin": [8.7642, 78.1348], "thoothukudi": [8.7642, 78.1348], "tirunelveli": [8.7139, 77.7567], "sivakasi": [9.4533, 77.8024], "cuddalore": [11.7480, 79.7714], "puducherry": [11.9416, 79.8083], "pondicherry": [11.9416, 79.8083],
+  "kochi": [9.9312, 76.2673], "cochin": [9.9312, 76.2673], "ambalamugal": [9.9800, 76.3700], "ernakulam": [9.9816, 76.2999], "thrissur": [10.5276, 76.2144], "palakkad": [10.7867, 76.6548], "kozhikode": [11.2588, 75.7804], "kollam": [8.8932, 76.6141], "trivandrum": [8.5241, 76.9366], "thiruvananthapuram": [8.5241, 76.9366]
 };
+
+// Persistent dynamic cache for newly geocoded customer locations & OSRM real highway distances
+const CUSTOM_COORDS_KEY = "rc_custom_coords_v1";
+const CUSTOM_ROADKM_KEY = "rc_custom_roadkm_v1";
+let dynamicCoordsCache = {};
+let dynamicRoadKmCache = {};
+let dynamicRouteGeomCache = {};
+const pendingGeocodes = new Set();
+const pendingOsrmRoutes = new Set();
+
+try {
+  const sc = localStorage.getItem(CUSTOM_COORDS_KEY);
+  if (sc) dynamicCoordsCache = JSON.parse(sc) || {};
+  const sr = localStorage.getItem(CUSTOM_ROADKM_KEY);
+  if (sr) dynamicRoadKmCache = JSON.parse(sr) || {};
+} catch (e) {}
+
+// Live OpenStreetMap Nominatim Geocoder: Resolves ANY new customer town, village, MIDC, or PIN code in India on the fly!
+async function geocodeTownLive(townName) {
+  if (!townName) return null;
+  const raw = String(townName).toLowerCase().trim();
+  if (raw.length < 2) return null;
+  if (dynamicCoordsCache[raw]) return dynamicCoordsCache[raw];
+  if (pendingGeocodes.has(raw)) return null;
+  pendingGeocodes.add(raw);
+  try {
+    const qStr = /\bindia\b/i.test(raw) ? raw : `${townName.trim()}, India`;
+    const url = `https://nominatim.openstreetmap.org/search?format=json&countrycodes=in&limit=1&q=${encodeURIComponent(qStr)}`;
+    const res = await fetch(url, { headers: { "Accept": "application/json" } });
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data) && data.length > 0 && data[0].lat && data[0].lon) {
+        const coords = [parseFloat(data[0].lat), parseFloat(data[0].lon)];
+        dynamicCoordsCache[raw] = coords;
+        const cleanKey = cleanLocTokens(raw);
+        if (cleanKey) dynamicCoordsCache[cleanKey] = coords;
+        try { localStorage.setItem(CUSTOM_COORDS_KEY, JSON.stringify(dynamicCoordsCache)); } catch (e) {}
+        // Refresh Calculator or Map automatically now that the new town has coordinates!
+        if (location.hash === "#map") viewMap();
+        else if (!location.hash || location.hash === "#quote") renderQuoteResults();
+        return coords;
+      }
+    }
+  } catch (e) {
+    // Offline or blocked; fallback handled gracefully
+  } finally {
+    pendingGeocodes.delete(raw);
+  }
+  return null;
+}
+
+// Live OSRM National Highway Router: Calculates actual driving distance (km) & highway polyline between any two coordinates!
+async function fetchOsrmRouteLive(pairKey, c1, c2) {
+  if (!pairKey || !c1 || !c2 || pendingOsrmRoutes.has(pairKey)) return;
+  pendingOsrmRoutes.add(pairKey);
+  try {
+    const url = `https://router.project-osrm.org/route/v1/driving/${c1[1]},${c1[0]};${c2[1]},${c2[0]}?overview=simplified&geometries=geojson`;
+    const res = await fetch(url);
+    if (res.ok) {
+      const data = await res.json();
+      const route = data?.routes?.[0];
+      if (route && route.distance > 0) {
+        const km = Math.max(5, Math.round(route.distance / 1000));
+        dynamicRoadKmCache[pairKey] = km;
+        try { localStorage.setItem(CUSTOM_ROADKM_KEY, JSON.stringify(dynamicRoadKmCache)); } catch (e) {}
+        if (route.geometry?.coordinates?.length) {
+          dynamicRouteGeomCache[pairKey] = route.geometry.coordinates.map(([lon, lat]) => [lat, lon]);
+        }
+        if (location.hash === "#map") viewMap();
+        else if (!location.hash || location.hash === "#quote") renderQuoteResults();
+      }
+    }
+  } catch (e) {
+    // Uses 1.24x Haversine highway estimate if OSRM is unreachable
+  } finally {
+    pendingOsrmRoutes.delete(pairKey);
+  }
+}
 
 function getCoordsForTown(townName) {
   if (!townName) return null;
   const raw = String(townName).toLowerCase().trim();
   if (INDIA_COORDS[raw]) return INDIA_COORDS[raw];
+  if (dynamicCoordsCache[raw]) return dynamicCoordsCache[raw];
+  const cleaned = cleanLocTokens(raw);
+  if (cleaned && INDIA_COORDS[cleaned]) return INDIA_COORDS[cleaned];
+  if (cleaned && dynamicCoordsCache[cleaned]) return dynamicCoordsCache[cleaned];
+
   const parts = raw.split(/[,/()-]+/).map(s => s.trim()).filter(Boolean);
   for (const p of parts) {
     if (INDIA_COORDS[p]) return INDIA_COORDS[p];
+    if (dynamicCoordsCache[p]) return dynamicCoordsCache[p];
+    const cp = cleanLocTokens(p);
+    if (cp && INDIA_COORDS[cp]) return INDIA_COORDS[cp];
   }
   for (const [k, coords] of Object.entries(INDIA_COORDS)) {
-    if (raw.includes(k) || k.includes(raw)) return coords;
+    if (k.length >= 4 && (raw.includes(k) || (cleaned.length >= 4 && k.includes(cleaned)))) return coords;
   }
+  for (const [k, coords] of Object.entries(dynamicCoordsCache)) {
+    if (k.length >= 4 && raw.includes(k)) return coords;
+  }
+  // Not in built-in index yet -> Trigger live OpenStreetMap Nominatim lookup!
+  geocodeTownLive(townName);
   return null;
 }
 
@@ -2381,6 +2656,12 @@ function calcRoadDistanceKm(fromTown, toTown) {
   const c1 = getCoordsForTown(fromTown);
   const c2 = getCoordsForTown(toTown);
   if (!c1 || !c2) return null;
+  const pairKey = `${c1[0].toFixed(3)},${c1[1].toFixed(3)}->${c2[0].toFixed(3)},${c2[1].toFixed(3)}`;
+  if (dynamicRoadKmCache[pairKey]) return dynamicRoadKmCache[pairKey];
+
+  // Trigger live OSRM highway driving distance query in background for exact highway km
+  fetchOsrmRouteLive(pairKey, c1, c2);
+
   const R = 6371;
   const dLat = (c2[0] - c1[0]) * Math.PI / 180;
   const dLon = (c2[1] - c1[1]) * Math.PI / 180;
@@ -2388,6 +2669,7 @@ function calcRoadDistanceKm(fromTown, toTown) {
             Math.cos(c1[0] * Math.PI / 180) * Math.cos(c2[0] * Math.PI / 180) *
             Math.sin(dLon / 2) * Math.sin(dLon / 2);
   const straightKm = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  if (straightKm < 3) return 10;
   // Highway road winding factor (~1.24x straight-line distance in India)
   return Math.max(10, Math.round(straightKm * 1.24));
 }
@@ -2399,6 +2681,8 @@ function mountInlineQuoteMap(containerId, fromTown, toTown, refineryName) {
   const c1 = getCoordsForTown(fromTown) || [20.5937, 78.9629];
   const c2 = getCoordsForTown(toTown) || c1;
   const distKm = calcRoadDistanceKm(fromTown, toTown);
+  const pairKey = `${c1[0].toFixed(3)},${c1[1].toFixed(3)}->${c2[0].toFixed(3)},${c2[1].toFixed(3)}`;
+  const highwayGeom = dynamicRouteGeomCache[pairKey];
 
   if (window.L) {
     try {
@@ -2425,8 +2709,9 @@ function mountInlineQuoteMap(containerId, fromTown, toTown, refineryName) {
 
       L.marker(c1, { icon: refIcon }).addTo(map).bindPopup(`<b>🏭 ${esc(refineryName)}</b><br>Loading: ${esc(fromTown)}`);
       if (toTown && (c1[0] !== c2[0] || c1[1] !== c2[1])) {
-        L.marker(c2, { icon: delIcon }).addTo(map).bindPopup(`<b>📍 Delivery Location</b><br>${esc(toTown)}${distKm ? `<br>~${distKm} km road distance` : ""}`);
-        const line = L.polyline([c1, c2], { color: "#4f46e5", weight: 4, dashArray: "8, 6" }).addTo(map);
+        L.marker(c2, { icon: delIcon }).addTo(map).bindPopup(`<b>📍 Delivery Location</b><br>${esc(toTown)}${distKm ? `<br>~${distKm} km highway distance` : ""}`);
+        const polyPts = highwayGeom && highwayGeom.length > 1 ? highwayGeom : [c1, c2];
+        const line = L.polyline(polyPts, { color: "#4f46e5", weight: 4, ...(highwayGeom ? {} : { dashArray: "8, 6" }) }).addTo(map);
         map.fitBounds(line.getBounds(), { padding: [45, 45] });
       } else {
         map.setView(c1, 8);
@@ -2450,20 +2735,23 @@ function viewMap() {
   const ms = UI.mapState;
   const selSrc = sources.find(s => s.id === ms.sourceId) || sources[0];
   const fromLoc = selSrc ? (getRefineryLocations(selSrc)[0] || selSrc.loading || selSrc.name) : "";
+  if (ms.delivery && !getCoordsForTown(ms.delivery)) geocodeTownLive(ms.delivery);
   const distKm = calcRoadDistanceKm(fromLoc, ms.delivery);
   const transitHrs = distKm ? Math.max(2, Math.round(distKm / 38)) : null;
   const transitDays = transitHrs ? Math.max(1, Math.ceil(transitHrs / 14)) : null;
   const matchingRoutes = (S.routes?.rows || []).filter(r =>
-    selSrc && getRefineryLocations(selSrc).map(norm).includes(norm(r.loading)) &&
-    (!ms.delivery || norm(r.delivery) === norm(ms.delivery))
+    selSrc && getRefineryLocations(selSrc).some(sl => areLocationsEquivalent(sl, r.loading, true)) &&
+    (!ms.delivery || areLocationsEquivalent(r.delivery, ms.delivery, true))
   );
+  const perKm = getCalibratedPerKmRate(ms.productId);
+  const estRoadRate = distKm ? Math.max(600, Math.round((distKm * perKm) / 50) * 50) : null;
   const gmapsUrl = `https://www.google.com/maps/dir/${encodeURIComponent(fromLoc + ", India")}/${encodeURIComponent((ms.delivery || "Nagpur") + ", India")}`;
 
   V().innerHTML = `
   <div class="sechead">
     <div>
-      <h2>🗺️ Refinery &amp; Delivery Route Map</h2>
-      <p class="sub" style="margin:0">Inspect refinery loading locations, customer delivery hubs, highway distance (km), and tanker transit times across India.</p>
+      <h2>🗺️ Live Refinery &amp; Any-City Delivery Route Map</h2>
+      <p class="sub" style="margin:0">Type <b>any</b> customer city, town, industrial area (MIDC/GIDC), or PIN code in India — OpenStreetMap Nominatim &amp; OSRM calculate highway distance and freight live.</p>
     </div>
     <div class="actions">
       <a href="${gmapsUrl}" target="_blank" rel="noopener" class="btn">↗ Open Route in Google Maps</a>
@@ -2480,8 +2768,8 @@ function viewMap() {
         </select>
       </div>
       <div class="field">
-        <label class="lbl" for="map-del">2. Delivery Location</label>
-        <input type="text" id="map-del" list="map-dl-locs" value="${esc(ms.delivery)}" placeholder="Type customer town (e.g. Nagpur, Pune)" class="font-bold">
+        <label class="lbl" for="map-del">2. Any Customer Delivery Location (Live Geocoder)</label>
+        <input type="text" id="map-del" list="map-dl-locs" value="${esc(ms.delivery)}" placeholder="Type ANY city, town, MIDC, or PIN in India…" class="font-bold">
         <datalist id="map-dl-locs">${dels.map(l => `<option value="${esc(l)}">`).join("")}</datalist>
       </div>
       <div class="field">
@@ -2491,7 +2779,7 @@ function viewMap() {
         </select>
       </div>
       <div class="flex items-center gap-2">
-        <button type="button" id="btn-map-calc" class="btn primary w-full justify-center py-2.5">🗺️ Show Route &amp; Distance</button>
+        <button type="button" id="btn-map-calc" class="btn primary w-full justify-center py-2.5">🗺️ Locate &amp; Calculate Highway Route</button>
       </div>
     </div>
 
@@ -2503,19 +2791,19 @@ function viewMap() {
         <span class="text-[11px] text-slate-500">${esc(selSrc?.name || "")}</span>
       </div>
       <div class="p-3 rounded-xl bg-slate-50 border border-slate-200">
-        <span class="text-[10px] font-extrabold uppercase text-slate-400">Destination (Delivery)</span>
+        <span class="text-[10px] font-extrabold uppercase text-slate-400">Destination (Live Geocoded)</span>
         <div class="text-sm font-extrabold text-rose-600 mt-0.5">📍 ${esc(ms.delivery || "—")}</div>
-        <span class="text-[11px] text-slate-500">Customer Hub</span>
+        <span class="text-[11px] text-slate-500">${getCoordsForTown(ms.delivery) ? `🛰️ GPS: ${getCoordsForTown(ms.delivery).map(n => n.toFixed(2)).join(", ")}` : "Locating via OpenStreetMap…"}</span>
       </div>
       <div class="p-3 rounded-xl bg-slate-50 border border-slate-200">
-        <span class="text-[10px] font-extrabold uppercase text-slate-400">Est. Highway Distance</span>
-        <div class="text-base font-extrabold font-mono text-emerald-700 mt-0.5">${distKm ? `~${nf(distKm)} km` : "Enter known town"}</div>
-        <span class="text-[11px] text-slate-500">${transitHrs ? `~${transitHrs} driving hrs (${transitDays}d transit)` : "Road corridor"}</span>
+        <span class="text-[10px] font-extrabold uppercase text-slate-400">Highway Driving Distance</span>
+        <div class="text-base font-extrabold font-mono text-emerald-700 mt-0.5">${distKm ? `~${nf(distKm)} km` : "Locating…"}</div>
+        <span class="text-[11px] text-slate-500">${transitHrs ? `~${transitHrs} driving hrs (${transitDays}d tanker transit)` : "National Highway route"}</span>
       </div>
       <div class="p-3 rounded-xl bg-slate-50 border border-slate-200">
-        <span class="text-[10px] font-extrabold uppercase text-slate-400">Saved Transport Routes</span>
-        <div class="text-base font-extrabold font-mono text-amber-700 mt-0.5">${matchingRoutes.length} route(s)</div>
-        <span class="text-[11px] text-slate-500">${matchingRoutes[0]?.rate ? `From ${inr(matchingRoutes[0].rate)}/unit` : "Click Price Route to quote"}</span>
+        <span class="text-[10px] font-extrabold uppercase text-slate-400">Transport Freight (Fixed / Est.)</span>
+        <div class="text-base font-extrabold font-mono text-amber-700 mt-0.5">${matchingRoutes[0]?.rate ? `${inr(matchingRoutes[0].rate)} (Fixed)` : estRoadRate ? `~${inr(estRoadRate)} (Road Est.)` : "—"}</div>
+        <span class="text-[11px] text-slate-500">${matchingRoutes.length ? `${matchingRoutes.length} saved route(s)` : `Auto-estimated @ ₹${perKm}/km`}</span>
       </div>
     </div>
   </div>
@@ -2525,10 +2813,13 @@ function viewMap() {
     <div id="dedicated-map-canvas" style="height:460px;width:100%;z-index:1"></div>
   </div>`;
 
-  const updateMapRoute = () => {
+  const updateMapRoute = async () => {
     ms.sourceId = $("#map-src")?.value || ms.sourceId;
     ms.delivery = ($("#map-del")?.value || "").trim();
     ms.productId = $("#map-prod")?.value || ms.productId;
+    if (ms.delivery && !getCoordsForTown(ms.delivery)) {
+      await geocodeTownLive(ms.delivery);
+    }
     viewMap();
   };
   $("#map-src")?.addEventListener("change", updateMapRoute);
@@ -2591,7 +2882,10 @@ function viewMap() {
         boundsPts.push(delCoords);
       }
       if (selCoords && delCoords && (selCoords[0] !== delCoords[0] || selCoords[1] !== delCoords[1])) {
-        const poly = L.polyline([selCoords, delCoords], { color: "#4f46e5", weight: 4, dashArray: "8, 6" }).addTo(map);
+        const pairKey = `${selCoords[0].toFixed(3)},${selCoords[1].toFixed(3)}->${delCoords[0].toFixed(3)},${delCoords[1].toFixed(3)}`;
+        const highwayGeom = dynamicRouteGeomCache[pairKey];
+        const polyPts = highwayGeom && highwayGeom.length > 1 ? highwayGeom : [selCoords, delCoords];
+        const poly = L.polyline(polyPts, { color: "#4f46e5", weight: 4, ...(highwayGeom ? {} : { dashArray: "8, 6" }) }).addTo(map);
         map.fitBounds(poly.getBounds(), { padding: [55, 55] });
       } else if (boundsPts.length === 1) {
         map.setView(boundsPts[0], 7);
@@ -2604,11 +2898,15 @@ function viewMap() {
 /* ================= VIEW 1: GET A PRICE (QUOTE CALCULATOR IN OUR UI) ================= */
 function allLocations() { return [...new Set((S.routes?.rows || []).map(r => r.delivery).filter(Boolean))].sort((a, b) => a.localeCompare(b)); }
 function sellableProducts() {
+  // Always return ALL named products in the catalog (never hide products just because the single latest cycle only had 2 products!)
   const named = (S.catalog?.products || []).filter(p => (p.name || "").trim());
-  const lc = S.cycles.find(c => c.id === UI.q.cycleId) || latestCycle();
-  const ids = new Set((lc?.prices || []).filter(p => num(p.basic) > 0).map(p => p.productId));
-  const list = named.filter(p => ids.has(p.id));
-  return list.length ? list : named;
+  const allPricedIds = new Set((S.cycles || []).flatMap(c => (c.prices || []).filter(p => num(p.basic) > 0).map(p => p.productId)));
+  const allRouteIds = new Set((S.routes?.rows || []).map(r => r.productId).filter(Boolean));
+  return [...named].sort((a, b) => {
+    const aScore = (allPricedIds.has(a.id) ? 2 : 0) + (allRouteIds.has(a.id) ? 1 : 0);
+    const bScore = (allPricedIds.has(b.id) ? 2 : 0) + (allRouteIds.has(b.id) ? 1 : 0);
+    return bScore - aScore;
+  });
 }
 const CO_VAR = { HPCL: "--hp", IOCL: "--io", BPCL: "--bp", RIL: "--ril", Nayara: "--ny", Depot: "--dp", Imported: "--imp" };
 const coVar = c => `var(${CO_VAR[c] || "--dp"})`;
@@ -2696,6 +2994,59 @@ function getSourceBrandName(s) {
 
 function autoHealCatalogAndRoutes() {
   let changed = false;
+  S.catalog = S.catalog || { sources: [], products: [] };
+  S.catalog.products = Array.isArray(S.catalog.products) ? S.catalog.products : [];
+
+  // 1. Recover any products referenced in saved Refinery Rate Cycles, Transport Routes, Refineries, or Transporters that are missing from S.catalog.products
+  const existingProdMatch = pidOrName => {
+    if (!pidOrName) return null;
+    return S.catalog.products.find(p =>
+      p.id === pidOrName ||
+      norm(p.id) === norm(pidOrName) ||
+      norm(p.name) === norm(pidOrName) ||
+      (p.aliases || []).map(norm).includes(norm(pidOrName))
+    );
+  };
+
+  const referencedProds = new Set([
+    ...(S.cycles || []).flatMap(c => (c.prices || []).map(p => p.productId)),
+    ...((S.routes?.rows || []).map(r => r.productId)),
+    ...((S.catalog?.sources || []).flatMap(s => Array.isArray(s.products) ? s.products : [])),
+    ...((S.transporters?.list || []).flatMap(t => Array.isArray(t.products) ? t.products : []))
+  ].filter(Boolean));
+
+  for (const refPid of referencedProds) {
+    if (!existingProdMatch(refPid)) {
+      const std = STANDARD_PRODUCT_BENCHMARKS[String(refPid).toUpperCase()];
+      const pName = std ? std.name : String(refPid);
+      S.catalog.products.push({
+        id: String(refPid),
+        name: pName,
+        unit: std ? std.unit : inferProductUnit(pName, ""),
+        cls: std ? std.cls : inferProductType(pName, ""),
+        aliases: [String(refPid).toUpperCase(), pName.toUpperCase()]
+      });
+      changed = true;
+    }
+  }
+
+  // 2. If the product list was accidentally truncated to <= 4 items (e.g. only MTO and LDO from a single circular upload),
+  // restore the core GEPL petrochemical product catalog so all products (FO, LDO, MTO, C9, Hexane, Bitumen, Toluene, Xylene, etc.) are available!
+  if (!S.catalog._userTruncatedProducts && S.catalog.products.filter(p => (p.name || "").trim()).length <= 4) {
+    for (const [stdId, stdDef] of Object.entries(STANDARD_PRODUCT_BENCHMARKS)) {
+      if (!existingProdMatch(stdId) && !existingProdMatch(stdDef.name)) {
+        S.catalog.products.push({
+          id: stdId,
+          name: stdDef.name,
+          unit: stdDef.unit,
+          cls: stdDef.cls,
+          aliases: [stdId, stdDef.name.toUpperCase()]
+        });
+        changed = true;
+      }
+    }
+  }
+
   if (S.catalog?.products) {
     S.catalog.products.forEach(p => {
       if (!p._userTypedCls && (!p.cls || p.cls === "White liquid" || p.cls === "white" || p.cls === "black" || p.cls === "bitumen")) {
@@ -3187,7 +3538,7 @@ function renderQuoteResults() {
           <div class="space-y-0.5">
             <div class="flex flex-wrap items-center gap-2 text-xs font-bold text-white">
               <span>🚚 Transport (${esc(origLoc)} → ${esc(q.loc || "Customer")} · ${esc(shortName(R.pr))}):</span>
-              ${fixedR != null ? `<span class="px-2 py-0.5 rounded bg-sky-950 border border-sky-700 text-sky-300 font-mono">Fixed Rate: ${inr(fixedR)}/${unit}</span>` : `<span class="px-2 py-0.5 rounded bg-amber-950 border border-amber-700 text-amber-300">No fixed rate saved yet</span>`}
+              ${fixedR != null ? `<span class="px-2 py-0.5 rounded bg-sky-950 border border-sky-700 text-sky-300 font-mono">✓ Saved Fixed Rate: ${inr(fixedR)}/${unit}</span>` : `<span class="px-2 py-0.5 rounded bg-emerald-950 border border-emerald-600 text-emerald-300 font-mono">⚡ Live Map Road-Distance Est.: ${B.distKm ? `~${nf(B.distKm)} km @ ₹${B.calibratedPerKm}/km` : "Auto-Calculated"}</span>`}
               ${diffFr !== 0 && fixedR != null ? `<span class="px-2 py-0.5 rounded ${diffFr < 0 ? "bg-emerald-500 text-slate-950" : "bg-amber-400 text-slate-950"} font-extrabold font-mono">${diffFr < 0 ? `Bargained −${inr(Math.abs(diffFr))}` : `Bargained +${inr(diffFr)}`}</span>` : ""}
             </div>
             <div class="text-[11px] text-slate-300">
@@ -3205,7 +3556,7 @@ function renderQuoteResults() {
             <button type="button" data-bargain-step="50" class="px-2 py-1 rounded-lg bg-slate-800 hover:bg-amber-600 text-amber-300 hover:text-white border border-slate-700 text-xs font-mono font-bold cursor-pointer">+50</button>
             <button type="button" data-bargain-step="100" class="px-2 py-1 rounded-lg bg-slate-800 hover:bg-amber-600 text-amber-300 hover:text-white border border-slate-700 text-xs font-mono font-bold cursor-pointer">+100</button>
             ${fixedR != null && curFr !== fixedR ? `<button type="button" id="btn-reset-fixed-freight" class="px-2.5 py-1 rounded-lg bg-slate-700 hover:bg-slate-600 text-white text-[11px] font-bold cursor-pointer">Reset (${inr(fixedR)})</button>` : ""}
-            ${S.canWrite && curFr > 0 && curFr !== fixedR && q.loc.trim() ? `<button type="button" id="btn-save-fixed-freight" class="px-2.5 py-1 rounded-lg bg-amber-400 hover:bg-amber-300 text-slate-950 text-[11px] font-extrabold cursor-pointer" title="Save ₹${curFr} as the new fixed rate for ${esc(origLoc)} → ${esc(q.loc)}">💾 Save as Fixed</button>` : ""}
+            ${S.canWrite && curFr > 0 && (fixedR == null || curFr !== fixedR) && q.loc.trim() ? `<button type="button" id="btn-save-fixed-freight" class="px-2.5 py-1 rounded-lg bg-amber-400 hover:bg-amber-300 text-slate-950 text-[11px] font-extrabold cursor-pointer" title="Save ₹${curFr} as the new fixed rate for ${esc(origLoc)} → ${esc(q.loc)}">💾 Save as Fixed</button>` : ""}
           </div>
         </div>`;
       })()}

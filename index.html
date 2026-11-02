@@ -470,6 +470,8 @@
         <button id="btn-banner-switch-admin" type="button" class="px-3 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs">Sign In as Admin</button>
       </div>
 
+      <div id="global-admin-pending-banner" hidden class="space-y-2 mb-4"></div>
+
       <div id="view" class="space-y-6">
         <div class="panel empty"><strong>Opening the desk…</strong>Loading refinery prices, discounts, and transport routes.</div>
       </div>
@@ -1193,11 +1195,57 @@ async function pushAllToNeon(notify = false, replaceAll = true) {
   return false;
 }
 
-async function pullFromNeon(notify = false, force = false) {
-  // Never clobber active local edits or in-flight saves during background polling
-  if (!force && (inflight > 0 || Object.keys(pending).length > 0 || editing() || (Date.now() - lastLocalMutationAt < 5000))) {
-    return false;
+function mergeUsersLists(localList, remoteList) {
+  const loc = Array.isArray(localList) ? localList : [];
+  const rem = Array.isArray(remoteList) ? remoteList : [];
+  const deletedKeys = new Set((S.authSettings?.deletedUserKeys || []).map(k => String(k).toLowerCase()));
+  const byKey = new Map();
+
+  const getKey = u => String(u?.email || u?.username || u?.id || "").trim().toLowerCase();
+
+  // Start with remote users (authoritative for new signups & password reset requests)
+  for (const ru of rem) {
+    const k = getKey(ru);
+    if (!k) continue;
+    if (deletedKeys.has(k) && ru.status !== "pending" && !ru.resetRequested) continue;
+    byKey.set(k, JSON.parse(JSON.stringify(ru)));
   }
+
+  // Merge local users without dropping remote pending signups or password reset requests
+  for (const lu of loc) {
+    const k = getKey(lu);
+    if (!k) continue;
+    if (deletedKeys.has(k) && lu.status !== "pending" && !lu.resetRequested) continue;
+    if (!byKey.has(k)) {
+      byKey.set(k, JSON.parse(JSON.stringify(lu)));
+    } else {
+      const existing = byKey.get(k);
+      // If remote has a pending password reset or newer status update, preserve it!
+      const merged = { ...lu, ...existing };
+      if (existing.resetRequested || lu.resetRequested) {
+        merged.resetRequested = true;
+        merged.requestedNewPassword = existing.requestedNewPassword || lu.requestedNewPassword;
+        merged.resetRequestedAt = existing.resetRequestedAt || lu.resetRequestedAt;
+      }
+      // If Admin locally approved a user who was pending remotely, keep the newest updatedAt
+      const locTs = Number(lu.updatedAtMs) || 0;
+      const remTs = Number(existing.updatedAtMs) || 0;
+      if (locTs > remTs) {
+        Object.assign(merged, lu);
+      }
+      byKey.set(k, merged);
+    }
+  }
+
+  const out = Array.from(byKey.values());
+  if (!out.some(u => (u.email || "").toLowerCase() === "dmegepl@gmail.com" || (u.username || "").toLowerCase() === "dmegepl")) {
+    out.unshift({ id: "u-mohsin", username: "dmegepl", email: "dmegepl@gmail.com", password: "admin123", name: "Mohsin Khan", role: "admin", canEditMaster: true, canQuote: true, active: true, status: "approved" });
+  }
+  return out;
+}
+
+async function pullFromNeon(notify = false, force = false) {
+  if (!force && inflight > 0) return false;
   try {
     const res = await apiRequest("/api/storage?_t=" + Date.now(), {
       method: "GET",
@@ -1209,13 +1257,39 @@ async function pullFromNeon(notify = false, force = false) {
     if (!data || typeof data !== "object") return false;
     cloudConnected = true;
 
+    // ALWAYS merge incoming users & authSettings immediately (even if Admin cursor is inside a Calculator input or stateRev is ahead!)
+    // so new employee Sign-Up requests and Password Reset requests NEVER get missed or overwritten!
+    if (data.authSettings && typeof data.authSettings === "object") {
+      S.authSettings = { ...(S.authSettings || {}), ...data.authSettings };
+      saveLocal("authSettings", S.authSettings);
+    }
+    if (Array.isArray(data.users)) {
+      const prevPendingIds = new Set((S.users || []).filter(u => u.status === "pending").map(u => (u.email || u.id)));
+      const prevResetIds = new Set((S.users || []).filter(u => u.resetRequested).map(u => (u.email || u.id)));
+      const mergedUsers = mergeUsersLists(S.users, data.users);
+      if (JSON.stringify(mergedUsers) !== JSON.stringify(S.users)) {
+        S.users = mergedUsers;
+        saveLocal("users", S.users);
+        syncUserNamesMap();
+        updateSidebarStats();
+        if (UI.tab === "admin-users") viewUsersAdmin();
+        // Alert Admin immediately if a brand-new Sign-Up or Password Reset request just arrived!
+        if (S.currentUser?.role === "admin") {
+          const newPend = S.users.find(u => u.status === "pending" && !prevPendingIds.has(u.email || u.id));
+          if (newPend) toast(`🔔 New Access Request from ${newPend.name} (${newPend.email})!`);
+          const newRst = S.users.find(u => u.resetRequested && !prevResetIds.has(u.email || u.id));
+          if (newRst) toast(`🔑 Password Reset Request from ${newRst.name} (${newRst.email || newRst.username})!`);
+        }
+      }
+    }
+
     // Re-check after network await so typing that happened while GET was in-flight is NEVER overwritten!
     if (!force && (inflight > 0 || Object.keys(pending).length > 0 || editing() || (Date.now() - lastLocalMutationAt < 5000))) {
       setSync();
       return false;
     }
 
-    // If server stateRev is older than or equal to our own stateRev, ignore echo
+    // If server stateRev is older than or equal to our own stateRev, ignore echo for master tables
     const remoteRev = Number(data._meta?.stateRev) || 0;
     if (!force && S.stateRev && remoteRev && remoteRev <= S.stateRev) {
       setSync();
@@ -1253,9 +1327,11 @@ async function pullFromNeon(notify = false, force = false) {
     if (data.mlMappings && typeof data.mlMappings === "object") applyKey("mlMappings", "mlMappings");
     if (data.quoteSeq) applyKey("quoteSeq", "quoteSeq");
     if (Array.isArray(data.users)) {
-      applyKey("users", "users");
-      if (!S.users.some(u => (u.email || "").toLowerCase() === "dmegepl@gmail.com" || (u.username || "").toLowerCase() === "dmegepl")) {
-        S.users.unshift({ id: "u-mohsin", username: "dmegepl", email: "dmegepl@gmail.com", password: "admin123", name: "Mohsin Khan", role: "admin", canEditMaster: true, canQuote: true, active: true, status: "approved" });
+      const mergedU = mergeUsersLists(S.users, data.users);
+      if (JSON.stringify(mergedU) !== JSON.stringify(S.users)) {
+        S.users = mergedU;
+        saveLocal("users", S.users);
+        changed = true;
       }
       if (S.currentUser && !S.isAuthenticatedAdmin) {
         const latestSelf = S.users.find(u => u.id === S.currentUser.id || (u.email && u.email === S.currentUser.email));
@@ -1628,13 +1704,53 @@ async function submitAccessRequestSignUp(fullName, email, password, note = "") {
   if (cleanPass.length < 4) {
     return { ok: false, error: "Please choose a password of at least 4 characters." };
   }
+  // Always pull & merge latest server users right before adding the signup request
+  try {
+    const r = await apiRequest("/api/storage?_t=" + Date.now(), { method: "GET", headers: { "Accept": "application/json" } });
+    if (r.ok) {
+      const p = await r.json();
+      const d = p?.data || p;
+      if (Array.isArray(d?.users)) {
+        S.users = mergeUsersLists(S.users, d.users);
+      }
+    }
+  } catch (e) {}
+
   S.users = S.users || [];
+  // Remove from deletedUserKeys if they were previously rejected and are applying again
+  if (Array.isArray(S.authSettings?.deletedUserKeys)) {
+    S.authSettings.deletedUserKeys = S.authSettings.deletedUserKeys.filter(k => String(k).toLowerCase() !== cleanEmail);
+    saveLocal("authSettings", S.authSettings);
+    await pushKeyToNeon("authSettings", S.authSettings);
+  }
+
   const existing = findMatchingUserAccount(cleanEmail);
   if (existing) {
     if (existing.status === "pending") {
-      return { ok: false, error: "⏳ An access request for this Gmail is already pending Admin approval." };
+      // Re-push to server in case previous push was only local!
+      existing.name = cleanName || existing.name;
+      existing.password = cleanPass || existing.password;
+      existing.requestNote = String(note || "").trim() || existing.requestNote;
+      existing.updatedAtMs = Date.now();
+      saveLocal("users", S.users);
+      await pushKeyToNeon("users", S.users);
+      updateSidebarStats();
+      return { ok: true, user: existing };
     }
-    return { ok: false, error: "An account with this Gmail already exists. Please use the Sign In tab." };
+    if (existing.status === "rejected" || existing.active === false) {
+      existing.name = cleanName;
+      existing.password = cleanPass;
+      existing.status = "pending";
+      existing.active = false;
+      existing.requestNote = String(note || "").trim();
+      existing.createdAt = new Date().toISOString();
+      existing.updatedAtMs = Date.now();
+      saveLocal("users", S.users);
+      await pushKeyToNeon("users", S.users);
+      updateSidebarStats();
+      return { ok: true, user: existing };
+    }
+    return { ok: false, error: "An approved account with this Gmail already exists. Please use the Sign In tab." };
   }
   const newReq = {
     id: "u_" + uid(),
@@ -1648,7 +1764,8 @@ async function submitAccessRequestSignUp(fullName, email, password, note = "") {
     active: false,
     status: "pending",
     requestNote: String(note || "").trim(),
-    createdAt: new Date().toISOString()
+    createdAt: new Date().toISOString(),
+    updatedAtMs: Date.now()
   };
   S.users.push(newReq);
   saveLocal("users", S.users);
@@ -1856,7 +1973,6 @@ function initAuthState() {
     mohsinAcc.status = "approved";
     saveLocal("dmegepl_pw_reset_v1", true);
     saveLocal("users", S.users);
-    pushKeyToNeon("users", S.users);
   }
   S.authSettings = loadLocal("authSettings", { allowQuickSwitch: false });
   syncUserNamesMap();
@@ -2403,16 +2519,128 @@ function updateSidebarStats() {
   const elTra = $("#stat-transporters-count"); if (elTra) elTra.textContent = (S.transporters?.list || []).length;
   const elRef = $("#stat-refineries-count"); if (elRef) elRef.textContent = (S.catalog?.sources || []).length;
   const elUsr = $("#stat-users-count");
+  const pendUsers = (S.users || []).map((u, idx) => ({ u, idx })).filter(({ u }) => u.status === "pending");
+  const resetUsers = (S.users || []).map((u, idx) => ({ u, idx })).filter(({ u }) => u.resetRequested && u.status !== "pending");
+  const totalActionNeeded = pendUsers.length + resetUsers.length;
   if (elUsr) {
-    const pendCount = (S.users || []).filter(u => u.status === "pending").length;
-    if (pendCount > 0) {
-      elUsr.textContent = `⏳ ${pendCount} Pending`;
+    if (totalActionNeeded > 0) {
+      elUsr.textContent = `⏳ ${totalActionNeeded} Pending`;
       elUsr.className = "text-[10px] bg-amber-400 text-slate-950 px-2 py-0.5 rounded-full font-extrabold animate-pulse";
     } else {
       elUsr.textContent = (S.users || []).length;
       elUsr.className = "text-[10px] bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full font-bold";
     }
   }
+  renderGlobalAdminPendingBanner(pendUsers, resetUsers);
+}
+
+function renderGlobalAdminPendingBanner(pendUsers, resetUsers) {
+  const banner = $("#global-admin-pending-banner");
+  if (!banner) return;
+  const isAdmin = S.currentUser?.role === "admin";
+  if (!isAdmin || (!pendUsers.length && !resetUsers.length)) {
+    banner.hidden = true;
+    banner.innerHTML = "";
+    return;
+  }
+  banner.hidden = false;
+  banner.innerHTML = `
+    ${pendUsers.map(({ u, idx }) => `
+      <div class="p-3.5 rounded-2xl bg-amber-50 border-2 border-amber-400 shadow-sm flex flex-wrap items-center justify-between gap-3">
+        <div class="flex items-center gap-2.5">
+          <span class="px-2.5 py-1 rounded-full bg-amber-400 text-slate-950 text-xs font-extrabold animate-pulse">🔔 NEW SIGN-UP REQUEST</span>
+          <div class="text-xs text-slate-900">
+            <b>${esc(u.name)}</b> (<span class="font-mono font-bold text-indigo-700">${esc(u.email)}</span>)
+            ${u.requestNote ? ` · <span class="text-slate-600">"${esc(u.requestNote)}"</span>` : ""}
+            <span class="text-slate-500 ml-1">wants access to the Quote Desk.</span>
+          </div>
+        </div>
+        <div class="flex flex-wrap items-center gap-1.5">
+          <button type="button" data-global-approve="${idx}|quote" class="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-extrabold cursor-pointer shadow-xs">✅ Approve (Quote Only)</button>
+          <button type="button" data-global-approve="${idx}|edit" class="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-extrabold cursor-pointer shadow-xs">✏️ Approve (Can Edit Master)</button>
+          <button type="button" data-global-reject="${idx}" class="px-2.5 py-1.5 rounded-xl bg-rose-100 hover:bg-rose-200 text-rose-800 text-xs font-bold cursor-pointer">✕ Reject</button>
+          <a href="#admin-users" class="px-2.5 py-1.5 rounded-xl bg-white border border-slate-300 text-slate-700 text-xs font-bold">Manage All</a>
+        </div>
+      </div>
+    `).join("")}
+    ${resetUsers.map(({ u, idx }) => `
+      <div class="p-3.5 rounded-2xl bg-indigo-50 border-2 border-indigo-400 shadow-sm flex flex-wrap items-center justify-between gap-3">
+        <div class="flex items-center gap-2.5">
+          <span class="px-2.5 py-1 rounded-full bg-indigo-600 text-white text-xs font-extrabold animate-pulse">🔑 PASSWORD RESET REQUEST</span>
+          <div class="text-xs text-slate-900">
+            <b>${esc(u.name)}</b> (<span class="font-mono font-bold text-indigo-700">${esc(u.email || u.username)}</span>) requested a password reset.
+          </div>
+        </div>
+        <div class="flex flex-wrap items-center gap-1.5">
+          <button type="button" data-global-pwapprove="${idx}" class="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-extrabold cursor-pointer">✅ Approve New Password</button>
+          <button type="button" data-global-pwreject="${idx}" class="px-2.5 py-1.5 rounded-xl bg-rose-100 hover:bg-rose-200 text-rose-800 text-xs font-bold cursor-pointer">✕ Dismiss</button>
+        </div>
+      </div>
+    `).join("")}
+  `;
+
+  banner.querySelectorAll("[data-global-approve]").forEach(btn => btn.onclick = async () => {
+    const [idxStr, mode] = btn.getAttribute("data-global-approve").split("|");
+    const u = S.users[+idxStr];
+    if (!u) return;
+    u.status = "approved";
+    u.active = true;
+    u.role = "user";
+    u.canEditMaster = mode === "edit";
+    u.canQuote = true;
+    u.updatedAtMs = Date.now();
+    saveLocal("users", S.users);
+    await pushKeyToNeon("users", S.users);
+    updateSidebarStats();
+    if (UI.tab === "admin-users") viewUsersAdmin();
+    toast(`✅ Approved ${u.name} (${u.email})! They can now sign in immediately.`);
+  });
+
+  banner.querySelectorAll("[data-global-reject]").forEach(btn => btn.onclick = async () => {
+    const idx = +btn.getAttribute("data-global-reject");
+    const u = S.users[idx];
+    if (!u) return;
+    const k = String(u.email || u.username || u.id).toLowerCase();
+    S.authSettings = S.authSettings || {};
+    S.authSettings.deletedUserKeys = [...new Set([...(S.authSettings.deletedUserKeys || []), k])];
+    saveLocal("authSettings", S.authSettings);
+    S.users.splice(idx, 1);
+    saveLocal("users", S.users);
+    await pushKeyToNeon("authSettings", S.authSettings);
+    await pushKeyToNeon("users", S.users);
+    updateSidebarStats();
+    if (UI.tab === "admin-users") viewUsersAdmin();
+    toast(`Removed sign-up request from ${u.name}`);
+  });
+
+  banner.querySelectorAll("[data-global-pwapprove]").forEach(btn => btn.onclick = async () => {
+    const idx = +btn.getAttribute("data-global-pwapprove");
+    const u = S.users[idx];
+    if (!u) return;
+    u.password = u.requestedNewPassword || u.password;
+    delete u.resetRequested;
+    delete u.requestedNewPassword;
+    u.updatedAtMs = Date.now();
+    saveLocal("users", S.users);
+    await pushKeyToNeon("users", S.users);
+    updateSidebarStats();
+    if (UI.tab === "admin-users") viewUsersAdmin();
+    toast(`✅ Approved new password for ${u.name}!`);
+  });
+
+  banner.querySelectorAll("[data-global-pwreject]").forEach(btn => btn.onclick = async () => {
+    const idx = +btn.getAttribute("data-global-pwreject");
+    const u = S.users[idx];
+    if (!u) return;
+    delete u.resetRequested;
+    delete u.requestedNewPassword;
+    u.updatedAtMs = Date.now();
+    saveLocal("users", S.users);
+    await pushKeyToNeon("users", S.users);
+    updateSidebarStats();
+    if (UI.tab === "admin-users") viewUsersAdmin();
+    toast("Dismissed password reset request");
+  });
 }
 
 function openMobileSidebar() {
@@ -6990,6 +7218,7 @@ function viewUsersAdmin() {
       <p class="sub" style="margin:0">Only invited or approved users can sign in. Approve new sign-up requests, invite team members by Gmail, and control who can edit master files.</p>
     </div>
     <div class="actions">
+      <button class="btn primary" id="btn-refresh-signup-requests" type="button">🔄 Check for New Sign-Up Requests</button>
       <button class="btn" id="btn-open-login-from-tab" type="button">🔐 Account / Sign Out</button>
     </div>
   </div>
@@ -7168,6 +7397,12 @@ function viewUsersAdmin() {
   </div>`;
 
   $("#btn-open-login-from-tab")?.addEventListener("click", () => { $("#modal-auth").hidden = false; });
+  $("#btn-refresh-signup-requests")?.addEventListener("click", async () => {
+    await pullFromNeon(false, true);
+    viewUsersAdmin();
+    const pend = (S.users || []).filter(u => u.status === "pending").length;
+    toast(pend ? `🔔 Found ${pend} pending sign-up request(s)!` : "✓ Synced with Cloud DB — 0 pending requests.");
+  });
 
   // Approve / Dismiss Password Reset Requests
   document.querySelectorAll("[data-approve-pwreset]").forEach(btn => btn.onclick = async () => {
@@ -7208,6 +7443,7 @@ function viewUsersAdmin() {
     if (perm === "admin") { u.role = "admin"; u.canEditMaster = true; u.canQuote = true; }
     else if (perm === "user-edit") { u.role = "user"; u.canEditMaster = true; u.canQuote = true; }
     else { u.role = "user"; u.canEditMaster = false; u.canQuote = true; }
+    u.updatedAtMs = Date.now();
     saveLocal("users", S.users);
     syncUserNamesMap();
     await pushKeyToNeon("users", S.users);
@@ -7221,6 +7457,13 @@ function viewUsersAdmin() {
     if (!isAdmin) return;
     const idx = +btn.getAttribute("data-reject-user");
     const u = S.users[idx];
+    if (u) {
+      const k = String(u.email || u.username || u.id).toLowerCase();
+      S.authSettings = S.authSettings || {};
+      S.authSettings.deletedUserKeys = [...new Set([...(S.authSettings.deletedUserKeys || []), k])];
+      saveLocal("authSettings", S.authSettings);
+      await pushKeyToNeon("authSettings", S.authSettings);
+    }
     S.users.splice(idx, 1);
     saveLocal("users", S.users);
     syncUserNamesMap();
@@ -7286,6 +7529,7 @@ function viewUsersAdmin() {
     else u[f] = inp.value;
     if (u.role === "admin") { u.canEditMaster = true; u.canQuote = true; }
     u.status = "approved";
+    u.updatedAtMs = Date.now();
     markLocalMutation();
     saveLocal("users", S.users);
     syncUserNamesMap();
@@ -7302,6 +7546,14 @@ function viewUsersAdmin() {
   document.querySelectorAll("[data-udel]").forEach(b => b.onclick = async () => {
     if (!isAdmin) return;
     if (!b.dataset.armed) { b.dataset.armed = 1; b.textContent = "Del?"; return; }
+    const u = S.users[+b.dataset.udel];
+    if (u) {
+      const k = String(u.email || u.username || u.id).toLowerCase();
+      S.authSettings = S.authSettings || {};
+      S.authSettings.deletedUserKeys = [...new Set([...(S.authSettings.deletedUserKeys || []), k])];
+      saveLocal("authSettings", S.authSettings);
+      await pushKeyToNeon("authSettings", S.authSettings);
+    }
     S.users.splice(+b.dataset.udel, 1);
     saveLocal("users", S.users);
     syncUserNamesMap();

@@ -48,6 +48,41 @@ const pool = process.env.DATABASE_URL
     })
   : null;
 
+// Non-destructive server-side user list merger so pending sign-ups & password resets are never clobbered by another browser's stale save
+function mergeServerUsers(existingUsers, incomingUsers, authSettings) {
+  if (!Array.isArray(incomingUsers)) return existingUsers || [];
+  if (!Array.isArray(existingUsers) || !existingUsers.length) return incomingUsers;
+  const deletedKeys = new Set(((authSettings && authSettings.deletedUserKeys) || []).map(k => String(k).toLowerCase()));
+  const getKey = u => String((u && (u.email || u.username || u.id)) || '').trim().toLowerCase();
+  const byKey = new Map();
+
+  for (const u of incomingUsers) {
+    const k = getKey(u);
+    if (!k) continue;
+    byKey.set(k, u);
+  }
+  for (const oldU of existingUsers) {
+    const k = getKey(oldU);
+    if (!k || deletedKeys.has(k)) continue;
+    if (!byKey.has(k)) {
+      // Preserve pending sign-up requests or active accounts that a stale client didn't know about yet
+      byKey.set(k, oldU);
+    } else {
+      const inc = byKey.get(k);
+      const oldTs = Number(oldU.updatedAtMs) || 0;
+      const incTs = Number(inc.updatedAtMs) || 0;
+      if (oldTs > incTs) {
+        byKey.set(k, oldU);
+      } else if (oldU.resetRequested && !inc.resetRequested && oldTs >= incTs) {
+        inc.resetRequested = true;
+        inc.requestedNewPassword = oldU.requestedNewPassword;
+        inc.resetRequestedAt = oldU.resetRequestedAt;
+      }
+    }
+  }
+  return Array.from(byKey.values());
+}
+
 // Connected Server-Sent Events (SSE) clients for instant multi-device push
 const sseClients = new Set();
 function broadcastSyncEvent(meta = {}) {
@@ -166,8 +201,9 @@ app.post('/api/storage/:key', async (req, res) => {
     const rev = Number(stateRev) || Date.now();
     const metaObj = { stateRev: rev, updatedAt: new Date().toISOString(), lastKey: key };
 
-    // 1. Update in-memory store immediately for 0ms cross-device consistency
-    memoryStore[key] = value ?? null;
+    // 1. Update in-memory store immediately for 0ms cross-device consistency (with non-destructive merge for users)
+    const finalValue = key === 'users' ? mergeServerUsers(memoryStore.users, value, memoryStore.authSettings) : (value ?? null);
+    memoryStore[key] = finalValue;
     memoryStore._meta = metaObj;
     latestServerMs = Math.max(latestServerMs, rev, Date.now());
 
@@ -184,7 +220,7 @@ app.post('/api/storage/:key', async (req, res) => {
             `INSERT INTO app_kv_store (key, value, updated_at)
              VALUES ($1, $2::jsonb, CURRENT_TIMESTAMP)
              ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = CURRENT_TIMESTAMP`,
-            [key, JSON.stringify(value ?? null)]
+            [key, JSON.stringify(finalValue)]
           );
           await client.query(
             `INSERT INTO app_kv_store (key, value, updated_at)
@@ -221,12 +257,14 @@ app.post('/api/storage', async (req, res) => {
     const rev = Number(stateRev) || Date.now();
     const metaObj = { stateRev: rev, updatedAt: new Date().toISOString(), lastKey: 'bulk' };
 
-    // 1. Update in-memory store immediately
+    // 1. Update in-memory store immediately (preserving pending sign-up requests in users)
+    const prevUsers = memoryStore.users;
+    const prevAuthSettings = entries.authSettings || memoryStore.authSettings;
     if (replaceAll) {
       for (const k of Object.keys(memoryStore)) delete memoryStore[k];
     }
     for (const [k, v] of Object.entries(entries)) {
-      memoryStore[k] = v ?? null;
+      memoryStore[k] = k === 'users' ? mergeServerUsers(prevUsers, v, prevAuthSettings) : (v ?? null);
     }
     memoryStore._meta = metaObj;
     latestServerMs = Math.max(latestServerMs, rev, Date.now());
@@ -244,11 +282,12 @@ app.post('/api/storage', async (req, res) => {
             await client.query('DELETE FROM app_kv_store');
           }
           for (const [k, v] of Object.entries(entries)) {
+            const dbVal = k === 'users' ? memoryStore.users : (v ?? null);
             await client.query(
               `INSERT INTO app_kv_store (key, value, updated_at)
                VALUES ($1, $2::jsonb, CURRENT_TIMESTAMP)
                ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = CURRENT_TIMESTAMP`,
-              [k, JSON.stringify(v ?? null)]
+              [k, JSON.stringify(dbVal)]
             );
           }
           await client.query(

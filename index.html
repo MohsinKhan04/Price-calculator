@@ -1910,17 +1910,40 @@ function canTransporterCarryProduct(transporterId, prodId) {
   return true;
 }
 
+// Find all transporters from Step 3 that carry this product and serve this origin/delivery
+function findMatchingTransportersForRoute(loadingLoc, deliveryLoc, prodId) {
+  return (S.transporters?.list || []).filter(t => {
+    const carriesProd = !Array.isArray(t.products) || !t.products.length || t.products.includes(prodId);
+    if (!carriesProd) return false;
+    if (Array.isArray(t.locationGroups) && t.locationGroups.length > 0) {
+      const origMatch = t.locationGroups.find(lg => norm(lg.loading) === norm(loadingLoc));
+      if (!origMatch) return false;
+      if (Array.isArray(origMatch.deliveries) && origMatch.deliveries.length > 0 && deliveryLoc) {
+        return origMatch.deliveries.some(d => norm(d.town) === norm(deliveryLoc));
+      }
+      return true;
+    }
+    return true;
+  });
+}
+
 function routeOptions(src, prodId, loc, qty) {
   const P = prodMap(), pr = P[prodId], st = settings();
   const srcLocs = getRefineryLocations(src).map(norm);
   const base = (S.routes?.rows || []).filter(r =>
     srcLocs.includes(norm(r.loading)) &&
-    norm(r.delivery) === norm(loc) &&
-    (!r.company || norm(r.company) === norm(src.company) || norm(r.company) === norm(src.name)) &&
-    canTransporterCarryProduct(r.transporterId, prodId)
+    norm(r.delivery) === norm(loc)
   );
   const ok = r => num(r.rate) !== null && (!num(r.minQty) || qty >= num(r.minQty));
-  const exact = base.filter(r => r.productId === prodId);
+  // Match by Product ID or Product Name / Short Name (e.g. "FO" matches "Furnace oil" or "FO")
+  const isSameProd = r => {
+    if (norm(r.productId) === norm(prodId)) return true;
+    const rP = P[r.productId];
+    if (rP && pr && (norm(rP.name) === norm(pr.name) || norm(shortName(rP)) === norm(shortName(pr)))) return true;
+    if (pr && (norm(r.productId) === norm(pr.name) || norm(r.productId) === norm(shortName(pr)))) return true;
+    return false;
+  };
+  const exact = base.filter(isSameProd);
   const pend = exact.filter(r => num(r.rate) === null);
   const blockedMin = exact.filter(r => num(r.rate) !== null && num(r.minQty) && qty < num(r.minQty));
   let list = exact.filter(ok), est = null;
@@ -1963,27 +1986,29 @@ function computeQuote(q) {
     const net = basic - disc;
     const ro = routeOptions(s, q.product, q.loc, qty);
     const route = (q.routeSel && ro.list.find(x => x.id === q.routeSel[s.id])) || ro.list[0] || null;
+    const fixedRate = route ? num(route.rate) : null;
     const manual = num(q.manual[s.id]);
     let freight = null, freightSrc = "none", veh = null, trucks = null, billedQty = qty;
     if (manual !== null) {
       freight = manual;
-      freightSrc = "manual";
+      freightSrc = fixedRate !== null ? "bargained" : "manual";
     } else if (route) {
       veh = vehicleFor(route, pr?.unit);
       if (veh && qty > 0) trucks = Math.ceil(qty / num(veh.capacity));
-      const rate = num(route.rate);
+      const rate = fixedRate;
       if (st.fullTruckBilling && veh && qty > 0) {
         billedQty = trucks * num(veh.capacity);
         freight = rate * billedQty / qty;
       } else freight = rate;
-      freightSrc = ro.est ? "estimated" : "route";
+      freightSrc = ro.est ? "estimated" : "fixed route";
     } else if (!q.loc.trim() || q.specificSource === s.id || !(S.routes?.rows || []).length) {
       freight = 0;
-      freightSrc = "ex-refinery (0 transport)";
+      freightSrc = "ex-refinery (enter transport below)";
     }
     const prev = prevIdx[s.id + "|" + q.product];
     const prevBasic = num(prev?.basic);
-    const r = { s, p, basic, maxD, disc, net, route, ro, veh, trucks, billedQty, freight, freightSrc, prevBasic, chg: prevBasic > 0 ? basic - prevBasic : null };
+    const matchingTransporters = findMatchingTransportersForRoute(route?.loading || getRefineryLocations(s)[0] || s.loading, q.loc, q.product);
+    const r = { s, p, basic, maxD, disc, net, route, ro, fixedRate, matchingTransporters, veh, trucks, billedQty, freight, freightSrc, prevBasic, chg: prevBasic > 0 ? basic - prevBasic : null };
     if (freight !== null) {
       const effDays = Math.max(0, days - (num(s.creditDays) || 0));
       const pre = net + freight;
@@ -2941,10 +2966,13 @@ function renderQuoteResults() {
           <div class="text-base font-bold text-rose-400 font-mono mt-0.5">−${inr(B.disc)}</div>
           <span class="text-[10px] text-slate-400">Max ${inr(B.maxD)}</span>
         </div>
-        <div class="bg-slate-800/60 border border-slate-700/60 rounded-xl p-3">
-          <span class="text-[10px] uppercase font-bold text-sky-400 tracking-wider">Transport</span>
+        <div class="bg-slate-800/80 border border-sky-500/40 rounded-xl p-3">
+          <div class="flex items-center justify-between">
+            <span class="text-[10px] uppercase font-bold text-sky-400 tracking-wider">Transport Rate</span>
+            ${B.fixedRate != null && B.freight !== B.fixedRate ? `<span class="text-[9px] px-1.5 py-0.2 rounded bg-amber-400 text-slate-950 font-extrabold">Bargained</span>` : `<span class="text-[9px] text-sky-300/80 font-semibold">Fixed Route</span>`}
+          </div>
           <div class="text-base font-bold text-sky-400 font-mono mt-0.5">+${inr(B.freight)}</div>
-          <span class="text-[10px] text-slate-400">${B.trucks ? `${B.trucks} truck(s)` : B.freightSrc}</span>
+          <span class="text-[10px] text-slate-300 block">${B.fixedRate != null ? (B.freight !== B.fixedRate ? `Fixed was ${inr(B.fixedRate)} (${B.freight < B.fixedRate ? "Saved " + inr(B.fixedRate - B.freight) : "+" + inr(B.freight - B.fixedRate)})` : `Fixed ${esc(B.route?.loading || B.s.loading)} → ${esc(q.loc)}`) : B.freightSrc}</span>
         </div>
         <div class="bg-slate-800/60 border border-slate-700/60 rounded-xl p-3">
           <span class="text-[10px] uppercase font-bold text-orange-400 tracking-wider">Credit Cost</span>
@@ -2962,6 +2990,40 @@ function renderQuoteResults() {
           <span class="text-[10px] text-indigo-200">${R.qty ? `Order: ${inr(B.orderValue)}` : `Incl GST: ${inr(B.sellGst)}`}</span>
         </div>
       </div>
+      ${(() => {
+        const origLoc = B.route?.loading || getRefineryLocations(B.s)[0] || B.s.loading || B.s.name;
+        const fixedR = B.fixedRate;
+        const curFr = B.freight ?? 0;
+        const diffFr = fixedR != null ? (curFr - fixedR) : 0;
+        const trList = B.matchingTransporters || [];
+        return `
+        <!-- Live Transport Bargain / Negotiation Bar -->
+        <div class="mt-4 p-3 rounded-xl bg-slate-900/90 border border-sky-500/40 flex flex-wrap items-center justify-between gap-3">
+          <div class="space-y-0.5">
+            <div class="flex flex-wrap items-center gap-2 text-xs font-bold text-white">
+              <span>🚚 Transport (${esc(origLoc)} → ${esc(q.loc || "Customer")} · ${esc(shortName(R.pr))}):</span>
+              ${fixedR != null ? `<span class="px-2 py-0.5 rounded bg-sky-950 border border-sky-700 text-sky-300 font-mono">Fixed Rate: ${inr(fixedR)}/${unit}</span>` : `<span class="px-2 py-0.5 rounded bg-amber-950 border border-amber-700 text-amber-300">No fixed rate saved yet</span>`}
+              ${diffFr !== 0 && fixedR != null ? `<span class="px-2 py-0.5 rounded ${diffFr < 0 ? "bg-emerald-500 text-slate-950" : "bg-amber-400 text-slate-950"} font-extrabold font-mono">${diffFr < 0 ? `Bargained −${inr(Math.abs(diffFr))}` : `Bargained +${inr(diffFr)}`}</span>` : ""}
+            </div>
+            <div class="text-[11px] text-slate-300">
+              ${trList.length ? `Available Transporters to call &amp; bargain: <b>${trList.map(t => `${esc(t.name)}${t.phone ? ` (${esc(t.phone)})` : ""}`).join(" · ")}</b>` : `Fixed route rate can be bargained up or down below:`}
+            </div>
+          </div>
+          <div class="flex flex-wrap items-center gap-1.5">
+            <button type="button" data-bargain-step="-100" class="px-2 py-1 rounded-lg bg-slate-800 hover:bg-emerald-700 text-emerald-300 hover:text-white border border-slate-700 text-xs font-mono font-bold cursor-pointer">−100</button>
+            <button type="button" data-bargain-step="-50" class="px-2 py-1 rounded-lg bg-slate-800 hover:bg-emerald-700 text-emerald-300 hover:text-white border border-slate-700 text-xs font-mono font-bold cursor-pointer">−50</button>
+            <div class="flex items-center bg-slate-950 border border-sky-400 rounded-lg overflow-hidden">
+              <span class="px-2 text-[11px] text-sky-300 font-bold">₹</span>
+              <input type="number" step="any" id="hero-bargain-input" value="${curFr}" style="width:92px;background:transparent;border:0;color:#fff;font-weight:800;font-family:'JetBrains Mono',monospace;padding:5px 6px;font-size:13px" aria-label="Bargained Transport Rate">
+              <span class="px-2 text-[10px] text-slate-400 font-bold">/${unit}</span>
+            </div>
+            <button type="button" data-bargain-step="50" class="px-2 py-1 rounded-lg bg-slate-800 hover:bg-amber-600 text-amber-300 hover:text-white border border-slate-700 text-xs font-mono font-bold cursor-pointer">+50</button>
+            <button type="button" data-bargain-step="100" class="px-2 py-1 rounded-lg bg-slate-800 hover:bg-amber-600 text-amber-300 hover:text-white border border-slate-700 text-xs font-mono font-bold cursor-pointer">+100</button>
+            ${fixedR != null && curFr !== fixedR ? `<button type="button" id="btn-reset-fixed-freight" class="px-2.5 py-1 rounded-lg bg-slate-700 hover:bg-slate-600 text-white text-[11px] font-bold cursor-pointer">Reset (${inr(fixedR)})</button>` : ""}
+            ${S.canWrite && curFr > 0 && curFr !== fixedR && q.loc.trim() ? `<button type="button" id="btn-save-fixed-freight" class="px-2.5 py-1 rounded-lg bg-amber-400 hover:bg-amber-300 text-slate-950 text-[11px] font-extrabold cursor-pointer" title="Save ₹${curFr} as the new fixed rate for ${esc(origLoc)} → ${esc(q.loc)}">💾 Save as Fixed</button>` : ""}
+          </div>
+        </div>`;
+      })()}
       ${(() => {
         const origLoc = B.route?.loading || getRefineryLocations(B.s)[0] || B.s.loading || B.s.name;
         const dKm = calcRoadDistanceKm(origLoc, q.loc);
@@ -3014,6 +3076,50 @@ function renderQuoteResults() {
    ${np}`;
 
   box.querySelectorAll("[data-sel]").forEach(el => el.onclick = () => { q.sel = el.dataset.sel; saveWorkspaceState(200); renderQuoteResults(); });
+  if (B) {
+    const bInp = box.querySelector("#hero-bargain-input");
+    if (bInp) bInp.addEventListener("change", e => {
+      const v = num(e.target.value);
+      if (v === null || v === B.fixedRate) delete q.manual[B.s.id];
+      else q.manual[B.s.id] = v;
+      saveWorkspaceState(200);
+      renderQuoteResults();
+    });
+    box.querySelectorAll("[data-bargain-step]").forEach(btn => btn.onclick = () => {
+      const delta = Number(btn.getAttribute("data-bargain-step")) || 0;
+      const baseFr = num(q.manual[B.s.id]) ?? B.freight ?? B.fixedRate ?? 0;
+      const nextFr = Math.max(0, baseFr + delta);
+      if (nextFr === B.fixedRate) delete q.manual[B.s.id];
+      else q.manual[B.s.id] = nextFr;
+      saveWorkspaceState(200);
+      renderQuoteResults();
+    });
+    const rstFr = box.querySelector("#btn-reset-fixed-freight");
+    if (rstFr) rstFr.onclick = () => {
+      delete q.manual[B.s.id];
+      saveWorkspaceState(200);
+      renderQuoteResults();
+      toast(`Restored fixed route rate (${inr(B.fixedRate)})`);
+    };
+    const svFr = box.querySelector("#btn-save-fixed-freight");
+    if (svFr) svFr.onclick = async () => {
+      if (!S.canWrite) return;
+      const newRate = num(q.manual[B.s.id]) ?? B.freight;
+      const origLoc = B.route?.loading || getRefineryLocations(B.s)[0] || B.s.loading || B.s.name;
+      const delLoc = q.loc.trim();
+      S.routes = S.routes || { rows: [] };
+      const existing = S.routes.rows.find(r => norm(r.loading) === norm(origLoc) && norm(r.delivery) === norm(delLoc) && norm(r.productId) === norm(q.product));
+      if (existing) {
+        existing.rate = newRate;
+      } else {
+        S.routes.rows.unshift({ id: "r" + uid(), transporterId: "", loading: origLoc, delivery: delLoc, productId: q.product, company: "", rate: newRate, minQty: null, note: "" });
+      }
+      delete q.manual[B.s.id];
+      saveDoc("master/routes", S.routes, 0);
+      renderQuoteResults();
+      toast(`💾 Saved ${inr(newRate)} as the fixed transport rate for ${origLoc} → ${delLoc} (${shortName(R.pr)})!`);
+    };
+  }
   const btnMap = box.querySelector("#btn-toggle-inline-map");
   if (btnMap) btnMap.onclick = () => {
     UI.showInlineMap = !UI.showInlineMap;
@@ -3367,6 +3473,25 @@ function viewEditor() {
 }
 
 /* ================= VIEW 4: MASTER FILE — TRANSPORT RATES (EXACT 4-COLUMN FORMAT: LOADING POINT | DELIVERY POINT | PRODUCT | TRANSPORT RATES) ================= */
+const USER_SHEET_16_ROUTES = [
+  { loading: "Jamnagar", delivery: "Nagpur", productId: "FO", rate: 4500 },
+  { loading: "Jamnagar", delivery: "Butibori", productId: "FO", rate: 4400 },
+  { loading: "Jamnagar", delivery: "Bandara", productId: "FO", rate: 4650 },
+  { loading: "Jamnagar", delivery: "Aurangabad", productId: "FO", rate: 3900 },
+  { loading: "Jamnagar", delivery: "Chandrapur", productId: "FO", rate: 5000 },
+  { loading: "Jamnagar", delivery: "Borgoan (MP)", productId: "FO", rate: 5000 },
+  { loading: "Jamnagar", delivery: "Pune", productId: "FO", rate: 4000 },
+  { loading: "Jamnagar", delivery: "Ahmednagar", productId: "FO", rate: 3800 },
+  { loading: "Jamnagar", delivery: "Pithampur", productId: "FO", rate: 2850 },
+  { loading: "Jamnagar", delivery: "Dewas", productId: "FO", rate: 2950 },
+  { loading: "Jamnagar", delivery: "Roha", productId: "FO", rate: 4100 },
+  { loading: "Jamnagar", delivery: "Sangli", productId: "FO", rate: 4650 },
+  { loading: "Jamnagar", delivery: "Itarsi", productId: "FO", rate: 4000 },
+  { loading: "Jamnagar", delivery: "Jhabua", productId: "FO", rate: 2400 },
+  { loading: "Jamnagar", delivery: "Bhopal", productId: "FO", rate: 3500 },
+  { loading: "Hazira", delivery: "Nagpur", productId: "CBFS", rate: 3200 }
+];
+
 function viewRoutes() {
   const rows = S.routes?.rows || [];
   const f = UI.rf;
@@ -3380,31 +3505,52 @@ function viewRoutes() {
     (!f.pendingOnly || num(r.rate) === null) &&
     (!f.text || norm(`${r.loading} ${r.delivery} ${r.productId} ${prodMap()[r.productId]?.name || ""} ${r.rate ?? ""}`).includes(norm(f.text)))
   );
-  const pend = rows.filter(r => num(r.rate) === null).length;
   const dis = S.canWrite ? "" : "disabled";
 
   V().innerHTML = `
    <div class="actions" style="justify-content:space-between;margin-bottom:12px">
      <div>
-       <h3>Transport Rates</h3>
-       <p class="tiny" style="margin:2px 0 0">Matches your Excel sheet format directly: <b>Loading Point</b> · <b>Delivery Point</b> · <b>Product</b> · <b>Transport Rates</b>. Edits save automatically.</p>
+       <h3>Fixed Transport Rates (By Loading Point ➔ Delivery Point &amp; Product)</h3>
+       <p class="tiny" style="margin:2px 0 0">Standard fixed transport rates (e.g. <b>Jamnagar → Nagpur · FO = ₹4,500</b>). The Calculator uses this fixed rate automatically and lets you bargain it up or down on any quote.</p>
      </div>
      <div class="actions">
-       ${S.currentUser?.role === "admin" && rows.length ? `<button class="btn danger" id="del-all-routes" type="button">🗑️ Delete All Rates (${rows.length})</button>` : ""}
-       ${S.canWrite ? `<label class="btn" for="up-step-routes">⬆ Upload Transport Rates (.xlsx)</label><input type="file" id="up-step-routes" accept=".xlsx,.xls,.csv" hidden>` : ""}
-       <button class="btn primary" id="addr" type="button" ${dis}>＋ Add transport rate</button>
+       ${S.canWrite ? `<button class="btn small primary" id="btn-load-16-sheet-routes" type="button">📥 Load Jamnagar/Hazira Sheet Rates (16)</button>` : ""}
+       ${S.currentUser?.role === "admin" && rows.length ? `<button class="btn small danger" id="del-all-routes" type="button">🗑️ Delete All (${rows.length})</button>` : ""}
+       ${S.canWrite ? `<label class="btn small" for="up-step-routes">⬆ Upload Excel (.xlsx)</label><input type="file" id="up-step-routes" accept=".xlsx,.xls,.csv" hidden>` : ""}
+       <button class="btn small primary" id="addr" type="button" ${dis}>＋ Add Row</button>
      </div>
    </div>
 
+   <!-- Quick Add Fixed Route Rate Bar -->
+   ${S.canWrite ? `
+   <form id="form-quick-add-route" class="p-3 rounded-xl bg-indigo-50/70 border border-indigo-200 mb-3 grid grid-cols-1 sm:grid-cols-5 gap-2.5 items-end">
+     <div class="field">
+       <label class="lbl" for="qa-load">1. Loading Point</label>
+       <input type="text" id="qa-load" list="dl-load" value="${esc(f.loading || "Jamnagar")}" placeholder="e.g. Jamnagar, Hazira" required style="background:#fff;font-weight:700">
+     </div>
+     <div class="field">
+       <label class="lbl" for="qa-del">2. Delivery Point</label>
+       <input type="text" id="qa-del" list="dl-del" placeholder="e.g. Nagpur, Butibori, Pune" required style="background:#fff;font-weight:700">
+     </div>
+     <div class="field">
+       <label class="lbl" for="qa-prod">3. Product</label>
+       <input type="text" id="qa-prod" list="dl-route-prods" value="${esc(f.product || "FO")}" placeholder="e.g. FO, CBFS, LDO, MTO" required style="background:#fff;font-weight:700">
+     </div>
+     <div class="field">
+       <label class="lbl" for="qa-rate">4. Fixed Transport Rate (₹)</label>
+       <input type="number" step="any" id="qa-rate" placeholder="e.g. 4500" required class="font-mono" style="background:#fff;font-weight:800">
+     </div>
+     <button type="submit" class="btn primary justify-center py-2">＋ Save Fixed Rate</button>
+   </form>` : ""}
+
    <div class="toolbar">
-     <div class="field"><label class="lbl" for="f-text">Search</label><input type="search" id="f-text" value="${esc(f.text)}" placeholder="Loading, delivery, product…"></div>
+     <div class="field"><label class="lbl" for="f-text">Search</label><input type="search" id="f-text" value="${esc(f.text)}" placeholder="Search Jamnagar, Nagpur, FO…"></div>
      <div class="field"><label class="lbl" for="f-load">Loading Point</label><select id="f-load"><option value="">All Loading Points</option>${loads.map(l => `<option value="${esc(l)}" ${f.loading === l ? "selected" : ""}>${esc(l)}</option>`).join("")}</select></div>
      <div class="field"><label class="lbl" for="f-del">Delivery Point</label><select id="f-del"><option value="">All Delivery Points</option>${dels.map(l => `<option value="${esc(l)}" ${f.delivery === l ? "selected" : ""}>${esc(l)}</option>`).join("")}</select></div>
      <div class="field"><label class="lbl" for="f-prod">Product</label><select id="f-prod"><option value="">All Products</option>${namedProds.map(p => `<option value="${esc(p.id)}" ${f.product === p.id ? "selected" : ""}>${esc(p.name)}</option>`).join("")}</select></div>
-     ${pend > 0 ? `<label class="actions" style="padding-bottom:8px"><input type="checkbox" id="f-pend" ${f.pendingOnly ? "checked" : ""}> Rate pending only (${pend})</label>` : ""}
    </div>
 
-   <p class="tiny" style="margin-bottom:8px">Showing <b>${vis.length}</b> of <b>${rows.length}</b> transport rate row(s)</p>
+   <p class="tiny" style="margin-bottom:8px">Showing <b>${vis.length}</b> of <b>${rows.length}</b> fixed transport rate row(s)</p>
    <datalist id="dl-load">${loadingPoints().map(l => `<option value="${esc(l)}">`).join("")}</datalist>
    <datalist id="dl-del">${dels.map(l => `<option value="${esc(l)}">`).join("")}</datalist>
    <datalist id="dl-route-prods">${namedProds.map(p => `<option value="${esc(shortName(p))}">`).join("")}</datalist>
@@ -3417,7 +3563,7 @@ function viewRoutes() {
            <th>Loading Point</th>
            <th>Delivery Point</th>
            <th>Product</th>
-           <th class="n" style="width:180px">Transport Rates (₹)</th>
+           <th class="n" style="width:190px">Transport Rates (₹)</th>
            <th style="width:50px"></th>
          </tr>
        </thead>
@@ -3430,13 +3576,59 @@ function viewRoutes() {
            <td><input type="text" list="dl-load" data-ri="${i}" data-f="loading" value="${esc(r.loading)}" placeholder="e.g. Jamnagar, Hazira" style="min-width:160px;font-weight:600" ${dis}></td>
            <td><input type="text" list="dl-del" data-ri="${i}" data-f="delivery" value="${esc(r.delivery)}" placeholder="e.g. Nagpur, Butibori, Pune" style="min-width:170px;font-weight:600" ${dis}></td>
            <td><input type="text" list="dl-route-prods" data-ri="${i}" data-f="productId" value="${esc(prodDisplay)}" placeholder="e.g. FO, CBFS, LDO, MTO" style="min-width:130px;font-weight:700" ${dis}></td>
-           <td class="n"><input type="number" step="any" data-ri="${i}" data-f="rate" value="${r.rate ?? ""}" placeholder="e.g. 4500" style="width:140px;font-weight:700" class="font-mono" aria-label="Transport Rate" ${dis}></td>
+           <td class="n"><input type="number" step="any" data-ri="${i}" data-f="rate" value="${r.rate ?? ""}" placeholder="e.g. 4500" style="width:145px;font-weight:700" class="font-mono" aria-label="Transport Rate" ${dis}></td>
            <td class="text-center"><button class="btn small danger" type="button" data-rdel="${i}" aria-label="Delete route" ${dis}>✕</button></td>
          </tr>`;
-       }).join("") || `<tr><td colspan="6" class="empty">No transport rates match these filters. Upload your Transport Rates Excel sheet or click <b>＋ Add transport rate</b>.</td></tr>`}
+       }).join("") || `<tr><td colspan="6" class="empty"><strong>0 transport rates saved yet</strong>Click <b>📥 Load Jamnagar/Hazira Sheet Rates (16)</b> above, use the Quick Add bar, or upload your Excel file.</td></tr>`}
        </tbody>
      </table>
    </div>`;
+
+  // 1-Click Load User's 16 Jamnagar/Hazira Sheet Routes
+  $("#btn-load-16-sheet-routes")?.addEventListener("click", () => {
+    if (!S.canWrite) return;
+    S.routes = S.routes || { rows: [] };
+    S.catalog = S.catalog || { sources: [], products: [] };
+    USER_SHEET_16_ROUTES.forEach(item => {
+      const p = ensureProductInCatalog(S.catalog, item.productId, "MT", "Black");
+      const pid = p ? p.id : item.productId;
+      const ex = S.routes.rows.find(r => norm(r.loading) === norm(item.loading) && norm(r.delivery) === norm(item.delivery) && norm(r.productId) === norm(pid));
+      if (ex) {
+        ex.rate = item.rate;
+      } else {
+        S.routes.rows.push({ id: "r" + uid(), transporterId: "", loading: item.loading, delivery: item.delivery, productId: pid, company: "", rate: item.rate, minQty: null, note: "" });
+      }
+    });
+    saveDoc("master/catalog", S.catalog, 0);
+    saveDoc("master/routes", S.routes, 0);
+    viewRoutes();
+    toast("📥 Loaded all 16 Jamnagar & Hazira FO/CBFS transport rates!");
+  });
+
+  // Quick Add Fixed Route Rate Submit
+  $("#form-quick-add-route")?.addEventListener("submit", e => {
+    e.preventDefault();
+    if (!S.canWrite) return;
+    const ld = ($("#qa-load")?.value || "").trim();
+    const dl = ($("#qa-del")?.value || "").trim();
+    const prRaw = ($("#qa-prod")?.value || "").trim();
+    const rtVal = num($("#qa-rate")?.value);
+    if (!ld || !dl || !prRaw || rtVal === null) { toast("Fill Loading Point, Delivery Point, Product, and Rate"); return; }
+    S.catalog = S.catalog || { sources: [], products: [] };
+    const p = matchProduct(prRaw) || ensureProductInCatalog(S.catalog, prRaw, "MT", "");
+    const pid = p ? p.id : prRaw;
+    S.routes = S.routes || { rows: [] };
+    const existing = S.routes.rows.find(r => norm(r.loading) === norm(ld) && norm(r.delivery) === norm(dl) && norm(r.productId) === norm(pid));
+    if (existing) {
+      existing.rate = rtVal;
+    } else {
+      S.routes.rows.unshift({ id: "r" + uid(), transporterId: "", loading: ld, delivery: dl, productId: pid, company: "", rate: rtVal, minQty: null, note: "" });
+    }
+    saveDoc("master/catalog", S.catalog, 0);
+    saveDoc("master/routes", S.routes, 0);
+    viewRoutes();
+    toast(`Saved fixed rate: ${ld} → ${dl} (${prRaw}) = ${inr(rtVal)}`);
+  });
 
   const rf = (id, k, ev = "change") => $(id)?.addEventListener(ev, e => {
     f[k] = e.target.type === "checkbox" ? e.target.checked : e.target.value;
@@ -3446,7 +3638,6 @@ function viewRoutes() {
   rf("#f-prod", "product");
   rf("#f-load", "loading");
   rf("#f-del", "delivery");
-  rf("#f-pend", "pendingOnly");
   rf("#f-text", "text", "input");
 
   document.querySelectorAll("[data-ri]").forEach(inp => inp.addEventListener("input", e => {

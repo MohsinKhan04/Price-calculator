@@ -1900,10 +1900,33 @@ function getRefineryLocations(s) {
   return [];
 }
 
+function canTransporterCarryProduct(transporterId, prodId) {
+  if (!transporterId) return true;
+  const t = (S.transporters?.list || []).find(x => x.id === transporterId);
+  if (!t) return true;
+  const pr = prodMap()[prodId];
+  const pType = displayTypeLabel(pr?.cls || "White liquid");
+  // If transporter has explicit productTypes / subProducts configured, enforce them strictly!
+  if (Array.isArray(t.typeGroups) && t.typeGroups.length > 0) {
+    const matchingGroup = t.typeGroups.find(g => norm(g.type) === norm(pType));
+    if (!matchingGroup) return false;
+    if (Array.isArray(matchingGroup.products) && matchingGroup.products.length > 0) {
+      return matchingGroup.products.includes(prodId);
+    }
+    return true;
+  }
+  return true;
+}
+
 function routeOptions(src, prodId, loc, qty) {
   const P = prodMap(), pr = P[prodId], st = settings();
   const srcLocs = getRefineryLocations(src).map(norm);
-  const base = (S.routes?.rows || []).filter(r => srcLocs.includes(norm(r.loading)) && norm(r.delivery) === norm(loc) && (!r.company || norm(r.company) === norm(src.company) || norm(r.company) === norm(src.name)));
+  const base = (S.routes?.rows || []).filter(r =>
+    srcLocs.includes(norm(r.loading)) &&
+    norm(r.delivery) === norm(loc) &&
+    (!r.company || norm(r.company) === norm(src.company) || norm(r.company) === norm(src.name)) &&
+    canTransporterCarryProduct(r.transporterId, prodId)
+  );
   const ok = r => num(r.rate) !== null && (!num(r.minQty) || qty >= num(r.minQty));
   const exact = base.filter(r => r.productId === prodId);
   const pend = exact.filter(r => num(r.rate) === null);
@@ -3438,29 +3461,365 @@ function viewRoutes() {
   };
 }
 
-/* ================= VIEW 5: MASTER FILE — TRANSPORTERS & FLEET ================= */
+/* ================= VIEW 5: MASTER FILE — TRANSPORTERS & FLEET (WITH PRODUCT TYPE & LOCATION SUBCATEGORIES) ================= */
+function getAvailableOilTypes() {
+  const defaults = ["White liquid", "Yellow liquid", "Black", "Bitumen"];
+  const fromCatalog = (S.catalog?.products || []).filter(p => (p.name || "").trim()).map(p => displayTypeLabel(p.cls));
+  const out = [];
+  [...defaults, ...fromCatalog].forEach(t => {
+    if (t && !out.some(x => norm(x) === norm(t))) out.push(t);
+  });
+  return out;
+}
+
+// Hydrate t.typeGroups and t.locationGroups on each transporter (and keep synced with S.routes.rows)
+function ensureTransporterSubcategories(t) {
+  if (!t) return;
+  const allProds = (S.catalog?.products || []).filter(p => (p.name || "").trim());
+  const assignedRoutes = (S.routes?.rows || []).filter(r => r.transporterId === t.id);
+
+  if (!Array.isArray(t.typeGroups)) {
+    // Hydrate from any assigned routes if present
+    const routeProdIds = [...new Set(assignedRoutes.map(r => r.productId).filter(Boolean))];
+    const groupsMap = new Map();
+    routeProdIds.forEach(pid => {
+      const pr = allProds.find(x => x.id === pid);
+      if (!pr) return;
+      const tLabel = displayTypeLabel(pr.cls);
+      const k = norm(tLabel);
+      if (!groupsMap.has(k)) groupsMap.set(k, { type: tLabel, products: [] });
+      groupsMap.get(k).products.push(pid);
+    });
+    t.typeGroups = [...groupsMap.values()];
+  }
+
+  if (!Array.isArray(t.locationGroups)) {
+    const locMap = new Map();
+    assignedRoutes.forEach(r => {
+      const orig = String(r.loading || "").trim();
+      const del = String(r.delivery || "").trim();
+      if (!orig) return;
+      const k = norm(orig);
+      if (!locMap.has(k)) locMap.set(k, { loading: orig, deliveries: [] });
+      if (del) {
+        const grp = locMap.get(k);
+        const existingDel = grp.deliveries.find(d => norm(d.town) === norm(del));
+        if (!existingDel) {
+          grp.deliveries.push({ town: del, rate: num(r.rate) });
+        } else if (existingDel.rate == null && num(r.rate) != null) {
+          existingDel.rate = num(r.rate);
+        }
+      }
+    });
+    t.locationGroups = [...locMap.values()];
+  }
+}
+
+// Sync a transporter's Product Subcategories x Location Subcategories into S.routes.rows
+function syncTransporterSubcategoriesToRoutes(t) {
+  if (!t) return;
+  ensureTransporterSubcategories(t);
+  S.routes = S.routes || { rows: [] };
+  const allProds = (S.catalog?.products || []).filter(p => (p.name || "").trim());
+
+  // Determine all product IDs this transporter carries across its typeGroups
+  let carriedProdIds = [];
+  (t.typeGroups || []).forEach(tg => {
+    if (Array.isArray(tg.products) && tg.products.length > 0) {
+      tg.products.forEach(pid => { if (!carriedProdIds.includes(pid)) carriedProdIds.push(pid); });
+    } else {
+      // If a typeGroup has no specific sub-products selected yet, include all catalog products of that type
+      allProds.filter(p => norm(displayTypeLabel(p.cls)) === norm(tg.type)).forEach(p => {
+        if (!carriedProdIds.includes(p.id)) carriedProdIds.push(p.id);
+      });
+    }
+  });
+  if (!carriedProdIds.length && allProds.length) {
+    carriedProdIds = [allProds[0].id];
+  }
+
+  let routesModified = false;
+  (t.locationGroups || []).forEach(lg => {
+    const orig = String(lg.loading || "").trim();
+    if (!orig) return;
+    (lg.deliveries || []).forEach(delObj => {
+      const delTown = String(delObj.town || "").trim();
+      if (!delTown) return;
+      carriedProdIds.forEach(pid => {
+        const existing = S.routes.rows.find(r =>
+          r.transporterId === t.id &&
+          norm(r.loading) === norm(orig) &&
+          norm(r.delivery) === norm(delTown) &&
+          r.productId === pid
+        );
+        if (existing) {
+          if (delObj.rate != null && num(existing.rate) !== num(delObj.rate)) {
+            existing.rate = num(delObj.rate);
+            routesModified = true;
+          }
+        } else {
+          S.routes.rows.unshift({
+            id: "r" + uid(),
+            transporterId: t.id,
+            loading: orig,
+            delivery: delTown,
+            productId: pid,
+            company: "",
+            rate: num(delObj.rate),
+            minQty: null,
+            note: ""
+          });
+          routesModified = true;
+        }
+      });
+    });
+  });
+
+  if (routesModified) {
+    saveDoc("master/routes", S.routes, 300);
+  }
+}
+
+// Flush current DOM inputs in viewTransporters before any button action re-renders the view so zero typed letters are ever lost!
+function flushTransportersDomToState() {
+  const list = (S.transporters = S.transporters || { list: [] }).list;
+  document.querySelectorAll("[data-t]").forEach(inp => {
+    const t = list[+inp.dataset.t];
+    if (!t) return;
+    const k = inp.dataset.f;
+    const val = k === "capacity" ? num(inp.value) : inp.value;
+    if (inp.dataset.v !== undefined) {
+      if (t.vehicles && t.vehicles[+inp.dataset.v]) t.vehicles[+inp.dataset.v][k] = val;
+    } else {
+      t[k] = val;
+    }
+  });
+}
+
 function viewTransporters() {
   const T = (S.transporters = S.transporters || { list: [] }).list;
+  T.forEach(ensureTransporterSubcategories);
   const rows = S.routes?.rows || [];
-  const save = () => saveDoc("master/transporters", S.transporters, 500);
+  const namedProds = (S.catalog?.products || []).filter(p => (p.name || "").trim());
+  const oilTypes = getAvailableOilTypes();
+  const allLoadingLocs = loadingPoints();
+  const allDelLocs = allLocations();
+  const saveT = (delay = 400) => saveDoc("master/transporters", S.transporters, delay);
   const dis = S.canWrite ? "" : "disabled";
+
   V().innerHTML = `
-   <div class="actions" style="justify-content:space-between;margin-bottom:12px"><div><h3>Transporters and vehicles</h3><p class="tiny" style="margin:2px 0 0">Each transporter's contact, tanker fleet capacities, and delivery routes.</p></div>
-   <div class="actions">
-     ${S.currentUser?.role === "admin" && T.length ? `<button class="btn danger" id="del-all-transporters" type="button">🗑️ Delete All Transporters (${T.length})</button>` : ""}
-     ${S.canWrite ? `<label class="btn" for="up-step-transporters">⬆ Upload Step 3: Transporters (.xlsx)</label><input type="file" id="up-step-transporters" accept=".xlsx,.xls,.csv" hidden>` : ""}
-     <button class="btn primary" id="addt" type="button" ${dis}>＋ Add transporter</button>
-   </div></div>
-   ${T.length ? `<div class="cards" data-live>${T.map((t, ti) => `<div class="panel pad stack" style="gap:10px">
-     <div class="row2"><div class="field"><label class="lbl" for="tn${ti}">Name</label><input type="text" id="tn${ti}" data-t="${ti}" data-f="name" value="${esc(t.name)}" ${dis}></div>
-       <div class="field"><label class="lbl" for="tp${ti}">Phone</label><input type="text" id="tp${ti}" data-t="${ti}" data-f="phone" value="${esc(t.phone || "")}" ${dis}></div></div>
-     <div class="field"><label class="lbl" for="tc${ti}">Contact / notes</label><input type="text" id="tc${ti}" data-t="${ti}" data-f="notes" value="${esc(t.notes || "")}" ${dis}></div>
-     <div><span class="lbl">Vehicles</span>
-     <table style="margin-top:4px"><thead><tr><th>Category</th><th class="n">Capacity</th><th>Unit</th><th></th></tr></thead><tbody>
-     ${(t.vehicles || []).map((v, vi) => `<tr><td><input type="text" data-t="${ti}" data-v="${vi}" data-f="category" value="${esc(v.category)}" placeholder="e.g. 20 KL Tanker" ${dis}></td><td class="n"><input type="number" step="any" data-t="${ti}" data-v="${vi}" data-f="capacity" value="${v.capacity ?? ""}" style="width:80px" ${dis}></td><td><select data-t="${ti}" data-v="${vi}" data-f="unit" ${dis}><option ${v.unit === "KL" ? "selected" : ""}>KL</option><option ${v.unit === "MT" ? "selected" : ""}>MT</option></select></td><td><button class="btn small danger" data-vdel="${ti}:${vi}" aria-label="Remove vehicle" ${dis}>✕</button></td></tr>`).join("") || `<tr><td colspan="4" class="tiny">No vehicles yet</td></tr>`}
-     </tbody></table></div>
-     <div class="actions" style="justify-content:space-between"><button class="btn small" data-vadd="${ti}" ${dis}>＋ Add vehicle</button><span class="tiny">${rows.filter(r => r.transporterId === t.id).length} routes assigned</span><button class="btn small danger" data-tdel="${ti}" ${dis}>Remove</button></div>
-   </div>`).join("")}</div>` : `<div class="panel empty"><strong>No transporters yet</strong>Add each transporter with their tanker categories and capacities.</div>`}`;
+   <div class="actions" style="justify-content:space-between;margin-bottom:12px">
+     <div>
+       <h3>Step 3 · Transporters, Product Types &amp; Delivery Location Subcategories</h3>
+       <p class="tiny" style="margin:2px 0 0">Configure each transporter's fleet, the specific <b>Oil Types &amp; Product Subcategories</b> they carry (e.g. only <b>White liquid → MTO, Hexane</b>), and their <b>Origin Location → Delivery Sub-Locations &amp; Rates</b>.</p>
+     </div>
+     <div class="actions">
+       ${S.currentUser?.role === "admin" && T.length ? `<button class="btn danger" id="del-all-transporters" type="button">🗑️ Delete All Transporters (${T.length})</button>` : ""}
+       ${S.canWrite ? `<label class="btn" for="up-step-transporters">⬆ Upload Step 3: Transporters (.xlsx)</label><input type="file" id="up-step-transporters" accept=".xlsx,.xls,.csv" hidden>` : ""}
+       <button class="btn primary" id="addt" type="button" ${dis}>＋ Add transporter</button>
+     </div>
+   </div>
+
+   <datalist id="dl-tr-oiltypes">${oilTypes.map(ot => `<option value="${esc(ot)}">`).join("")}</datalist>
+   <datalist id="dl-tr-loadlocs">${allLoadingLocs.map(l => `<option value="${esc(l)}">`).join("")}</datalist>
+   <datalist id="dl-tr-dellocs">${allDelLocs.map(l => `<option value="${esc(l)}">`).join("")}</datalist>
+
+   ${T.length ? `
+   <div class="tw tbl-edit" data-live>
+     <table>
+       <thead>
+         <tr>
+           <th style="width:280px;min-width:250px">Transporter &amp; Tanker Fleet</th>
+           <th style="min-width:340px">1. Transport Oil Type &amp; Product Subcategory</th>
+           <th style="min-width:380px">2. Origin Location &amp; Delivery Subcategory</th>
+           <th style="width:55px"></th>
+         </tr>
+       </thead>
+       <tbody>
+         ${T.map((t, ti) => {
+           const tGroups = t.typeGroups || [];
+           const lGroups = t.locationGroups || [];
+           const routeCount = rows.filter(r => r.transporterId === t.id).length;
+
+           return `<tr>
+             <!-- COLUMN 1: TRANSPORTER DETAILS & VEHICLES -->
+             <td style="vertical-align:top;padding-top:12px">
+               <div class="stack" style="gap:8px">
+                 <div>
+                   <label class="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 block mb-0.5">Transporter Name</label>
+                   <input type="text" data-t="${ti}" data-f="name" value="${esc(t.name)}" placeholder="e.g. Dahej SS Enterprise" style="font-weight:800;font-size:13.5px" ${dis}>
+                 </div>
+                 <div class="row2" style="gap:6px">
+                   <div>
+                     <label class="text-[10px] font-bold text-slate-400 block mb-0.5">Phone</label>
+                     <input type="text" data-t="${ti}" data-f="phone" value="${esc(t.phone || "")}" placeholder="Phone number" style="font-size:12px" ${dis}>
+                   </div>
+                   <div>
+                     <label class="text-[10px] font-bold text-slate-400 block mb-0.5">Notes</label>
+                     <input type="text" data-t="${ti}" data-f="notes" value="${esc(t.notes || "")}" placeholder="Contact / notes" style="font-size:12px" ${dis}>
+                   </div>
+                 </div>
+
+                 <!-- Tanker Fleet Sub-Box -->
+                 <div class="p-2.5 rounded-xl bg-slate-50 border border-slate-200 space-y-1.5">
+                   <div class="flex items-center justify-between">
+                     <span class="text-[10px] font-extrabold uppercase text-slate-500">🚚 Tanker Fleet</span>
+                     ${S.canWrite ? `<button type="button" class="text-[11px] font-bold text-indigo-600 hover:text-indigo-800 cursor-pointer" data-vadd="${ti}">＋ Add Vehicle</button>` : ""}
+                   </div>
+                   <div class="space-y-1">
+                     ${(t.vehicles || []).map((v, vi) => `
+                       <div class="flex items-center gap-1">
+                         <input type="text" data-t="${ti}" data-v="${vi}" data-f="category" value="${esc(v.category)}" placeholder="e.g. 20 KL Tanker" style="font-size:11.5px;padding:3px 6px;flex:1" ${dis}>
+                         <input type="number" step="any" data-t="${ti}" data-v="${vi}" data-f="capacity" value="${v.capacity ?? ""}" placeholder="Cap" style="width:58px;font-size:11.5px;padding:3px 5px" class="font-mono" ${dis}>
+                         <select data-t="${ti}" data-v="${vi}" data-f="unit" style="width:54px;font-size:11.5px;padding:3px 4px" ${dis}>
+                           <option ${v.unit === "KL" ? "selected" : ""}>KL</option>
+                           <option ${v.unit === "MT" ? "selected" : ""}>MT</option>
+                         </select>
+                         ${S.canWrite ? `<button type="button" class="btn small danger" style="padding:2px 6px" data-vdel="${ti}:${vi}" title="Remove vehicle">✕</button>` : ""}
+                       </div>
+                     `).join("") || `<div class="tiny">No vehicles added</div>`}
+                   </div>
+                   <div class="text-[10px] text-slate-400 font-semibold pt-0.5">${routeCount} active route(s) synced</div>
+                 </div>
+               </div>
+             </td>
+
+             <!-- COLUMN 2: OIL TYPE CATEGORY -> PRODUCT SUBCATEGORY -->
+             <td style="vertical-align:top;padding-top:12px">
+               <div class="stack" style="gap:8px">
+                 <!-- Add / Toggle Main Oil Type Category -->
+                 ${S.canWrite ? `
+                 <div class="p-2 rounded-xl bg-indigo-50/60 border border-indigo-200/80 space-y-1.5">
+                   <span class="text-[10px] font-extrabold uppercase tracking-wider text-indigo-900 block">+ Add Oil Type Category They Transport:</span>
+                   <div class="chips" style="gap:4px">
+                     ${oilTypes.map(ot => {
+                       const hasType = tGroups.some(g => norm(g.type) === norm(ot));
+                       return `<button type="button" data-tr-addtype="${ti}|${esc(ot)}" aria-pressed="${hasType}" class="chip" style="padding:2px 8px;font-size:11px">
+                         <span class="dot" style="background:${clsDotColor(ot)}"></span>
+                         <span>${esc(ot)}</span>
+                       </button>`;
+                     }).join("")}
+                   </div>
+                   <div class="flex items-center gap-1 pt-0.5">
+                     <input type="text" data-tr-customtype-in="${ti}" list="dl-tr-oiltypes" placeholder="Or type custom category (e.g. White liquid)" style="padding:3px 7px;font-size:11.5px">
+                     <button type="button" data-tr-customtype-btn="${ti}" class="btn small primary" style="padding:3px 8px">+ Add Type</button>
+                   </div>
+                 </div>` : ""}
+
+                 <!-- Subcategory Cards for Each Assigned Oil Type -->
+                 ${tGroups.length ? `<div class="stack" style="gap:6px">
+                   ${tGroups.map((tg, tgi) => {
+                     const matchingCatalogProds = namedProds.filter(p => norm(displayTypeLabel(p.cls)) === norm(tg.type));
+                     const otherCatalogProds = namedProds.filter(p => norm(displayTypeLabel(p.cls)) !== norm(tg.type));
+                     const subProds = tg.products || [];
+
+                     return `<div class="p-2.5 rounded-xl bg-slate-50 border border-slate-200 space-y-2">
+                       <div class="flex items-center justify-between gap-2 border-b border-slate-200/80 pb-1.5">
+                         <div class="flex items-center gap-1.5">
+                           <span class="dot" style="width:10px;height:10px;border-radius:50%;background:${clsDotColor(tg.type)};display:inline-block"></span>
+                           <span class="text-xs font-extrabold text-slate-900">${esc(tg.type)}</span>
+                           <span class="text-[10px] bg-white border border-slate-200 px-1.5 py-0.2 rounded-full text-slate-500 font-mono">${subProds.length ? `${subProds.length} product(s)` : "All " + esc(tg.type)}</span>
+                         </div>
+                         ${S.canWrite ? `<button type="button" data-tr-rmtype="${ti}|${tgi}" class="text-[11px] text-rose-600 hover:text-rose-800 font-bold" title="Remove ${esc(tg.type)} category">✕ Type</button>` : ""}
+                       </div>
+
+                       <!-- Subcategory: Products inside this Oil Type -->
+                       <div class="space-y-1.5">
+                         <span class="text-[10px] font-bold uppercase text-slate-400 block">Subcategory · Products under ${esc(tg.type)}:</span>
+                         <div class="chips" style="gap:4px">
+                           ${subProds.map(pid => {
+                             const p = namedProds.find(x => x.id === pid);
+                             if (!p) return "";
+                             return `<span class="chip" style="padding:2px 8px;font-size:11px;background:var(--accent);border-color:var(--accent);color:#fff">
+                               <span>${esc(p.name)}</span>
+                               ${S.canWrite ? `<button type="button" data-tr-rmsubprod="${ti}|${tgi}|${esc(p.id)}" class="ml-1 text-white/80 hover:text-white font-extrabold">×</button>` : ""}
+                             </span>`;
+                           }).join("") || `<span class="tiny text-emerald-700 font-semibold">Carries all ${esc(tg.type)} products — or pick specific products below:</span>`}
+                         </div>
+
+                         ${S.canWrite ? `
+                         <div class="flex flex-wrap items-center gap-1 pt-0.5">
+                           <select data-tr-picksubprod="${ti}|${tgi}" style="width:auto;min-width:140px;padding:3px 6px;font-size:11px">
+                             <option value="">+ Select ${esc(tg.type)} product…</option>
+                             ${matchingCatalogProds.filter(p => !subProds.includes(p.id)).map(p => `<option value="${esc(p.id)}">${esc(p.name)} (${p.unit})</option>`).join("")}
+                             ${otherCatalogProds.length ? `<optgroup label="Other Products">${otherCatalogProds.filter(p => !subProds.includes(p.id)).map(p => `<option value="${esc(p.id)}">${esc(p.name)} (${esc(displayTypeLabel(p.cls))})</option>`).join("")}</optgroup>` : ""}
+                             <option value="__ALL_TYPE__">✓ Add All ${esc(tg.type)} Products</option>
+                           </select>
+                           <div class="flex items-center gap-1">
+                             <input type="text" data-tr-newsubprod-in="${ti}|${tgi}" placeholder="Or type new (e.g. MTO)" style="padding:3px 6px;font-size:11px;width:125px">
+                             <button type="button" data-tr-newsubprod-btn="${ti}|${tgi}" class="btn small primary" style="padding:3px 7px">+ Add</button>
+                           </div>
+                         </div>` : ""}
+                       </div>
+                     </div>`;
+                   }).join("")}
+                 </div>` : `<div class="p-3 rounded-xl bg-slate-50 border border-dashed border-slate-300 text-center tiny">No product restriction set (carries any product). Click an <b>Oil Type</b> above (e.g. <b>White liquid</b>) to restrict this transporter and add its product subcategories.</div>`}
+               </div>
+             </td>
+
+             <!-- COLUMN 3: ORIGIN / LOADING LOCATION -> DELIVERY SUB-LOCATIONS & RATES -->
+             <td style="vertical-align:top;padding-top:12px">
+               <div class="stack" style="gap:8px">
+                 <!-- Add Main Loading / Origin Location -->
+                 ${S.canWrite ? `
+                 <div class="p-2 rounded-xl bg-emerald-50/60 border border-emerald-200/80 space-y-1">
+                   <span class="text-[10px] font-extrabold uppercase tracking-wider text-emerald-950 block">+ Add Main Loading / Origin Location:</span>
+                   <div class="flex items-center gap-1">
+                     <input type="text" data-tr-addorig-in="${ti}" list="dl-tr-loadlocs" placeholder="e.g. Dahej, Jamnagar, Vadinar, Kochi" style="padding:4px 8px;font-size:11.5px">
+                     <button type="button" data-tr-addorig-btn="${ti}" class="btn small primary" style="padding:4px 9px">+ Add Location</button>
+                   </div>
+                 </div>` : ""}
+
+                 <!-- Subcategory Cards for Each Origin / Loading Location -->
+                 ${lGroups.length ? `<div class="stack" style="gap:6px">
+                   ${lGroups.map((lg, lgi) => {
+                     const dels = lg.deliveries || [];
+                     return `<div class="p-2.5 rounded-xl bg-slate-50 border border-slate-200 space-y-2">
+                       <div class="flex items-center justify-between gap-2 border-b border-slate-200/80 pb-1.5">
+                         <div class="flex items-center gap-1.5">
+                           <span class="px-2 py-0.5 rounded-md bg-emerald-700 text-white text-[10px] font-extrabold">🏭 From</span>
+                           <span class="text-xs font-extrabold text-slate-900">${esc(lg.loading)}</span>
+                           <span class="text-[10px] bg-white border border-slate-200 px-1.5 py-0.2 rounded-full text-slate-500 font-mono">${dels.length} delivery town(s)</span>
+                         </div>
+                         ${S.canWrite ? `<button type="button" data-tr-rmorig="${ti}|${lgi}" class="text-[11px] text-rose-600 hover:text-rose-800 font-bold" title="Remove ${esc(lg.loading)} origin">✕ Loc</button>` : ""}
+                       </div>
+
+                       <!-- Subcategory: Delivery Locations under this Origin Location -->
+                       <div class="space-y-1.5">
+                         <span class="text-[10px] font-bold uppercase text-slate-400 block">Subcategory · Delivery Locations from ${esc(lg.loading)}:</span>
+                         <div class="chips" style="gap:4px">
+                           ${dels.map((dObj, di) => `
+                             <span class="chip" style="padding:2px 8px;font-size:11px;background:var(--surface);border-color:var(--accent);color:var(--ink)">
+                               <span>📍 <b>${esc(dObj.town)}</b>${dObj.rate != null ? ` · <span class="font-mono text-indigo-700 font-bold">${inr(dObj.rate)}</span>` : ""}</span>
+                               ${S.canWrite ? `<button type="button" data-tr-rmdel="${ti}|${lgi}|${di}" class="ml-1 text-rose-600 hover:text-rose-800 font-extrabold" title="Remove ${esc(dObj.town)}">×</button>` : ""}
+                             </span>
+                           `).join("") || `<span class="tiny text-amber-700 font-semibold">Add delivery towns below for ${esc(lg.loading)}</span>`}
+                         </div>
+
+                         ${S.canWrite ? `
+                         <div class="flex flex-wrap items-center gap-1 pt-0.5">
+                           <input type="text" data-tr-newdel-town="${ti}|${lgi}" list="dl-tr-dellocs" placeholder="+ Delivery town (e.g. Nagpur, Pune)" style="padding:3px 7px;font-size:11px;flex:1;min-width:130px">
+                           <input type="number" step="any" data-tr-newdel-rate="${ti}|${lgi}" placeholder="Rate ₹ (opt)" style="padding:3px 6px;font-size:11px;width:88px" class="font-mono">
+                           <button type="button" data-tr-newdel-btn="${ti}|${lgi}" class="btn small primary" style="padding:3px 8px">+ Add Sub-Location</button>
+                         </div>` : ""}
+                       </div>
+                     </div>`;
+                   }).join("")}
+                 </div>` : `<div class="p-3 rounded-xl bg-slate-50 border border-dashed border-slate-300 text-center tiny">Add an <b>Origin / Loading Location</b> above (e.g. <b>Dahej</b> or <b>Jamnagar</b>), then add the <b>Delivery Sub-Locations</b> this transporter serves.</div>`}
+               </div>
+             </td>
+
+             <!-- COLUMN 4: DELETE TRANSPORTER -->
+             <td style="vertical-align:top;padding-top:12px">
+               <button class="btn small danger" type="button" data-tdel="${ti}" title="Delete ${esc(t.name)}" ${dis}>✕</button>
+             </td>
+           </tr>`;
+         }).join("")}
+       </tbody>
+     </table>
+   </div>` : `<div class="panel empty"><strong>No transporters yet</strong>Click <b>＋ Add transporter</b> above to add each transporter with their oil type subcategories and delivery location subcategories.</div>`}`;
+
+  // 1. Basic Transporter & Vehicle input listeners (in-place mutation)
   document.querySelectorAll("[data-t]").forEach(inp => inp.addEventListener(inp.tagName === "SELECT" ? "change" : "input", e => {
     if (!S.canWrite) return;
     const list = (S.transporters = S.transporters || { list: [] }).list;
@@ -3470,23 +3829,299 @@ function viewTransporters() {
     const val = k === "capacity" ? num(e.target.value) : e.target.value;
     if (inp.dataset.v !== undefined) t.vehicles[+inp.dataset.v][k] = val;
     else t[k] = val;
-    saveDoc("master/transporters", S.transporters, 500);
+    saveT(500);
   }));
-  document.querySelectorAll("[data-vadd]").forEach(b => b.onclick = () => { if (!S.canWrite) return; const list = (S.transporters = S.transporters || { list: [] }).list; const t = list[+b.dataset.vadd]; if (!t) return; (t.vehicles = t.vehicles || []).push({ category: "", capacity: null, unit: "KL" }); saveDoc("master/transporters", S.transporters, 0); viewTransporters(); });
-  document.querySelectorAll("[data-vdel]").forEach(b => b.onclick = () => { if (!S.canWrite) return; const list = (S.transporters = S.transporters || { list: [] }).list; const [a, c] = b.dataset.vdel.split(":").map(Number); list[a]?.vehicles?.splice(c, 1); saveDoc("master/transporters", S.transporters, 0); viewTransporters(); });
-  document.querySelectorAll("[data-tdel]").forEach(b => b.onclick = () => { if (!S.canWrite) return; if (!b.dataset.armed) { b.dataset.armed = 1; b.textContent = "Confirm remove"; return; } const list = (S.transporters = S.transporters || { list: [] }).list; list.splice(+b.dataset.tdel, 1); saveDoc("master/transporters", S.transporters, 0); viewTransporters(); });
+
+  document.querySelectorAll("[data-vadd]").forEach(b => b.onclick = () => {
+    if (!S.canWrite) return;
+    flushTransportersDomToState();
+    const list = (S.transporters = S.transporters || { list: [] }).list;
+    const t = list[+b.dataset.vadd];
+    if (!t) return;
+    (t.vehicles = t.vehicles || []).push({ category: "20 KL Tanker", capacity: 20, unit: "KL" });
+    saveT(0);
+    viewTransporters();
+  });
+
+  document.querySelectorAll("[data-vdel]").forEach(b => b.onclick = () => {
+    if (!S.canWrite) return;
+    flushTransportersDomToState();
+    const list = (S.transporters = S.transporters || { list: [] }).list;
+    const [a, c] = b.dataset.vdel.split(":").map(Number);
+    list[a]?.vehicles?.splice(c, 1);
+    saveT(0);
+    viewTransporters();
+  });
+
+  // 2. Column 2 Listeners: Add/Toggle Oil Type Category & Manage Product Subcategories
+  const toggleOrAddOilType = (ti, rawType) => {
+    if (!S.canWrite) return;
+    flushTransportersDomToState();
+    const typeName = String(rawType || "").trim();
+    if (!typeName) { toast("Enter an oil type category first"); return; }
+    const t = S.transporters.list[ti];
+    if (!t) return;
+    t.typeGroups = t.typeGroups || [];
+    const existingIdx = t.typeGroups.findIndex(g => norm(g.type) === norm(typeName));
+    if (existingIdx >= 0) {
+      t.typeGroups.splice(existingIdx, 1);
+    } else {
+      const matchingProds = namedProds.filter(p => norm(displayTypeLabel(p.cls)) === norm(typeName)).map(p => p.id);
+      t.typeGroups.push({ type: typeName, products: matchingProds });
+    }
+    syncTransporterSubcategoriesToRoutes(t);
+    saveT(0);
+    viewTransporters();
+  };
+
+  document.querySelectorAll("[data-tr-addtype]").forEach(btn => btn.onclick = () => {
+    const [tiStr, typeName] = btn.getAttribute("data-tr-addtype").split("|");
+    toggleOrAddOilType(+tiStr, typeName);
+  });
+
+  document.querySelectorAll("[data-tr-customtype-btn]").forEach(btn => btn.onclick = () => {
+    const ti = +btn.getAttribute("data-tr-customtype-btn");
+    const inp = document.querySelector(`input[data-tr-customtype-in="${ti}"]`);
+    if (inp && inp.value.trim()) toggleOrAddOilType(ti, inp.value.trim());
+  });
+  document.querySelectorAll("[data-tr-customtype-in]").forEach(inp => inp.addEventListener("keydown", e => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      toggleOrAddOilType(+inp.getAttribute("data-tr-customtype-in"), inp.value.trim());
+    }
+  }));
+
+  document.querySelectorAll("[data-tr-rmtype]").forEach(btn => btn.onclick = () => {
+    if (!S.canWrite) return;
+    flushTransportersDomToState();
+    const [ti, tgi] = btn.getAttribute("data-tr-rmtype").split("|").map(Number);
+    const t = S.transporters.list[ti];
+    if (!t) return;
+    t.typeGroups.splice(tgi, 1);
+    saveT(0);
+    viewTransporters();
+  });
+
+  document.querySelectorAll("[data-tr-rmsubprod]").forEach(btn => btn.onclick = () => {
+    if (!S.canWrite) return;
+    flushTransportersDomToState();
+    const [tiStr, tgiStr, pid] = btn.getAttribute("data-tr-rmsubprod").split("|");
+    const tg = S.transporters.list[+tiStr]?.typeGroups?.[+tgiStr];
+    if (!tg) return;
+    tg.products = (tg.products || []).filter(x => x !== pid);
+    saveT(0);
+    viewTransporters();
+  });
+
+  document.querySelectorAll("[data-tr-picksubprod]").forEach(sel => sel.onchange = () => {
+    if (!S.canWrite || !sel.value) return;
+    flushTransportersDomToState();
+    const [ti, tgi] = sel.getAttribute("data-tr-picksubprod").split("|").map(Number);
+    const t = S.transporters.list[ti];
+    const tg = t?.typeGroups?.[tgi];
+    if (!tg) return;
+    tg.products = tg.products || [];
+    if (sel.value === "__ALL_TYPE__") {
+      namedProds.filter(p => norm(displayTypeLabel(p.cls)) === norm(tg.type)).forEach(p => {
+        if (!tg.products.includes(p.id)) tg.products.push(p.id);
+      });
+    } else if (!tg.products.includes(sel.value)) {
+      tg.products.push(sel.value);
+    }
+    syncTransporterSubcategoriesToRoutes(t);
+    saveT(0);
+    viewTransporters();
+  });
+
+  const addNewSubProdToTransporterType = (ti, tgi, rawNames) => {
+    if (!S.canWrite) return;
+    flushTransportersDomToState();
+    const names = String(rawNames || "").split(",").map(x => x.trim()).filter(Boolean);
+    if (!names.length) { toast("Type a product name first (e.g. MTO)"); return; }
+    const t = S.transporters.list[ti];
+    const tg = t?.typeGroups?.[tgi];
+    if (!tg) return;
+    tg.products = tg.products || [];
+    S.catalog = S.catalog || { sources: [], products: [] };
+    names.forEach(pName => {
+      let prod = (S.catalog.products || []).find(p => norm(p.name) === norm(pName) || norm(p.id) === norm(pName));
+      if (!prod) {
+        const newId = productIdFor(pName, "");
+        prod = { id: newId, name: pName, unit: inferProductUnit(pName, ""), cls: tg.type, _userTypedCls: true, aliases: [pName.toUpperCase()] };
+        S.catalog.products.push(prod);
+      }
+      if (!tg.products.includes(prod.id)) tg.products.push(prod.id);
+    });
+    saveDoc("master/catalog", S.catalog, 0);
+    syncTransporterSubcategoriesToRoutes(t);
+    saveT(0);
+    viewTransporters();
+    toast(`Added ${names.join(", ")} under ${tg.type} for ${t.name}`);
+  };
+
+  document.querySelectorAll("[data-tr-newsubprod-btn]").forEach(btn => btn.onclick = () => {
+    const keyAttr = btn.getAttribute("data-tr-newsubprod-btn");
+    const [ti, tgi] = keyAttr.split("|").map(Number);
+    const inp = document.querySelector(`input[data-tr-newsubprod-in="${keyAttr}"]`);
+    if (inp) addNewSubProdToTransporterType(ti, tgi, inp.value);
+  });
+  document.querySelectorAll("[data-tr-newsubprod-in]").forEach(inp => inp.addEventListener("keydown", e => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      const keyAttr = inp.getAttribute("data-tr-newsubprod-in");
+      const [ti, tgi] = keyAttr.split("|").map(Number);
+      addNewSubProdToTransporterType(ti, tgi, inp.value);
+    }
+  }));
+
+  // 3. Column 3 Listeners: Add Origin Location & Manage Delivery Sub-Locations
+  const addOriginLocToTransporter = (ti, rawOrig) => {
+    if (!S.canWrite) return;
+    flushTransportersDomToState();
+    const parts = String(rawOrig || "").split(",").map(x => x.trim()).filter(Boolean);
+    if (!parts.length) { toast("Enter an origin / loading location first (e.g. Dahej)"); return; }
+    const t = S.transporters.list[ti];
+    if (!t) return;
+    t.locationGroups = t.locationGroups || [];
+    parts.forEach(loc => {
+      if (!t.locationGroups.some(lg => norm(lg.loading) === norm(loc))) {
+        t.locationGroups.push({ loading: loc, deliveries: [] });
+      }
+    });
+    saveT(0);
+    viewTransporters();
+  };
+
+  document.querySelectorAll("[data-tr-addorig-btn]").forEach(btn => btn.onclick = () => {
+    const ti = +btn.getAttribute("data-tr-addorig-btn");
+    const inp = document.querySelector(`input[data-tr-addorig-in="${ti}"]`);
+    if (inp) addOriginLocToTransporter(ti, inp.value);
+  });
+  document.querySelectorAll("[data-tr-addorig-in]").forEach(inp => inp.addEventListener("keydown", e => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      addOriginLocToTransporter(+inp.getAttribute("data-tr-addorig-in"), inp.value);
+    }
+  }));
+
+  document.querySelectorAll("[data-tr-rmorig]").forEach(btn => btn.onclick = () => {
+    if (!S.canWrite) return;
+    flushTransportersDomToState();
+    const [ti, lgi] = btn.getAttribute("data-tr-rmorig").split("|").map(Number);
+    const t = S.transporters.list[ti];
+    const lg = t?.locationGroups?.[lgi];
+    if (!lg) return;
+    // Also remove routes from this origin for this transporter
+    if (S.routes?.rows) {
+      S.routes.rows = S.routes.rows.filter(r => !(r.transporterId === t.id && norm(r.loading) === norm(lg.loading)));
+      saveDoc("master/routes", S.routes, 0);
+    }
+    t.locationGroups.splice(lgi, 1);
+    saveT(0);
+    viewTransporters();
+  });
+
+  const addDeliverySubLocToTransporter = (ti, lgi, rawTowns, rawRate) => {
+    if (!S.canWrite) return;
+    flushTransportersDomToState();
+    const towns = String(rawTowns || "").split(",").map(x => x.trim()).filter(Boolean);
+    if (!towns.length) { toast("Enter a delivery town first (e.g. Nagpur)"); return; }
+    const rateVal = num(rawRate);
+    const t = S.transporters.list[ti];
+    const lg = t?.locationGroups?.[lgi];
+    if (!lg) return;
+    lg.deliveries = lg.deliveries || [];
+    towns.forEach(town => {
+      const ex = lg.deliveries.find(d => norm(d.town) === norm(town));
+      if (ex) {
+        if (rateVal != null) ex.rate = rateVal;
+      } else {
+        lg.deliveries.push({ town, rate: rateVal });
+      }
+    });
+    syncTransporterSubcategoriesToRoutes(t);
+    saveT(0);
+    viewTransporters();
+    toast(`Added delivery sub-location(s) ${towns.join(", ")} under ${lg.loading}`);
+  };
+
+  document.querySelectorAll("[data-tr-newdel-btn]").forEach(btn => btn.onclick = () => {
+    const keyAttr = btn.getAttribute("data-tr-newdel-btn");
+    const [ti, lgi] = keyAttr.split("|").map(Number);
+    const townInp = document.querySelector(`input[data-tr-newdel-town="${keyAttr}"]`);
+    const rateInp = document.querySelector(`input[data-tr-newdel-rate="${keyAttr}"]`);
+    if (townInp) addDeliverySubLocToTransporter(ti, lgi, townInp.value, rateInp?.value);
+  });
+  document.querySelectorAll("[data-tr-newdel-town], [data-tr-newdel-rate]").forEach(inp => inp.addEventListener("keydown", e => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      const keyAttr = inp.getAttribute("data-tr-newdel-town") || inp.getAttribute("data-tr-newdel-rate");
+      const [ti, lgi] = keyAttr.split("|").map(Number);
+      const townInp = document.querySelector(`input[data-tr-newdel-town="${keyAttr}"]`);
+      const rateInp = document.querySelector(`input[data-tr-newdel-rate="${keyAttr}"]`);
+      if (townInp) addDeliverySubLocToTransporter(ti, lgi, townInp.value, rateInp?.value);
+    }
+  }));
+
+  document.querySelectorAll("[data-tr-rmdel]").forEach(btn => btn.onclick = () => {
+    if (!S.canWrite) return;
+    flushTransportersDomToState();
+    const [ti, lgi, di] = btn.getAttribute("data-tr-rmdel").split("|").map(Number);
+    const t = S.transporters.list[ti];
+    const lg = t?.locationGroups?.[lgi];
+    const delObj = lg?.deliveries?.[di];
+    if (!delObj) return;
+    if (S.routes?.rows) {
+      S.routes.rows = S.routes.rows.filter(r => !(r.transporterId === t.id && norm(r.loading) === norm(lg.loading) && norm(r.delivery) === norm(delObj.town)));
+      saveDoc("master/routes", S.routes, 0);
+    }
+    lg.deliveries.splice(di, 1);
+    saveT(0);
+    viewTransporters();
+  });
+
+  // 4. Delete Transporter & Top Action Buttons
+  document.querySelectorAll("[data-tdel]").forEach(b => b.onclick = () => {
+    if (!S.canWrite) return;
+    flushTransportersDomToState();
+    if (!b.dataset.armed) { b.dataset.armed = 1; b.textContent = "Del?"; return; }
+    const list = (S.transporters = S.transporters || { list: [] }).list;
+    list.splice(+b.dataset.tdel, 1);
+    saveT(0);
+    viewTransporters();
+  });
+
   const dat = $("#del-all-transporters");
   if (dat) dat.onclick = async () => {
     if (!S.canWrite) return;
     if (!dat.dataset.armed) { dat.dataset.armed = "1"; dat.textContent = "⚠️ Confirm Delete All Transporters?"; return; }
     S.transporters = { list: [] };
-    saveDoc("master/transporters", S.transporters, 0);
+    saveT(0);
     viewTransporters();
     toast("🗑️ Deleted all transporters!");
   };
+
   const ust = $("#up-step-transporters");
   if (ust) ust.onchange = e => { if (e.target.files?.[0]) uploadMaster(e.target.files[0], "transporters"); e.target.value = ""; };
-  $("#addt").onclick = () => { if (!S.canWrite) return; const list = (S.transporters = S.transporters || { list: [] }).list; list.push({ id: "t" + uid(), name: "", phone: "", notes: "", vehicles: [{ category: "20 KL Tanker", capacity: 20, unit: "KL" }] }); saveDoc("master/transporters", S.transporters, 0); viewTransporters(); };
+
+  $("#addt").onclick = () => {
+    if (!S.canWrite) return;
+    flushTransportersDomToState();
+    const list = (S.transporters = S.transporters || { list: [] }).list;
+    list.push({
+      id: "t" + uid(),
+      name: "",
+      phone: "",
+      notes: "",
+      vehicles: [{ category: "20 KL Tanker", capacity: 20, unit: "KL" }],
+      typeGroups: [],
+      locationGroups: []
+    });
+    saveT(0);
+    viewTransporters();
+    const allNameInps = document.querySelectorAll('input[data-f="name"][data-t]');
+    allNameInps[allNameInps.length - 1]?.focus();
+  };
 }
 
 /* ================= MASTER FILE BAR & NAVIGATION ================= */

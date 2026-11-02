@@ -1904,16 +1904,8 @@ function canTransporterCarryProduct(transporterId, prodId) {
   if (!transporterId) return true;
   const t = (S.transporters?.list || []).find(x => x.id === transporterId);
   if (!t) return true;
-  const pr = prodMap()[prodId];
-  const pType = displayTypeLabel(pr?.cls || "White liquid");
-  // If transporter has explicit productTypes / subProducts configured, enforce them strictly!
-  if (Array.isArray(t.typeGroups) && t.typeGroups.length > 0) {
-    const matchingGroup = t.typeGroups.find(g => norm(g.type) === norm(pType));
-    if (!matchingGroup) return false;
-    if (Array.isArray(matchingGroup.products) && matchingGroup.products.length > 0) {
-      return matchingGroup.products.includes(prodId);
-    }
-    return true;
+  if (Array.isArray(t.products) && t.products.length > 0) {
+    return t.products.includes(prodId);
   }
   return true;
 }
@@ -3461,37 +3453,20 @@ function viewRoutes() {
   };
 }
 
-/* ================= VIEW 5: MASTER FILE — TRANSPORTERS & FLEET (WITH PRODUCT TYPE & LOCATION SUBCATEGORIES) ================= */
-function getAvailableOilTypes() {
-  const defaults = ["White liquid", "Yellow liquid", "Black", "Bitumen"];
-  const fromCatalog = (S.catalog?.products || []).filter(p => (p.name || "").trim()).map(p => displayTypeLabel(p.cls));
-  const out = [];
-  [...defaults, ...fromCatalog].forEach(t => {
-    if (t && !out.some(x => norm(x) === norm(t))) out.push(t);
-  });
-  return out;
-}
-
-// Hydrate t.typeGroups and t.locationGroups on each transporter (and keep synced with S.routes.rows)
+/* ================= VIEW 5: MASTER FILE — TRANSPORTERS & FLEET (COMPACT PRODUCT & LOCATION SUBCATEGORIES) ================= */
 function ensureTransporterSubcategories(t) {
   if (!t) return;
-  const allProds = (S.catalog?.products || []).filter(p => (p.name || "").trim());
   const assignedRoutes = (S.routes?.rows || []).filter(r => r.transporterId === t.id);
 
-  if (!Array.isArray(t.typeGroups)) {
-    // Hydrate from any assigned routes if present
-    const routeProdIds = [...new Set(assignedRoutes.map(r => r.productId).filter(Boolean))];
-    const groupsMap = new Map();
-    routeProdIds.forEach(pid => {
-      const pr = allProds.find(x => x.id === pid);
-      if (!pr) return;
-      const tLabel = displayTypeLabel(pr.cls);
-      const k = norm(tLabel);
-      if (!groupsMap.has(k)) groupsMap.set(k, { type: tLabel, products: [] });
-      groupsMap.get(k).products.push(pid);
-    });
-    t.typeGroups = [...groupsMap.values()];
+  // Migrate any earlier t.typeGroups into flat t.products list (by product ID)
+  if (!Array.isArray(t.products)) {
+    const fromTypeGroups = Array.isArray(t.typeGroups)
+      ? t.typeGroups.flatMap(g => g.products || [])
+      : [];
+    const fromRoutes = assignedRoutes.map(r => r.productId).filter(Boolean);
+    t.products = [...new Set([...fromTypeGroups, ...fromRoutes])];
   }
+  delete t.typeGroups;
 
   if (!Array.isArray(t.locationGroups)) {
     const locMap = new Map();
@@ -3515,28 +3490,14 @@ function ensureTransporterSubcategories(t) {
   }
 }
 
-// Sync a transporter's Product Subcategories x Location Subcategories into S.routes.rows
 function syncTransporterSubcategoriesToRoutes(t) {
   if (!t) return;
   ensureTransporterSubcategories(t);
   S.routes = S.routes || { rows: [] };
   const allProds = (S.catalog?.products || []).filter(p => (p.name || "").trim());
-
-  // Determine all product IDs this transporter carries across its typeGroups
-  let carriedProdIds = [];
-  (t.typeGroups || []).forEach(tg => {
-    if (Array.isArray(tg.products) && tg.products.length > 0) {
-      tg.products.forEach(pid => { if (!carriedProdIds.includes(pid)) carriedProdIds.push(pid); });
-    } else {
-      // If a typeGroup has no specific sub-products selected yet, include all catalog products of that type
-      allProds.filter(p => norm(displayTypeLabel(p.cls)) === norm(tg.type)).forEach(p => {
-        if (!carriedProdIds.includes(p.id)) carriedProdIds.push(p.id);
-      });
-    }
-  });
-  if (!carriedProdIds.length && allProds.length) {
-    carriedProdIds = [allProds[0].id];
-  }
+  const carriedProdIds = (Array.isArray(t.products) && t.products.length > 0)
+    ? t.products
+    : (allProds[0] ? [allProds[0].id] : []);
 
   let routesModified = false;
   (t.locationGroups || []).forEach(lg => {
@@ -3580,7 +3541,6 @@ function syncTransporterSubcategoriesToRoutes(t) {
   }
 }
 
-// Flush current DOM inputs in viewTransporters before any button action re-renders the view so zero typed letters are ever lost!
 function flushTransportersDomToState() {
   const list = (S.transporters = S.transporters || { list: [] }).list;
   document.querySelectorAll("[data-t]").forEach(inp => {
@@ -3601,26 +3561,24 @@ function viewTransporters() {
   T.forEach(ensureTransporterSubcategories);
   const rows = S.routes?.rows || [];
   const namedProds = (S.catalog?.products || []).filter(p => (p.name || "").trim());
-  const oilTypes = getAvailableOilTypes();
   const allLoadingLocs = loadingPoints();
   const allDelLocs = allLocations();
   const saveT = (delay = 400) => saveDoc("master/transporters", S.transporters, delay);
   const dis = S.canWrite ? "" : "disabled";
 
   V().innerHTML = `
-   <div class="actions" style="justify-content:space-between;margin-bottom:12px">
+   <div class="actions" style="justify-content:space-between;margin-bottom:10px">
      <div>
-       <h3>Step 3 · Transporters, Product Types &amp; Delivery Location Subcategories</h3>
-       <p class="tiny" style="margin:2px 0 0">Configure each transporter's fleet, the specific <b>Oil Types &amp; Product Subcategories</b> they carry (e.g. only <b>White liquid → MTO, Hexane</b>), and their <b>Origin Location → Delivery Sub-Locations &amp; Rates</b>.</p>
+       <h3>Step 3 · Transporters, Products Carried &amp; Location Subcategories</h3>
+       <p class="tiny" style="margin:2px 0 0">Compact view: set each transporter's fleet, choose the <b>Products</b> they carry (e.g. <b>MTO</b>, <b>C9</b>, <b>LDO</b>), and add their <b>Origin → Delivery Sub-Locations</b>.</p>
      </div>
      <div class="actions">
-       ${S.currentUser?.role === "admin" && T.length ? `<button class="btn danger" id="del-all-transporters" type="button">🗑️ Delete All Transporters (${T.length})</button>` : ""}
-       ${S.canWrite ? `<label class="btn" for="up-step-transporters">⬆ Upload Step 3: Transporters (.xlsx)</label><input type="file" id="up-step-transporters" accept=".xlsx,.xls,.csv" hidden>` : ""}
-       <button class="btn primary" id="addt" type="button" ${dis}>＋ Add transporter</button>
+       ${S.currentUser?.role === "admin" && T.length ? `<button class="btn small danger" id="del-all-transporters" type="button">🗑️ Delete All (${T.length})</button>` : ""}
+       ${S.canWrite ? `<label class="btn small" for="up-step-transporters">⬆ Upload Transporters (.xlsx)</label><input type="file" id="up-step-transporters" accept=".xlsx,.xls,.csv" hidden>` : ""}
+       <button class="btn small primary" id="addt" type="button" ${dis}>＋ Add transporter</button>
      </div>
    </div>
 
-   <datalist id="dl-tr-oiltypes">${oilTypes.map(ot => `<option value="${esc(ot)}">`).join("")}</datalist>
    <datalist id="dl-tr-loadlocs">${allLoadingLocs.map(l => `<option value="${esc(l)}">`).join("")}</datalist>
    <datalist id="dl-tr-dellocs">${allDelLocs.map(l => `<option value="${esc(l)}">`).join("")}</datalist>
 
@@ -3629,197 +3587,124 @@ function viewTransporters() {
      <table>
        <thead>
          <tr>
-           <th style="width:280px;min-width:250px">Transporter &amp; Tanker Fleet</th>
-           <th style="min-width:340px">1. Transport Oil Type &amp; Product Subcategory</th>
-           <th style="min-width:380px">2. Origin Location &amp; Delivery Subcategory</th>
-           <th style="width:55px"></th>
+           <th style="width:255px;min-width:235px">Transporter &amp; Tanker Fleet</th>
+           <th style="width:270px;min-width:240px">1. Products Carried (MTO, C9, etc.)</th>
+           <th style="min-width:390px">2. Origin Location ➔ Delivery Sub-Locations</th>
+           <th style="width:44px"></th>
          </tr>
        </thead>
        <tbody>
          ${T.map((t, ti) => {
-           const tGroups = t.typeGroups || [];
+           const carried = t.products || [];
            const lGroups = t.locationGroups || [];
            const routeCount = rows.filter(r => r.transporterId === t.id).length;
 
            return `<tr>
-             <!-- COLUMN 1: TRANSPORTER DETAILS & VEHICLES -->
-             <td style="vertical-align:top;padding-top:12px">
-               <div class="stack" style="gap:8px">
-                 <div>
-                   <label class="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 block mb-0.5">Transporter Name</label>
-                   <input type="text" data-t="${ti}" data-f="name" value="${esc(t.name)}" placeholder="e.g. Dahej SS Enterprise" style="font-weight:800;font-size:13.5px" ${dis}>
+             <!-- COLUMN 1: COMPACT TRANSPORTER DETAILS & FLEET -->
+             <td style="vertical-align:top;padding:8px 10px">
+               <div class="space-y-1.5">
+                 <div class="grid grid-cols-12 gap-1.5">
+                   <input type="text" data-t="${ti}" data-f="name" value="${esc(t.name)}" placeholder="Transporter Name" class="col-span-7" style="font-weight:800;font-size:12.5px;padding:4px 7px" ${dis}>
+                   <input type="text" data-t="${ti}" data-f="phone" value="${esc(t.phone || "")}" placeholder="Phone" class="col-span-5 font-mono" style="font-size:11.5px;padding:4px 6px" ${dis}>
                  </div>
-                 <div class="row2" style="gap:6px">
-                   <div>
-                     <label class="text-[10px] font-bold text-slate-400 block mb-0.5">Phone</label>
-                     <input type="text" data-t="${ti}" data-f="phone" value="${esc(t.phone || "")}" placeholder="Phone number" style="font-size:12px" ${dis}>
+                 <div class="space-y-1 pt-0.5">
+                   ${(t.vehicles || []).map((v, vi) => `
+                     <div class="flex items-center gap-1">
+                       <span class="text-[10px] text-slate-400">🚚</span>
+                       <input type="text" data-t="${ti}" data-v="${vi}" data-f="category" value="${esc(v.category)}" placeholder="20 KL Tanker" style="font-size:11px;padding:2px 6px;flex:1" ${dis}>
+                       <input type="number" step="any" data-t="${ti}" data-v="${vi}" data-f="capacity" value="${v.capacity ?? ""}" placeholder="Cap" style="width:52px;font-size:11px;padding:2px 5px" class="font-mono" ${dis}>
+                       <select data-t="${ti}" data-v="${vi}" data-f="unit" style="width:48px;font-size:11px;padding:2px 3px" ${dis}>
+                         <option ${v.unit === "KL" ? "selected" : ""}>KL</option>
+                         <option ${v.unit === "MT" ? "selected" : ""}>MT</option>
+                       </select>
+                       ${S.canWrite ? `<button type="button" class="text-rose-500 hover:text-rose-700 text-xs font-bold px-1" data-vdel="${ti}:${vi}" title="Remove vehicle">×</button>` : ""}
+                     </div>
+                   `).join("")}
+                   <div class="flex items-center justify-between text-[10px] text-slate-400 pt-0.5">
+                     <span>${routeCount} route(s)</span>
+                     ${S.canWrite ? `<button type="button" class="font-bold text-indigo-600 hover:text-indigo-800 cursor-pointer" data-vadd="${ti}">+ Add Vehicle</button>` : ""}
                    </div>
-                   <div>
-                     <label class="text-[10px] font-bold text-slate-400 block mb-0.5">Notes</label>
-                     <input type="text" data-t="${ti}" data-f="notes" value="${esc(t.notes || "")}" placeholder="Contact / notes" style="font-size:12px" ${dis}>
-                   </div>
-                 </div>
-
-                 <!-- Tanker Fleet Sub-Box -->
-                 <div class="p-2.5 rounded-xl bg-slate-50 border border-slate-200 space-y-1.5">
-                   <div class="flex items-center justify-between">
-                     <span class="text-[10px] font-extrabold uppercase text-slate-500">🚚 Tanker Fleet</span>
-                     ${S.canWrite ? `<button type="button" class="text-[11px] font-bold text-indigo-600 hover:text-indigo-800 cursor-pointer" data-vadd="${ti}">＋ Add Vehicle</button>` : ""}
-                   </div>
-                   <div class="space-y-1">
-                     ${(t.vehicles || []).map((v, vi) => `
-                       <div class="flex items-center gap-1">
-                         <input type="text" data-t="${ti}" data-v="${vi}" data-f="category" value="${esc(v.category)}" placeholder="e.g. 20 KL Tanker" style="font-size:11.5px;padding:3px 6px;flex:1" ${dis}>
-                         <input type="number" step="any" data-t="${ti}" data-v="${vi}" data-f="capacity" value="${v.capacity ?? ""}" placeholder="Cap" style="width:58px;font-size:11.5px;padding:3px 5px" class="font-mono" ${dis}>
-                         <select data-t="${ti}" data-v="${vi}" data-f="unit" style="width:54px;font-size:11.5px;padding:3px 4px" ${dis}>
-                           <option ${v.unit === "KL" ? "selected" : ""}>KL</option>
-                           <option ${v.unit === "MT" ? "selected" : ""}>MT</option>
-                         </select>
-                         ${S.canWrite ? `<button type="button" class="btn small danger" style="padding:2px 6px" data-vdel="${ti}:${vi}" title="Remove vehicle">✕</button>` : ""}
-                       </div>
-                     `).join("") || `<div class="tiny">No vehicles added</div>`}
-                   </div>
-                   <div class="text-[10px] text-slate-400 font-semibold pt-0.5">${routeCount} active route(s) synced</div>
                  </div>
                </div>
              </td>
 
-             <!-- COLUMN 2: OIL TYPE CATEGORY -> PRODUCT SUBCATEGORY -->
-             <td style="vertical-align:top;padding-top:12px">
-               <div class="stack" style="gap:8px">
-                 <!-- Add / Toggle Main Oil Type Category -->
+             <!-- COLUMN 2: COMPACT PRODUCTS TRANSPORTED (CHOOSE BY PRODUCT NAME LIKE MTO, C9) -->
+             <td style="vertical-align:top;padding:8px 10px">
+               <div class="space-y-1.5">
+                 <div class="chips" style="gap:4px">
+                   ${carried.map(pid => {
+                     const p = namedProds.find(x => x.id === pid);
+                     if (!p) return "";
+                     return `<span class="chip" style="padding:2px 8px;font-size:11px;background:var(--accent);border-color:var(--accent);color:#fff">
+                       <span class="dot" style="background:${clsDotColor(p.cls)};border:1px solid #fff;width:6px;height:6px"></span>
+                       <span>${esc(p.name)}</span>
+                       ${S.canWrite ? `<button type="button" data-tr-rmprod="${ti}|${esc(p.id)}" class="ml-1 text-white/80 hover:text-white font-extrabold" title="Remove ${esc(p.name)}">×</button>` : ""}
+                     </span>`;
+                   }).join("") || `<span class="tiny text-slate-400">All products (or pick below)</span>`}
+                 </div>
                  ${S.canWrite ? `
-                 <div class="p-2 rounded-xl bg-indigo-50/60 border border-indigo-200/80 space-y-1.5">
-                   <span class="text-[10px] font-extrabold uppercase tracking-wider text-indigo-900 block">+ Add Oil Type Category They Transport:</span>
-                   <div class="chips" style="gap:4px">
-                     ${oilTypes.map(ot => {
-                       const hasType = tGroups.some(g => norm(g.type) === norm(ot));
-                       return `<button type="button" data-tr-addtype="${ti}|${esc(ot)}" aria-pressed="${hasType}" class="chip" style="padding:2px 8px;font-size:11px">
-                         <span class="dot" style="background:${clsDotColor(ot)}"></span>
-                         <span>${esc(ot)}</span>
-                       </button>`;
-                     }).join("")}
-                   </div>
-                   <div class="flex items-center gap-1 pt-0.5">
-                     <input type="text" data-tr-customtype-in="${ti}" list="dl-tr-oiltypes" placeholder="Or type custom category (e.g. White liquid)" style="padding:3px 7px;font-size:11.5px">
-                     <button type="button" data-tr-customtype-btn="${ti}" class="btn small primary" style="padding:3px 8px">+ Add Type</button>
-                   </div>
+                 <div class="flex items-center gap-1">
+                   <select data-tr-pickprod="${ti}" style="width:auto;min-width:120px;max-width:145px;padding:3px 6px;font-size:11px">
+                     <option value="">+ Product…</option>
+                     ${namedProds.filter(p => !carried.includes(p.id)).map(p => `<option value="${esc(p.id)}">${esc(p.name)} (${p.unit})</option>`).join("")}
+                     <option value="__ALL__">✓ All Products</option>
+                     <option value="__CLEAR__">✕ Clear All</option>
+                   </select>
+                   <input type="text" data-tr-newprod-in="${ti}" placeholder="Or type MTO, C9" style="padding:3px 6px;font-size:11px;width:95px">
+                   <button type="button" data-tr-newprod-btn="${ti}" class="btn small primary" style="padding:3px 7px;font-size:11px">+</button>
                  </div>` : ""}
-
-                 <!-- Subcategory Cards for Each Assigned Oil Type -->
-                 ${tGroups.length ? `<div class="stack" style="gap:6px">
-                   ${tGroups.map((tg, tgi) => {
-                     const matchingCatalogProds = namedProds.filter(p => norm(displayTypeLabel(p.cls)) === norm(tg.type));
-                     const otherCatalogProds = namedProds.filter(p => norm(displayTypeLabel(p.cls)) !== norm(tg.type));
-                     const subProds = tg.products || [];
-
-                     return `<div class="p-2.5 rounded-xl bg-slate-50 border border-slate-200 space-y-2">
-                       <div class="flex items-center justify-between gap-2 border-b border-slate-200/80 pb-1.5">
-                         <div class="flex items-center gap-1.5">
-                           <span class="dot" style="width:10px;height:10px;border-radius:50%;background:${clsDotColor(tg.type)};display:inline-block"></span>
-                           <span class="text-xs font-extrabold text-slate-900">${esc(tg.type)}</span>
-                           <span class="text-[10px] bg-white border border-slate-200 px-1.5 py-0.2 rounded-full text-slate-500 font-mono">${subProds.length ? `${subProds.length} product(s)` : "All " + esc(tg.type)}</span>
-                         </div>
-                         ${S.canWrite ? `<button type="button" data-tr-rmtype="${ti}|${tgi}" class="text-[11px] text-rose-600 hover:text-rose-800 font-bold" title="Remove ${esc(tg.type)} category">✕ Type</button>` : ""}
-                       </div>
-
-                       <!-- Subcategory: Products inside this Oil Type -->
-                       <div class="space-y-1.5">
-                         <span class="text-[10px] font-bold uppercase text-slate-400 block">Subcategory · Products under ${esc(tg.type)}:</span>
-                         <div class="chips" style="gap:4px">
-                           ${subProds.map(pid => {
-                             const p = namedProds.find(x => x.id === pid);
-                             if (!p) return "";
-                             return `<span class="chip" style="padding:2px 8px;font-size:11px;background:var(--accent);border-color:var(--accent);color:#fff">
-                               <span>${esc(p.name)}</span>
-                               ${S.canWrite ? `<button type="button" data-tr-rmsubprod="${ti}|${tgi}|${esc(p.id)}" class="ml-1 text-white/80 hover:text-white font-extrabold">×</button>` : ""}
-                             </span>`;
-                           }).join("") || `<span class="tiny text-emerald-700 font-semibold">Carries all ${esc(tg.type)} products — or pick specific products below:</span>`}
-                         </div>
-
-                         ${S.canWrite ? `
-                         <div class="flex flex-wrap items-center gap-1 pt-0.5">
-                           <select data-tr-picksubprod="${ti}|${tgi}" style="width:auto;min-width:140px;padding:3px 6px;font-size:11px">
-                             <option value="">+ Select ${esc(tg.type)} product…</option>
-                             ${matchingCatalogProds.filter(p => !subProds.includes(p.id)).map(p => `<option value="${esc(p.id)}">${esc(p.name)} (${p.unit})</option>`).join("")}
-                             ${otherCatalogProds.length ? `<optgroup label="Other Products">${otherCatalogProds.filter(p => !subProds.includes(p.id)).map(p => `<option value="${esc(p.id)}">${esc(p.name)} (${esc(displayTypeLabel(p.cls))})</option>`).join("")}</optgroup>` : ""}
-                             <option value="__ALL_TYPE__">✓ Add All ${esc(tg.type)} Products</option>
-                           </select>
-                           <div class="flex items-center gap-1">
-                             <input type="text" data-tr-newsubprod-in="${ti}|${tgi}" placeholder="Or type new (e.g. MTO)" style="padding:3px 6px;font-size:11px;width:125px">
-                             <button type="button" data-tr-newsubprod-btn="${ti}|${tgi}" class="btn small primary" style="padding:3px 7px">+ Add</button>
-                           </div>
-                         </div>` : ""}
-                       </div>
-                     </div>`;
-                   }).join("")}
-                 </div>` : `<div class="p-3 rounded-xl bg-slate-50 border border-dashed border-slate-300 text-center tiny">No product restriction set (carries any product). Click an <b>Oil Type</b> above (e.g. <b>White liquid</b>) to restrict this transporter and add its product subcategories.</div>`}
                </div>
              </td>
 
-             <!-- COLUMN 3: ORIGIN / LOADING LOCATION -> DELIVERY SUB-LOCATIONS & RATES -->
-             <td style="vertical-align:top;padding-top:12px">
-               <div class="stack" style="gap:8px">
-                 <!-- Add Main Loading / Origin Location -->
+             <!-- COLUMN 3: COMPACT ORIGIN LOCATION -> DELIVERY SUB-LOCATIONS -->
+             <td style="vertical-align:top;padding:8px 10px">
+               <div class="space-y-1.5">
+                 <!-- Compact 1-Line Sub-Rows for Each Origin Location -->
+                 ${lGroups.map((lg, lgi) => {
+                   const dels = lg.deliveries || [];
+                   return `<div class="p-1.5 rounded-lg bg-slate-50 border border-slate-200/90 flex flex-wrap items-center justify-between gap-1.5">
+                     <div class="flex items-center gap-1 shrink-0">
+                       <span class="px-1.5 py-0.5 rounded bg-emerald-700 text-white text-[10px] font-extrabold">🏭 ${esc(lg.loading)}</span>
+                       ${S.canWrite ? `<button type="button" data-tr-rmorig="${ti}|${lgi}" class="text-[11px] text-rose-500 hover:text-rose-700 font-bold px-0.5" title="Remove ${esc(lg.loading)}">×</button>` : ""}
+                       <span class="text-slate-300 text-xs">➔</span>
+                     </div>
+                     <div class="chips flex-1" style="gap:3px">
+                       ${dels.map((dObj, di) => `
+                         <span class="chip" style="padding:1px 7px;font-size:10.5px;background:var(--surface);border-color:var(--line);color:var(--ink)">
+                           <span>📍 <b>${esc(dObj.town)}</b>${dObj.rate != null ? ` <span class="font-mono text-indigo-700 font-bold">${inr(dObj.rate)}</span>` : ""}</span>
+                           ${S.canWrite ? `<button type="button" data-tr-rmdel="${ti}|${lgi}|${di}" class="ml-0.5 text-rose-500 hover:text-rose-700 font-extrabold">×</button>` : ""}
+                         </span>
+                       `).join("")}
+                     </div>
+                     ${S.canWrite ? `
+                     <div class="flex items-center gap-1 shrink-0">
+                       <input type="text" data-tr-newdel-town="${ti}|${lgi}" list="dl-tr-dellocs" placeholder="+ Delivery town" style="padding:2px 6px;font-size:11px;width:105px">
+                       <input type="number" step="any" data-tr-newdel-rate="${ti}|${lgi}" placeholder="₹ Rate" style="padding:2px 5px;font-size:11px;width:64px" class="font-mono">
+                       <button type="button" data-tr-newdel-btn="${ti}|${lgi}" class="btn small primary" style="padding:2px 6px;font-size:10.5px">+</button>
+                     </div>` : ""}
+                   </div>`;
+                 }).join("")}
+
+                 <!-- Compact Add Origin Bar -->
                  ${S.canWrite ? `
-                 <div class="p-2 rounded-xl bg-emerald-50/60 border border-emerald-200/80 space-y-1">
-                   <span class="text-[10px] font-extrabold uppercase tracking-wider text-emerald-950 block">+ Add Main Loading / Origin Location:</span>
-                   <div class="flex items-center gap-1">
-                     <input type="text" data-tr-addorig-in="${ti}" list="dl-tr-loadlocs" placeholder="e.g. Dahej, Jamnagar, Vadinar, Kochi" style="padding:4px 8px;font-size:11.5px">
-                     <button type="button" data-tr-addorig-btn="${ti}" class="btn small primary" style="padding:4px 9px">+ Add Location</button>
-                   </div>
+                 <div class="flex items-center gap-1">
+                   <input type="text" data-tr-addorig-in="${ti}" list="dl-tr-loadlocs" placeholder="+ Add Origin Location (e.g. Munda, Vadodara, Dahej)" style="padding:3px 7px;font-size:11px;max-width:260px">
+                   <button type="button" data-tr-addorig-btn="${ti}" class="btn small" style="padding:3px 8px;font-size:11px">+ Origin</button>
                  </div>` : ""}
-
-                 <!-- Subcategory Cards for Each Origin / Loading Location -->
-                 ${lGroups.length ? `<div class="stack" style="gap:6px">
-                   ${lGroups.map((lg, lgi) => {
-                     const dels = lg.deliveries || [];
-                     return `<div class="p-2.5 rounded-xl bg-slate-50 border border-slate-200 space-y-2">
-                       <div class="flex items-center justify-between gap-2 border-b border-slate-200/80 pb-1.5">
-                         <div class="flex items-center gap-1.5">
-                           <span class="px-2 py-0.5 rounded-md bg-emerald-700 text-white text-[10px] font-extrabold">🏭 From</span>
-                           <span class="text-xs font-extrabold text-slate-900">${esc(lg.loading)}</span>
-                           <span class="text-[10px] bg-white border border-slate-200 px-1.5 py-0.2 rounded-full text-slate-500 font-mono">${dels.length} delivery town(s)</span>
-                         </div>
-                         ${S.canWrite ? `<button type="button" data-tr-rmorig="${ti}|${lgi}" class="text-[11px] text-rose-600 hover:text-rose-800 font-bold" title="Remove ${esc(lg.loading)} origin">✕ Loc</button>` : ""}
-                       </div>
-
-                       <!-- Subcategory: Delivery Locations under this Origin Location -->
-                       <div class="space-y-1.5">
-                         <span class="text-[10px] font-bold uppercase text-slate-400 block">Subcategory · Delivery Locations from ${esc(lg.loading)}:</span>
-                         <div class="chips" style="gap:4px">
-                           ${dels.map((dObj, di) => `
-                             <span class="chip" style="padding:2px 8px;font-size:11px;background:var(--surface);border-color:var(--accent);color:var(--ink)">
-                               <span>📍 <b>${esc(dObj.town)}</b>${dObj.rate != null ? ` · <span class="font-mono text-indigo-700 font-bold">${inr(dObj.rate)}</span>` : ""}</span>
-                               ${S.canWrite ? `<button type="button" data-tr-rmdel="${ti}|${lgi}|${di}" class="ml-1 text-rose-600 hover:text-rose-800 font-extrabold" title="Remove ${esc(dObj.town)}">×</button>` : ""}
-                             </span>
-                           `).join("") || `<span class="tiny text-amber-700 font-semibold">Add delivery towns below for ${esc(lg.loading)}</span>`}
-                         </div>
-
-                         ${S.canWrite ? `
-                         <div class="flex flex-wrap items-center gap-1 pt-0.5">
-                           <input type="text" data-tr-newdel-town="${ti}|${lgi}" list="dl-tr-dellocs" placeholder="+ Delivery town (e.g. Nagpur, Pune)" style="padding:3px 7px;font-size:11px;flex:1;min-width:130px">
-                           <input type="number" step="any" data-tr-newdel-rate="${ti}|${lgi}" placeholder="Rate ₹ (opt)" style="padding:3px 6px;font-size:11px;width:88px" class="font-mono">
-                           <button type="button" data-tr-newdel-btn="${ti}|${lgi}" class="btn small primary" style="padding:3px 8px">+ Add Sub-Location</button>
-                         </div>` : ""}
-                       </div>
-                     </div>`;
-                   }).join("")}
-                 </div>` : `<div class="p-3 rounded-xl bg-slate-50 border border-dashed border-slate-300 text-center tiny">Add an <b>Origin / Loading Location</b> above (e.g. <b>Dahej</b> or <b>Jamnagar</b>), then add the <b>Delivery Sub-Locations</b> this transporter serves.</div>`}
                </div>
              </td>
 
              <!-- COLUMN 4: DELETE TRANSPORTER -->
-             <td style="vertical-align:top;padding-top:12px">
-               <button class="btn small danger" type="button" data-tdel="${ti}" title="Delete ${esc(t.name)}" ${dis}>✕</button>
+             <td style="vertical-align:top;padding:8px 6px;text-align:center">
+               <button class="btn small danger" style="padding:3px 7px" type="button" data-tdel="${ti}" title="Delete ${esc(t.name)}" ${dis}>✕</button>
              </td>
            </tr>`;
          }).join("")}
        </tbody>
      </table>
-   </div>` : `<div class="panel empty"><strong>No transporters yet</strong>Click <b>＋ Add transporter</b> above to add each transporter with their oil type subcategories and delivery location subcategories.</div>`}`;
+   </div>` : `<div class="panel empty"><strong>No transporters yet</strong>Click <b>＋ Add transporter</b> above to add each transporter with their products and location subcategories.</div>`}`;
 
-  // 1. Basic Transporter & Vehicle input listeners (in-place mutation)
+  // 1. Basic Transporter & Vehicle input listeners
   document.querySelectorAll("[data-t]").forEach(inp => inp.addEventListener(inp.tagName === "SELECT" ? "change" : "input", e => {
     if (!S.canWrite) return;
     const list = (S.transporters = S.transporters || { list: [] }).list;
@@ -3853,124 +3738,71 @@ function viewTransporters() {
     viewTransporters();
   });
 
-  // 2. Column 2 Listeners: Add/Toggle Oil Type Category & Manage Product Subcategories
-  const toggleOrAddOilType = (ti, rawType) => {
+  // 2. Column 2 Listeners: Choose Directly by Product Name (e.g. MTO, C9)
+  document.querySelectorAll("[data-tr-rmprod]").forEach(btn => btn.onclick = () => {
     if (!S.canWrite) return;
     flushTransportersDomToState();
-    const typeName = String(rawType || "").trim();
-    if (!typeName) { toast("Enter an oil type category first"); return; }
-    const t = S.transporters.list[ti];
+    const [tiStr, pid] = btn.getAttribute("data-tr-rmprod").split("|");
+    const t = S.transporters.list[+tiStr];
     if (!t) return;
-    t.typeGroups = t.typeGroups || [];
-    const existingIdx = t.typeGroups.findIndex(g => norm(g.type) === norm(typeName));
-    if (existingIdx >= 0) {
-      t.typeGroups.splice(existingIdx, 1);
-    } else {
-      const matchingProds = namedProds.filter(p => norm(displayTypeLabel(p.cls)) === norm(typeName)).map(p => p.id);
-      t.typeGroups.push({ type: typeName, products: matchingProds });
-    }
-    syncTransporterSubcategoriesToRoutes(t);
-    saveT(0);
-    viewTransporters();
-  };
-
-  document.querySelectorAll("[data-tr-addtype]").forEach(btn => btn.onclick = () => {
-    const [tiStr, typeName] = btn.getAttribute("data-tr-addtype").split("|");
-    toggleOrAddOilType(+tiStr, typeName);
-  });
-
-  document.querySelectorAll("[data-tr-customtype-btn]").forEach(btn => btn.onclick = () => {
-    const ti = +btn.getAttribute("data-tr-customtype-btn");
-    const inp = document.querySelector(`input[data-tr-customtype-in="${ti}"]`);
-    if (inp && inp.value.trim()) toggleOrAddOilType(ti, inp.value.trim());
-  });
-  document.querySelectorAll("[data-tr-customtype-in]").forEach(inp => inp.addEventListener("keydown", e => {
-    if (e.key === "Enter") {
-      e.preventDefault();
-      toggleOrAddOilType(+inp.getAttribute("data-tr-customtype-in"), inp.value.trim());
-    }
-  }));
-
-  document.querySelectorAll("[data-tr-rmtype]").forEach(btn => btn.onclick = () => {
-    if (!S.canWrite) return;
-    flushTransportersDomToState();
-    const [ti, tgi] = btn.getAttribute("data-tr-rmtype").split("|").map(Number);
-    const t = S.transporters.list[ti];
-    if (!t) return;
-    t.typeGroups.splice(tgi, 1);
+    t.products = (t.products || []).filter(x => x !== pid);
     saveT(0);
     viewTransporters();
   });
 
-  document.querySelectorAll("[data-tr-rmsubprod]").forEach(btn => btn.onclick = () => {
-    if (!S.canWrite) return;
-    flushTransportersDomToState();
-    const [tiStr, tgiStr, pid] = btn.getAttribute("data-tr-rmsubprod").split("|");
-    const tg = S.transporters.list[+tiStr]?.typeGroups?.[+tgiStr];
-    if (!tg) return;
-    tg.products = (tg.products || []).filter(x => x !== pid);
-    saveT(0);
-    viewTransporters();
-  });
-
-  document.querySelectorAll("[data-tr-picksubprod]").forEach(sel => sel.onchange = () => {
+  document.querySelectorAll("[data-tr-pickprod]").forEach(sel => sel.onchange = () => {
     if (!S.canWrite || !sel.value) return;
     flushTransportersDomToState();
-    const [ti, tgi] = sel.getAttribute("data-tr-picksubprod").split("|").map(Number);
+    const ti = +sel.getAttribute("data-tr-pickprod");
     const t = S.transporters.list[ti];
-    const tg = t?.typeGroups?.[tgi];
-    if (!tg) return;
-    tg.products = tg.products || [];
-    if (sel.value === "__ALL_TYPE__") {
-      namedProds.filter(p => norm(displayTypeLabel(p.cls)) === norm(tg.type)).forEach(p => {
-        if (!tg.products.includes(p.id)) tg.products.push(p.id);
-      });
-    } else if (!tg.products.includes(sel.value)) {
-      tg.products.push(sel.value);
+    if (!t) return;
+    t.products = t.products || [];
+    if (sel.value === "__ALL__") {
+      t.products = namedProds.map(p => p.id);
+    } else if (sel.value === "__CLEAR__") {
+      t.products = [];
+    } else if (!t.products.includes(sel.value)) {
+      t.products.push(sel.value);
     }
     syncTransporterSubcategoriesToRoutes(t);
     saveT(0);
     viewTransporters();
   });
 
-  const addNewSubProdToTransporterType = (ti, tgi, rawNames) => {
+  const addNewProdToTransporter = (ti, rawNames) => {
     if (!S.canWrite) return;
     flushTransportersDomToState();
     const names = String(rawNames || "").split(",").map(x => x.trim()).filter(Boolean);
-    if (!names.length) { toast("Type a product name first (e.g. MTO)"); return; }
+    if (!names.length) { toast("Type a product name first (e.g. MTO, C9)"); return; }
     const t = S.transporters.list[ti];
-    const tg = t?.typeGroups?.[tgi];
-    if (!tg) return;
-    tg.products = tg.products || [];
+    if (!t) return;
+    t.products = t.products || [];
     S.catalog = S.catalog || { sources: [], products: [] };
     names.forEach(pName => {
       let prod = (S.catalog.products || []).find(p => norm(p.name) === norm(pName) || norm(p.id) === norm(pName));
       if (!prod) {
         const newId = productIdFor(pName, "");
-        prod = { id: newId, name: pName, unit: inferProductUnit(pName, ""), cls: tg.type, _userTypedCls: true, aliases: [pName.toUpperCase()] };
+        prod = { id: newId, name: pName, unit: inferProductUnit(pName, ""), cls: inferProductType(pName, ""), aliases: [pName.toUpperCase()] };
         S.catalog.products.push(prod);
       }
-      if (!tg.products.includes(prod.id)) tg.products.push(prod.id);
+      if (!t.products.includes(prod.id)) t.products.push(prod.id);
     });
     saveDoc("master/catalog", S.catalog, 0);
     syncTransporterSubcategoriesToRoutes(t);
     saveT(0);
     viewTransporters();
-    toast(`Added ${names.join(", ")} under ${tg.type} for ${t.name}`);
+    toast(`Added ${names.join(", ")} to ${t.name || "transporter"}`);
   };
 
-  document.querySelectorAll("[data-tr-newsubprod-btn]").forEach(btn => btn.onclick = () => {
-    const keyAttr = btn.getAttribute("data-tr-newsubprod-btn");
-    const [ti, tgi] = keyAttr.split("|").map(Number);
-    const inp = document.querySelector(`input[data-tr-newsubprod-in="${keyAttr}"]`);
-    if (inp) addNewSubProdToTransporterType(ti, tgi, inp.value);
+  document.querySelectorAll("[data-tr-newprod-btn]").forEach(btn => btn.onclick = () => {
+    const ti = +btn.getAttribute("data-tr-newprod-btn");
+    const inp = document.querySelector(`input[data-tr-newprod-in="${ti}"]`);
+    if (inp) addNewProdToTransporter(ti, inp.value);
   });
-  document.querySelectorAll("[data-tr-newsubprod-in]").forEach(inp => inp.addEventListener("keydown", e => {
+  document.querySelectorAll("[data-tr-newprod-in]").forEach(inp => inp.addEventListener("keydown", e => {
     if (e.key === "Enter") {
       e.preventDefault();
-      const keyAttr = inp.getAttribute("data-tr-newsubprod-in");
-      const [ti, tgi] = keyAttr.split("|").map(Number);
-      addNewSubProdToTransporterType(ti, tgi, inp.value);
+      addNewProdToTransporter(+inp.getAttribute("data-tr-newprod-in"), inp.value);
     }
   }));
 
@@ -3979,7 +3811,7 @@ function viewTransporters() {
     if (!S.canWrite) return;
     flushTransportersDomToState();
     const parts = String(rawOrig || "").split(",").map(x => x.trim()).filter(Boolean);
-    if (!parts.length) { toast("Enter an origin / loading location first (e.g. Dahej)"); return; }
+    if (!parts.length) { toast("Enter an origin location first (e.g. Munda, Vadodara)"); return; }
     const t = S.transporters.list[ti];
     if (!t) return;
     t.locationGroups = t.locationGroups || [];
@@ -4011,7 +3843,6 @@ function viewTransporters() {
     const t = S.transporters.list[ti];
     const lg = t?.locationGroups?.[lgi];
     if (!lg) return;
-    // Also remove routes from this origin for this transporter
     if (S.routes?.rows) {
       S.routes.rows = S.routes.rows.filter(r => !(r.transporterId === t.id && norm(r.loading) === norm(lg.loading)));
       saveDoc("master/routes", S.routes, 0);
@@ -4042,7 +3873,7 @@ function viewTransporters() {
     syncTransporterSubcategoriesToRoutes(t);
     saveT(0);
     viewTransporters();
-    toast(`Added delivery sub-location(s) ${towns.join(", ")} under ${lg.loading}`);
+    toast(`Added ${towns.join(", ")} under ${lg.loading}`);
   };
 
   document.querySelectorAll("[data-tr-newdel-btn]").forEach(btn => btn.onclick = () => {
@@ -4094,7 +3925,7 @@ function viewTransporters() {
   const dat = $("#del-all-transporters");
   if (dat) dat.onclick = async () => {
     if (!S.canWrite) return;
-    if (!dat.dataset.armed) { dat.dataset.armed = "1"; dat.textContent = "⚠️ Confirm Delete All Transporters?"; return; }
+    if (!dat.dataset.armed) { dat.dataset.armed = "1"; dat.textContent = "⚠️ Confirm Delete All?"; return; }
     S.transporters = { list: [] };
     saveT(0);
     viewTransporters();
@@ -4114,7 +3945,7 @@ function viewTransporters() {
       phone: "",
       notes: "",
       vehicles: [{ category: "20 KL Tanker", capacity: 20, unit: "KL" }],
-      typeGroups: [],
+      products: [],
       locationGroups: []
     });
     saveT(0);

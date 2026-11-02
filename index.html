@@ -2142,7 +2142,7 @@ const INDIA_COORDS = {
   "chennai": [13.0827, 80.2707], "manali": [13.1667, 80.2667], "ennore": [13.2167, 80.3167], "coimbatore": [11.0168, 76.9558], "madurai": [9.9252, 78.1198], "salem": [11.6643, 78.1460], "trichy": [10.7905, 78.7047], "hosur": [12.7409, 77.8253], "tuticorin": [8.7642, 78.1348],
   "kochi": [9.9312, 76.2673], "cochin": [9.9312, 76.2673], "ambalamugal": [9.9800, 76.3700], "trivandrum": [8.5241, 76.9366], "kozhikode": [11.2588, 75.7804],
   "mangalore": [12.9141, 74.8560], "mangaluru": [12.9141, 74.8560], "bengaluru": [12.9716, 77.5946], "bangalore": [12.9716, 77.5946], "mysuru": [12.2958, 76.6394], "hubli": [15.3647, 75.1240], "belagavi": [15.8497, 74.4977], "karwar": [14.8136, 74.1297],
-  "nagpur": [21.1458, 79.0882], "pune": [18.5204, 73.8567], "nashik": [19.9975, 73.7898], "aurangabad": [19.8762, 75.3433], "chhatrapati sambhajinagar": [19.8762, 75.3433], "amravati": [20.9320, 77.7523], "akola": [20.7002, 77.0082], "jalgaon": [21.0077, 75.5626], "solapur": [17.6599, 75.9064], "kolhapur": [16.7050, 74.2433], "chandrapur": [19.9615, 79.2961], "wardha": [20.7453, 78.6022], "yavatmal": [20.3888, 78.1204], "bhandara": [21.1702, 79.6489], "gondia": [21.4624, 80.2210], "dhule": [20.9042, 74.7749], "nanded": [19.1383, 77.3210], "latur": [18.4088, 76.5604], "satara": [17.6805, 74.0183], "sangli": [16.8524, 74.5815], "ratnagiri": [16.9902, 73.3120],
+  "nagpur": [21.1458, 79.0882], "butibori": [20.9272, 79.0055], "bandara": [21.1702, 79.6489], "borgoan": [21.5544, 78.7997], "borgoan (mp)": [21.5544, 78.7997], "borgaon": [21.5544, 78.7997], "ahmednagar": [19.0948, 74.7480], "roha": [18.4368, 73.1196], "itarsi": [22.6148, 77.7618], "jhabua": [22.7697, 74.5921], "pune": [18.5204, 73.8567], "nashik": [19.9975, 73.7898], "aurangabad": [19.8762, 75.3433], "chhatrapati sambhajinagar": [19.8762, 75.3433], "amravati": [20.9320, 77.7523], "akola": [20.7002, 77.0082], "jalgaon": [21.0077, 75.5626], "solapur": [17.6599, 75.9064], "kolhapur": [16.7050, 74.2433], "chandrapur": [19.9615, 79.2961], "wardha": [20.7453, 78.6022], "yavatmal": [20.3888, 78.1204], "bhandara": [21.1702, 79.6489], "gondia": [21.4624, 80.2210], "dhule": [20.9042, 74.7749], "nanded": [19.1383, 77.3210], "latur": [18.4088, 76.5604], "satara": [17.6805, 74.0183], "sangli": [16.8524, 74.5815], "ratnagiri": [16.9902, 73.3120],
   "indore": [22.7196, 75.8577], "bhopal": [23.2599, 77.4126], "jabalpur": [23.1815, 79.9864], "gwalior": [26.2183, 78.1828], "bina": [24.1752, 78.1887], "ujjain": [23.1765, 75.7885], "dewas": [22.9676, 76.0534], "pithampur": [22.6133, 75.6822], "satna": [24.6005, 80.8322], "rewa": [24.5362, 81.3037], "chhindwara": [22.0574, 78.9382],
   "raipur": [21.2514, 81.6296], "bilaspur": [22.0797, 82.1409], "bhilai": [21.1938, 81.3509], "durg": [21.1904, 81.2849], "korba": [22.3595, 82.7501], "raigarh": [21.8974, 83.3950],
   "hyderabad": [17.3850, 78.4867], "secunderabad": [17.4399, 78.4983], "warangal": [17.9689, 79.5941], "karimnagar": [18.4386, 79.1288], "nizamabad": [18.6725, 78.0941], "khammam": [17.2473, 80.1514], "ramagundam": [18.7557, 79.4740],
@@ -2602,7 +2602,19 @@ function chgPill(c) {
   if (Math.abs(c) < 0.5) return `<span class="pill flat">no change</span>`;
   return `<span class="pill ${c > 0 ? "up" : "down"}">${c > 0 ? "▲ +" : "▼ −"}${nf(Math.abs(c))}</span>`;
 }
-function trName(route) { return trMap()[route?.transporterId]?.name || ""; }
+function trName(route) {
+  if (!route) return "";
+  if (route.transporterId && trMap()[route.transporterId]?.name) return trMap()[route.transporterId].name;
+  const matchT = (S.transporters?.list || []).find(t => {
+    const carriesProd = !Array.isArray(t.products) || !t.products.length || t.products.includes(route.productId);
+    if (!carriesProd) return false;
+    if (Array.isArray(t.locationGroups) && t.locationGroups.length > 0) {
+      return t.locationGroups.some(lg => norm(lg.loading) === norm(route.loading));
+    }
+    return false;
+  });
+  return matchT ? matchT.name : "";
+}
 function transportLine(r) {
   if (r.freightSrc === "manual") return `Rate entered by you · ${inr(r.freight)}`;
   const t = trName(r.route);
@@ -3354,102 +3366,154 @@ function viewEditor() {
   };
 }
 
-/* ================= VIEW 4: MASTER FILE — TRANSPORT ROUTES ================= */
+/* ================= VIEW 4: MASTER FILE — TRANSPORT RATES (EXACT 4-COLUMN FORMAT: LOADING POINT | DELIVERY POINT | PRODUCT | TRANSPORT RATES) ================= */
 function viewRoutes() {
-  const rows = S.routes?.rows || [], f = UI.rf, T = S.transporters?.list || [];
-  const loads = [...new Set(rows.map(r => r.loading))].sort(), dels = allLocations();
-  const comps = [...new Set((S.catalog.sources || []).map(s => s.company))];
-  const vis = rows.map((r, i) => ({ r, i })).filter(({ r }) => (!f.product || r.productId === f.product) && (!f.loading || r.loading === f.loading) && (!f.delivery || r.delivery === f.delivery) && (!f.pendingOnly || num(r.rate) === null) && (!f.text || norm(JSON.stringify(r) + (trMap()[r.transporterId]?.name || "")).includes(norm(f.text))));
+  const rows = S.routes?.rows || [];
+  const f = UI.rf;
+  const loads = [...new Set(rows.map(r => r.loading).filter(Boolean))].sort();
+  const dels = allLocations();
+  const namedProds = (S.catalog?.products || []).filter(p => (p.name || "").trim());
+  const vis = rows.map((r, i) => ({ r, i })).filter(({ r }) =>
+    (!f.product || norm(r.productId) === norm(f.product) || norm(prodMap()[r.productId]?.name || "") === norm(f.product)) &&
+    (!f.loading || norm(r.loading) === norm(f.loading)) &&
+    (!f.delivery || norm(r.delivery) === norm(f.delivery)) &&
+    (!f.pendingOnly || num(r.rate) === null) &&
+    (!f.text || norm(`${r.loading} ${r.delivery} ${r.productId} ${prodMap()[r.productId]?.name || ""} ${r.rate ?? ""}`).includes(norm(f.text)))
+  );
   const pend = rows.filter(r => num(r.rate) === null).length;
   const dis = S.canWrite ? "" : "disabled";
 
-  const unsetCount = vis.filter(({ r }) => !r.transporterId).length;
   V().innerHTML = `
-   <div class="actions" style="justify-content:space-between;margin-bottom:12px"><div><h3>Transport rates</h3><p class="tiny" style="margin:2px 0 0">Rate per MT or KL from each loading location to each delivery location. Edits save automatically.</p></div>
-   <div class="actions">
-     ${S.canWrite && unsetCount > 0 && T.length > 0 ? `
-     <div class="flex items-center gap-1.5 bg-amber-50 border border-amber-300 px-2.5 py-1 rounded-xl">
-       <span class="text-xs font-bold text-amber-900">${unsetCount} route(s) without transporter:</span>
-       <select id="bulk-assign-tr" style="width:auto;padding:4px 8px;font-size:12px">
-         <option value="">Assign transporter to shown routes…</option>
-         ${T.map(t => `<option value="${t.id}">${esc(t.name)}</option>`).join("")}
-       </select>
-       <button type="button" id="btn-bulk-assign-tr" class="btn small primary">Apply</button>
-     </div>` : ""}
-     ${S.currentUser?.role === "admin" && rows.length ? `<button class="btn danger" id="del-all-routes" type="button">🗑️ Delete All Routes (${rows.length})</button>` : ""}
-     ${S.canWrite ? `<label class="btn" for="up-step-routes">⬆ Upload Routes (.xlsx)</label><input type="file" id="up-step-routes" accept=".xlsx,.xls,.csv" hidden>` : ""}
-     <button class="btn primary" id="addr" type="button" ${dis}>＋ Add transport rate</button>
-   </div></div>
-   <div class="toolbar">
-     <div class="field"><label class="lbl" for="f-text">Search</label><input type="search" id="f-text" value="${esc(f.text)}" placeholder="Town, note, transporter"></div>
-     <div class="field"><label class="lbl" for="f-prod">Product</label><select id="f-prod"><option value="">All products</option>${S.catalog.products.map(p => `<option value="${p.id}" ${f.product === p.id ? "selected" : ""}>${esc(p.name)}</option>`).join("")}</select></div>
-     <div class="field"><label class="lbl" for="f-load">Loading point</label><select id="f-load"><option value="">All</option>${loads.map(l => `<option ${f.loading === l ? "selected" : ""}>${esc(l)}</option>`).join("")}</select></div>
-     <div class="field"><label class="lbl" for="f-del">Delivery point</label><select id="f-del"><option value="">All</option>${dels.map(l => `<option ${f.delivery === l ? "selected" : ""}>${esc(l)}</option>`).join("")}</select></div>
-     <label class="actions" style="padding-bottom:8px"><input type="checkbox" id="f-pend" ${f.pendingOnly ? "checked" : ""}> Rate pending only (${pend})</label>
+   <div class="actions" style="justify-content:space-between;margin-bottom:12px">
+     <div>
+       <h3>Transport Rates</h3>
+       <p class="tiny" style="margin:2px 0 0">Matches your Excel sheet format directly: <b>Loading Point</b> · <b>Delivery Point</b> · <b>Product</b> · <b>Transport Rates</b>. Edits save automatically.</p>
+     </div>
+     <div class="actions">
+       ${S.currentUser?.role === "admin" && rows.length ? `<button class="btn danger" id="del-all-routes" type="button">🗑️ Delete All Rates (${rows.length})</button>` : ""}
+       ${S.canWrite ? `<label class="btn" for="up-step-routes">⬆ Upload Transport Rates (.xlsx)</label><input type="file" id="up-step-routes" accept=".xlsx,.xls,.csv" hidden>` : ""}
+       <button class="btn primary" id="addr" type="button" ${dis}>＋ Add transport rate</button>
+     </div>
    </div>
-   <p class="tiny">${vis.length} of ${rows.length} routes</p>
-   <datalist id="dl-load">${loads.map(l => `<option value="${esc(l)}">`).join("")}${S.catalog.sources.map(s => `<option value="${esc(s.loading)}">`).join("")}</datalist>
+
+   <div class="toolbar">
+     <div class="field"><label class="lbl" for="f-text">Search</label><input type="search" id="f-text" value="${esc(f.text)}" placeholder="Loading, delivery, product…"></div>
+     <div class="field"><label class="lbl" for="f-load">Loading Point</label><select id="f-load"><option value="">All Loading Points</option>${loads.map(l => `<option value="${esc(l)}" ${f.loading === l ? "selected" : ""}>${esc(l)}</option>`).join("")}</select></div>
+     <div class="field"><label class="lbl" for="f-del">Delivery Point</label><select id="f-del"><option value="">All Delivery Points</option>${dels.map(l => `<option value="${esc(l)}" ${f.delivery === l ? "selected" : ""}>${esc(l)}</option>`).join("")}</select></div>
+     <div class="field"><label class="lbl" for="f-prod">Product</label><select id="f-prod"><option value="">All Products</option>${namedProds.map(p => `<option value="${esc(p.id)}" ${f.product === p.id ? "selected" : ""}>${esc(p.name)}</option>`).join("")}</select></div>
+     ${pend > 0 ? `<label class="actions" style="padding-bottom:8px"><input type="checkbox" id="f-pend" ${f.pendingOnly ? "checked" : ""}> Rate pending only (${pend})</label>` : ""}
+   </div>
+
+   <p class="tiny" style="margin-bottom:8px">Showing <b>${vis.length}</b> of <b>${rows.length}</b> transport rate row(s)</p>
+   <datalist id="dl-load">${loadingPoints().map(l => `<option value="${esc(l)}">`).join("")}</datalist>
    <datalist id="dl-del">${dels.map(l => `<option value="${esc(l)}">`).join("")}</datalist>
-   <div class="tw tbl-edit" data-live><table><thead><tr><th>Transporter</th><th>Loading</th><th>Delivery</th><th>Product</th><th>Only for</th><th class="n">Rate ₹/unit</th><th class="n">Min qty</th><th>Note</th><th></th></tr></thead><tbody>
-   ${vis.map(({ r, i }) => `<tr>
-     <td><select data-ri="${i}" data-f="transporterId" style="min-width:130px" ${dis}><option value="">— not set —</option>${T.map(t => `<option value="${t.id}" ${t.id === r.transporterId ? "selected" : ""}>${esc(t.name)}</option>`).join("")}</select></td>
-     <td><input type="text" list="dl-load" data-ri="${i}" data-f="loading" value="${esc(r.loading)}" style="min-width:110px" ${dis}></td>
-     <td><input type="text" list="dl-del" data-ri="${i}" data-f="delivery" value="${esc(r.delivery)}" style="min-width:110px" ${dis}></td>
-     <td><select data-ri="${i}" data-f="productId" ${dis}>${S.catalog.products.map(p => `<option value="${p.id}" ${p.id === r.productId ? "selected" : ""}>${esc(p.id)}</option>`).join("")}</select></td>
-     <td><select data-ri="${i}" data-f="company" ${dis}><option value="">Any</option>${[...new Set([...comps, "Imported"])].map(c => `<option ${c === r.company ? "selected" : ""}>${esc(c)}</option>`).join("")}</select></td>
-     <td class="n"><input type="number" step="any" data-ri="${i}" data-f="rate" value="${r.rate ?? ""}" placeholder="pending" aria-label="Rate" ${dis}></td>
-     <td class="n"><input type="number" step="any" data-ri="${i}" data-f="minQty" value="${r.minQty ?? ""}" style="width:70px" aria-label="Minimum quantity" ${dis}></td>
-     <td><input type="text" data-ri="${i}" data-f="note" value="${esc(r.note || "")}" style="min-width:160px" ${dis}></td>
-     <td><button class="btn small danger" data-rdel="${i}" aria-label="Delete route" ${dis}>✕</button></td></tr>`).join("") || `<tr><td colspan="9" class="empty">No routes match these filters.</td></tr>`}
-   </tbody></table></div>`;
-  const rf = (id, k, ev = "change") => $(id).addEventListener(ev, e => {
+   <datalist id="dl-route-prods">${namedProds.map(p => `<option value="${esc(shortName(p))}">`).join("")}</datalist>
+
+   <div class="tw tbl-edit" data-live>
+     <table>
+       <thead>
+         <tr>
+           <th style="width:52px;text-align:center">#</th>
+           <th>Loading Point</th>
+           <th>Delivery Point</th>
+           <th>Product</th>
+           <th class="n" style="width:180px">Transport Rates (₹)</th>
+           <th style="width:50px"></th>
+         </tr>
+       </thead>
+       <tbody>
+       ${vis.map(({ r, i }, rowNum) => {
+         const prodObj = prodMap()[r.productId];
+         const prodDisplay = prodObj ? shortName(prodObj) : (r.productId || "");
+         return `<tr>
+           <td class="tiny font-mono text-center text-slate-400">${rowNum + 1}</td>
+           <td><input type="text" list="dl-load" data-ri="${i}" data-f="loading" value="${esc(r.loading)}" placeholder="e.g. Jamnagar, Hazira" style="min-width:160px;font-weight:600" ${dis}></td>
+           <td><input type="text" list="dl-del" data-ri="${i}" data-f="delivery" value="${esc(r.delivery)}" placeholder="e.g. Nagpur, Butibori, Pune" style="min-width:170px;font-weight:600" ${dis}></td>
+           <td><input type="text" list="dl-route-prods" data-ri="${i}" data-f="productId" value="${esc(prodDisplay)}" placeholder="e.g. FO, CBFS, LDO, MTO" style="min-width:130px;font-weight:700" ${dis}></td>
+           <td class="n"><input type="number" step="any" data-ri="${i}" data-f="rate" value="${r.rate ?? ""}" placeholder="e.g. 4500" style="width:140px;font-weight:700" class="font-mono" aria-label="Transport Rate" ${dis}></td>
+           <td class="text-center"><button class="btn small danger" type="button" data-rdel="${i}" aria-label="Delete route" ${dis}>✕</button></td>
+         </tr>`;
+       }).join("") || `<tr><td colspan="6" class="empty">No transport rates match these filters. Upload your Transport Rates Excel sheet or click <b>＋ Add transport rate</b>.</td></tr>`}
+       </tbody>
+     </table>
+   </div>`;
+
+  const rf = (id, k, ev = "change") => $(id)?.addEventListener(ev, e => {
     f[k] = e.target.type === "checkbox" ? e.target.checked : e.target.value;
     viewRoutes();
-    if (k === "text") { const t = $("#f-text"); t.focus(); t.setSelectionRange(t.value.length, t.value.length); }
+    if (k === "text") { const t = $("#f-text"); if (t) { t.focus(); t.setSelectionRange(t.value.length, t.value.length); } }
   });
-  rf("#f-prod", "product"); rf("#f-load", "loading"); rf("#f-del", "delivery"); rf("#f-pend", "pendingOnly"); rf("#f-text", "text", "input");
-  document.querySelectorAll("[data-ri]").forEach(inp => inp.addEventListener(inp.tagName === "SELECT" ? "change" : "input", e => {
+  rf("#f-prod", "product");
+  rf("#f-load", "loading");
+  rf("#f-del", "delivery");
+  rf("#f-pend", "pendingOnly");
+  rf("#f-text", "text", "input");
+
+  document.querySelectorAll("[data-ri]").forEach(inp => inp.addEventListener("input", e => {
     if (!S.canWrite) return;
-    const r = S.routes.rows[+inp.dataset.ri]; const k = inp.dataset.f;
-    r[k] = (k === "rate" || k === "minQty") ? num(e.target.value) : e.target.value;
-    saveDoc("master/routes", S.routes, 500);
+    const r = S.routes.rows[+inp.dataset.ri];
+    if (!r) return;
+    const k = inp.dataset.f;
+    if (k === "rate") {
+      r.rate = num(e.target.value);
+    } else if (k === "productId") {
+      const rawP = e.target.value.trim();
+      const matched = matchProduct(rawP);
+      if (matched) {
+        r.productId = matched.id;
+      } else if (rawP) {
+        const p = ensureProductInCatalog(S.catalog, rawP, "MT", "");
+        saveDoc("master/catalog", S.catalog, 500);
+        r.productId = p ? p.id : rawP;
+      }
+    } else {
+      r[k] = e.target.value;
+    }
+    saveDoc("master/routes", S.routes, 400);
   }));
+
   document.querySelectorAll("[data-rdel]").forEach(b => b.onclick = () => {
     if (!S.canWrite) return;
-    if (!b.dataset.armed) { b.dataset.armed = 1; b.textContent = "Delete?"; return; }
-    S.routes.rows.splice(+b.dataset.rdel, 1); saveDoc("master/routes", S.routes, 0); viewRoutes();
-  });
-  const batBtn = $("#btn-bulk-assign-tr");
-  if (batBtn) batBtn.onclick = () => {
-    const tid = $("#bulk-assign-tr")?.value;
-    if (!tid) { toast("Pick a transporter from the dropdown first"); return; }
-    let count = 0;
-    vis.forEach(({ r }) => {
-      if (!r.transporterId) { r.transporterId = tid; count++; }
-    });
-    if (!count) {
-      vis.forEach(({ r }) => { r.transporterId = tid; count++; });
-    }
+    if (!b.dataset.armed) { b.dataset.armed = 1; b.textContent = "Del?"; return; }
+    S.routes.rows.splice(+b.dataset.rdel, 1);
     saveDoc("master/routes", S.routes, 0);
     viewRoutes();
-    toast(`Assigned transporter to ${count} route(s)!`);
-  };
+  });
+
   const dar = $("#del-all-routes");
   if (dar) dar.onclick = async () => {
     if (!S.canWrite) return;
-    if (!dar.dataset.armed) { dar.dataset.armed = "1"; dar.textContent = "⚠️ Confirm Delete All Routes?"; return; }
+    if (!dar.dataset.armed) { dar.dataset.armed = "1"; dar.textContent = "⚠️ Confirm Delete All Rates?"; return; }
     S.routes = { rows: [] };
     saveDoc("master/routes", S.routes, 0);
     viewRoutes();
-    toast("🗑️ Deleted all transport routes!");
+    toast("🗑️ Deleted all transport rates!");
   };
+
   const usr = $("#up-step-routes");
   if (usr) usr.onchange = e => { if (e.target.files?.[0]) uploadMaster(e.target.files[0], "transport"); e.target.value = ""; };
+
   $("#addr").onclick = () => {
     if (!S.canWrite) return;
     S.routes = S.routes || { rows: [] };
-    S.routes.rows.unshift({ id: "r" + uid(), transporterId: "", loading: f.loading || "", delivery: f.delivery || "", productId: f.product || "LDO", company: "", rate: null, minQty: null, note: "" });
-    f.text = ""; f.pendingOnly = false; saveDoc("master/routes", S.routes, 0); viewRoutes();
+    const defaultProd = f.product || (namedProds[0]?.id || "FO");
+    S.routes.rows.unshift({
+      id: "r" + uid(),
+      transporterId: "",
+      loading: f.loading || "",
+      delivery: f.delivery || "",
+      productId: defaultProd,
+      company: "",
+      rate: null,
+      minQty: null,
+      note: ""
+    });
+    f.text = "";
+    f.pendingOnly = false;
+    saveDoc("master/routes", S.routes, 0);
+    viewRoutes();
+    const firstLoadInp = document.querySelector('input[data-ri="0"][data-f="loading"]');
+    firstLoadInp?.focus();
   };
 }
 
@@ -4703,9 +4767,9 @@ async function downloadMaster() {
   const r1 = [["Effective date", lc ? lc.effectiveDate : todayISO(), "(yyyy-mm-dd)"], [], ["Refinery", "Company", "Loading point", "Product", "Unit", "Basic price (₹)", "Max discount (₹)", "Note"]];
   (lc?.prices || []).forEach(p => r1.push([SM[p.sourceId]?.name || p.sourceId, SM[p.sourceId]?.company || "", SM[p.sourceId]?.loading || "", P[p.productId]?.name || p.productId, P[p.productId]?.unit || "", num(p.basic) ?? "", num(p.maxDiscount) ?? "", [p.variant, p.note].filter(Boolean).join("; ")]));
   const ws1 = XLSX.utils.aoa_to_sheet(r1); ws1["!cols"] = [{ wch: 22 }, { wch: 10 }, { wch: 14 }, { wch: 30 }, { wch: 6 }, { wch: 16 }, { wch: 16 }, { wch: 30 }]; XLSX.utils.book_append_sheet(wb, ws1, SH.rates);
-  const r2 = [["Route ID", "Transporter", "Loading point", "Delivery point", "Product", "Only for company", "Rate (₹ per unit)", "Min qty", "Note"]];
-  (S.routes?.rows || []).forEach(r => r2.push([r.id, T[r.transporterId]?.name || "", r.loading, r.delivery, P[r.productId]?.name || r.productId, r.company || "", num(r.rate) ?? "", num(r.minQty) ?? "", r.note || ""]));
-  const ws2 = XLSX.utils.aoa_to_sheet(r2); ws2["!cols"] = [{ wch: 10 }, { wch: 22 }, { wch: 14 }, { wch: 16 }, { wch: 28 }, { wch: 14 }, { wch: 16 }, { wch: 8 }, { wch: 36 }]; XLSX.utils.book_append_sheet(wb, ws2, SH.transport);
+  const r2 = [["Sr. No.", "Loading Point", "Delivery Point", "Product", "Transport Rates"]];
+  (S.routes?.rows || []).forEach((r, idx) => r2.push([idx + 1, r.loading, r.delivery, P[r.productId]?.name || r.productId, num(r.rate) ?? ""]));
+  const ws2 = XLSX.utils.aoa_to_sheet(r2); ws2["!cols"] = [{ wch: 8 }, { wch: 18 }, { wch: 18 }, { wch: 16 }, { wch: 18 }]; XLSX.utils.book_append_sheet(wb, ws2, SH.transport);
   const r3 = [
     ["Setting", "Value", "Meaning"],
     ["Interest rate % a year", st.interestPct, "Cost of money used for credit cost"],
@@ -4834,9 +4898,16 @@ function trigramSim(a, b) {
 
 // Self-learning ML column classifier combining learned user mappings + header trigram similarity + sample cell value profiling
 function classifyExcelColumn(headerText, sampleValues, siblingHeaders = []) {
-  const rawH = String(headerText ?? "").trim();
+  const rawH = String(headerText ?? "").replace(/\s+/g, " ").trim();
   const normH = norm(rawH);
+  const compactH = normH.replace(/\s+/g, "");
   if (!normH) return { field: "ignore", confidence: 0, reason: "Empty header" };
+
+  // Direct exact matches for wrapped/standard headers like in user's Excel ("Loading Point", "Delivery Point", "Prod uct", "Transport Rates")
+  if (compactH === "loadingpoint" || compactH === "loadinglocation") return { field: "location", confidence: 0.99, reason: "Matched Loading Point" };
+  if (compactH === "deliverypoint" || compactH === "deliverylocation") return { field: "delivery", confidence: 0.99, reason: "Matched Delivery Point" };
+  if (compactH === "product" || compactH === "productname") return { field: "product", confidence: 0.99, reason: "Matched Product" };
+  if (compactH === "transportrates" || compactH === "transportrate" || compactH === "freightrate") return { field: "freight", confidence: 0.99, reason: "Matched Transport Rates" };
 
   // 1. Check learned user mappings first
   const learned = S.mlMappings?.[normH];

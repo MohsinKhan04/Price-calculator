@@ -4,10 +4,10 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>RefineCalc Pro — Goverdhan Refinery Quote Desk & Price Optimizer</title>
-  <script src="https://cdn.tailwindcss.com/3.4.17"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://cdn.tailwindcss.com/3.4.17" crossorigin="anonymous"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" crossorigin="anonymous"></script>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="anonymous" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin="anonymous"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Lexend:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -558,25 +558,21 @@
       <!-- TAB 3: FORGOT / RESET PASSWORD FORM -->
       <form id="form-gate-forgot" hidden class="space-y-3.5">
         <div class="p-3 rounded-xl bg-indigo-50 border border-indigo-200 text-indigo-950 text-xs space-y-1">
-          <div><b>Forgot your password?</b> Enter your Gmail/username and your new password below:</div>
-          <div class="text-[11px] text-indigo-800">• <b>Admin Instant Reset:</b> Enter Master Recovery Key (default: <code>GEPL2026</code>) to reset and log in immediately.<br>• <b>Team Member Reset:</b> Leave Recovery Key blank to send a 1-click password reset request to Admin.</div>
+          <div><b>Forgot your password?</b> Enter your registered Gmail address and desired new password below.</div>
+          <div class="text-[11px] text-indigo-700">An Administrator will review and approve your password reset request securely.</div>
         </div>
         <div class="field">
-          <label class="lbl" for="gate-forgot-email">Your Gmail Address or Username</label>
-          <input type="text" id="gate-forgot-email" placeholder="e.g. dmegepl@gmail.com or dmegepl" required>
+          <label class="lbl" for="gate-forgot-email">Your Gmail Address</label>
+          <input type="email" id="gate-forgot-email" placeholder="e.g. rahul@goverdhanenergy.com" required>
         </div>
         <div class="field">
-          <label class="lbl" for="gate-forgot-newpass">New Password</label>
-          <input type="password" id="gate-forgot-newpass" placeholder="Enter new password (min 4 chars)" required>
-        </div>
-        <div class="field">
-          <label class="lbl" for="gate-forgot-pin">Master Recovery Key (For Instant Reset · Optional for Users)</label>
-          <input type="text" id="gate-forgot-pin" placeholder="Enter GEPL2026 for instant reset, or leave blank">
+          <label class="lbl" for="gate-forgot-newpass">Desired New Password</label>
+          <input type="password" id="gate-forgot-newpass" placeholder="Enter new password (min 6 characters)" minlength="6" required>
         </div>
         <div id="gate-forgot-msg" hidden class="p-3 rounded-xl text-xs font-bold"></div>
         <button type="submit" class="w-full py-3 px-4 bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold rounded-xl text-xs shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer">
           <span>🔑</span>
-          <span>Reset Password</span>
+          <span>Submit Password Reset Request</span>
         </button>
       </form>
     </div>
@@ -860,11 +856,7 @@ const DEFAULT_CYCLES = [
   }
 ];
 
-const DEFAULT_USERS = [
-  { id: "u-mohsin", username: "dmegepl", email: "dmegepl@gmail.com", password: "admin123", name: "Mohsin Khan", role: "admin", canEditMaster: true, canQuote: true, active: true, status: "approved" },
-  { id: "u-admin", username: "admin", email: "admin@gmail.com", password: "admin123", name: "Admin (Goverdhan Desk)", role: "admin", canEditMaster: true, canQuote: true, active: true, status: "approved" },
-  { id: "u-sales", username: "sales", email: "sales@goverdhanenergy.com", password: "sales123", name: "Sales Executive", role: "user", canEditMaster: false, canQuote: true, active: true, status: "approved" }
-];
+const DEFAULT_USERS = [];
 
 const DEFAULT_QUOTES = [
   {
@@ -988,13 +980,6 @@ function toast(t) {
 
 // Universal Browser Blob Downloader (works on Render, localhost, and Canvas)
 async function triggerBlobDownload(filename, blob) {
-  try {
-    const dl = await window.claude?.use?.("downloads").catch(() => null);
-    if (dl && typeof dl.save === "function") {
-      await dl.save({ filename, data: blob });
-      return true;
-    }
-  } catch (e) {}
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
@@ -1030,25 +1015,41 @@ function markLocalMutation() {
 }
 
 function getApiBase() {
-  try { return (localStorage.getItem("refinecalc_api_base_url") || "").trim().replace(/\/+$/, ""); } catch (e) { return ""; }
+  return "";
 }
 
 async function apiRequest(endpoint, options = {}) {
-  const base = getApiBase();
-  const url = base ? (base + endpoint) : endpoint;
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 8000);
+  const timer = setTimeout(() => controller.abort(), 30000);
+  const token = localStorage.getItem("rc_session_token") || "";
+  const headers = {
+    "Cache-Control": "no-cache, no-store, must-revalidate",
+    "Pragma": "no-cache",
+    ...(token ? { "Authorization": "Bearer " + token } : {}),
+    ...(options.headers || {})
+  };
   try {
-    return await fetch(url, {
+    const res = await fetch(endpoint, {
       cache: "no-store",
       ...options,
-      headers: {
-        "Cache-Control": "no-cache, no-store, must-revalidate",
-        "Pragma": "no-cache",
-        ...(options.headers || {})
-      },
+      headers,
       signal: controller.signal
     });
+    if (res.status === 401) {
+      if (S.currentUser) {
+        signOutCurrentUser();
+        toast("Session expired. Please sign in again.");
+      }
+    } else if (res.status === 409) {
+      toast("⚠️ Another user updated this data. Refreshing latest version...");
+      await pullFromNeon(false, true);
+    }
+    return res;
+  } catch (err) {
+    if (err.name === "AbortError") {
+      toast("⚠️ Server request timed out. Please check connection.");
+    }
+    throw err;
   } finally {
     clearTimeout(timer);
   }
@@ -1086,18 +1087,30 @@ function setSync(customText) {
 }
 
 async function pushKeyToNeon(k, val) {
-  markLocalMutation();
+  if (!S.canWrite) return false;
   inflight++;
-  setSync();
+  setSync("Saving to Cloud DB…");
   try {
+    const expectedVersion = S.versions ? S.versions[k] : undefined;
     const res = await apiRequest("/api/storage/" + encodeURIComponent(k), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ value: val, stateRev: S.stateRev })
+      body: JSON.stringify({ value: val, expectedVersion })
     });
-    if (res.ok) cloudConnected = true;
-    return res.ok;
+    if (res.ok) {
+      const data = await res.json();
+      S.versions = S.versions || {};
+      if (data.version) S.versions[k] = data.version;
+      cloudConnected = true;
+      saveLocal(k, val);
+      return true;
+    } else {
+      const errData = await res.json().catch(() => ({}));
+      toast("⚠️ Save failed: " + (errData.error || res.statusText));
+      return false;
+    }
   } catch (e) {
+    toast("⚠️ Network error while saving to Cloud DB.");
     return false;
   } finally {
     inflight = Math.max(0, inflight - 1);
@@ -1113,14 +1126,15 @@ function getWorkspaceStateSnapshot() {
   };
 }
 
+// Local-only quotation draft saving per user - never synced across other devices/users (H-09)
 function saveWorkspaceState(delay = 300) {
-  if (!initialPullDone) return;
-  markLocalMutation();
-  const snap = getWorkspaceStateSnapshot();
-  saveLocal("workspaceState", snap);
   clearTimeout(wsSyncTimer);
   wsSyncTimer = setTimeout(() => {
-    pushKeyToNeon("workspaceState", getWorkspaceStateSnapshot());
+    const snap = getWorkspaceStateSnapshot();
+    const uidKey = S.currentUser ? S.currentUser.id : "anon";
+    try {
+      localStorage.setItem("rc_draft_" + uidKey, JSON.stringify(snap));
+    } catch (e) {}
   }, delay);
 }
 
@@ -1155,97 +1169,32 @@ function flushActiveEditorToState() {
   }
 }
 
-async function pushAllToNeon(notify = false, replaceAll = true) {
+async function pushAllToNeon(notify = false) {
   flushActiveEditorToState();
-  markLocalMutation();
+  if (!S.canWrite) return false;
   inflight++;
-  setSync("Syncing all data to Neon DB…");
+  setSync("Syncing all collections to Neon DB…");
   try {
-    const entries = {
-      catalog: S.catalog,
-      routes: S.routes,
-      transporters: S.transporters,
-      settings: S.settings,
-      template: S.template,
-      cycles: S.cycles,
-      quotes: S.quotes,
-      quoteSeq: S.quoteSeq,
-      users: S.users,
-      authSettings: S.authSettings,
-      brand_settings: loadLocal("brand_settings", null),
-      workspaceState: getWorkspaceStateSnapshot(),
-      quoteLogs: S.quoteLogs || [],
-      mlMappings: S.mlMappings || {}
-    };
-    const res = await apiRequest("/api/storage", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ entries, stateRev: S.stateRev, replaceAll })
-    });
-    if (res.ok) {
-      cloudConnected = true;
-      if (notify) toast("All changes auto-saved & synced across all devices!");
-      return true;
+    const keys = ["catalog", "routes", "transporters", "settings", "template", "cycles", "brand_settings", "mlMappings"];
+    for (const k of keys) {
+      if (S[k] !== undefined && S[k] !== null) {
+        await pushKeyToNeon(k, S[k]);
+      }
     }
-  } catch (e) {} finally {
+    cloudConnected = true;
+    if (notify) toast("All master data synced across devices!");
+    return true;
+  } catch (e) {
+    if (notify) toast("Sync failed: " + (e?.message || e));
+    return false;
+  } finally {
     inflight = Math.max(0, inflight - 1);
     setSync();
   }
-  if (notify) toast("Saved locally (Check Render server connection)");
-  return false;
-}
-
-function mergeUsersLists(localList, remoteList) {
-  const loc = Array.isArray(localList) ? localList : [];
-  const rem = Array.isArray(remoteList) ? remoteList : [];
-  const deletedKeys = new Set((S.authSettings?.deletedUserKeys || []).map(k => String(k).toLowerCase()));
-  const byKey = new Map();
-
-  const getKey = u => String(u?.email || u?.username || u?.id || "").trim().toLowerCase();
-
-  // Start with remote users (authoritative for new signups & password reset requests)
-  for (const ru of rem) {
-    const k = getKey(ru);
-    if (!k) continue;
-    if (deletedKeys.has(k) && ru.status !== "pending" && !ru.resetRequested) continue;
-    byKey.set(k, JSON.parse(JSON.stringify(ru)));
-  }
-
-  // Merge local users without dropping remote pending signups or password reset requests
-  for (const lu of loc) {
-    const k = getKey(lu);
-    if (!k) continue;
-    if (deletedKeys.has(k) && lu.status !== "pending" && !lu.resetRequested) continue;
-    if (!byKey.has(k)) {
-      byKey.set(k, JSON.parse(JSON.stringify(lu)));
-    } else {
-      const existing = byKey.get(k);
-      // If remote has a pending password reset or newer status update, preserve it!
-      const merged = { ...lu, ...existing };
-      if (existing.resetRequested || lu.resetRequested) {
-        merged.resetRequested = true;
-        merged.requestedNewPassword = existing.requestedNewPassword || lu.requestedNewPassword;
-        merged.resetRequestedAt = existing.resetRequestedAt || lu.resetRequestedAt;
-      }
-      // If Admin locally approved a user who was pending remotely, keep the newest updatedAt
-      const locTs = Number(lu.updatedAtMs) || 0;
-      const remTs = Number(existing.updatedAtMs) || 0;
-      if (locTs > remTs) {
-        Object.assign(merged, lu);
-      }
-      byKey.set(k, merged);
-    }
-  }
-
-  const out = Array.from(byKey.values());
-  if (!out.some(u => (u.email || "").toLowerCase() === "dmegepl@gmail.com" || (u.username || "").toLowerCase() === "dmegepl")) {
-    out.unshift({ id: "u-mohsin", username: "dmegepl", email: "dmegepl@gmail.com", password: "admin123", name: "Mohsin Khan", role: "admin", canEditMaster: true, canQuote: true, active: true, status: "approved" });
-  }
-  return out;
 }
 
 async function pullFromNeon(notify = false, force = false) {
-  if (!force && inflight > 0) return false;
+  if (!S.currentUser && !force) return false;
   try {
     const res = await apiRequest("/api/storage?_t=" + Date.now(), {
       method: "GET",
@@ -1257,330 +1206,85 @@ async function pullFromNeon(notify = false, force = false) {
     if (!data || typeof data !== "object") return false;
     cloudConnected = true;
 
-    // ALWAYS merge incoming users & authSettings immediately (even if Admin cursor is inside a Calculator input or stateRev is ahead!)
-    // so new employee Sign-Up requests and Password Reset requests NEVER get missed or overwritten!
-    if (data.authSettings && typeof data.authSettings === "object") {
-      S.authSettings = { ...(S.authSettings || {}), ...data.authSettings };
-      saveLocal("authSettings", S.authSettings);
-    }
-    if (Array.isArray(data.users)) {
-      const prevPendingIds = new Set((S.users || []).filter(u => u.status === "pending").map(u => (u.email || u.id)));
-      const prevResetIds = new Set((S.users || []).filter(u => u.resetRequested).map(u => (u.email || u.id)));
-      const mergedUsers = mergeUsersLists(S.users, data.users);
-      if (JSON.stringify(mergedUsers) !== JSON.stringify(S.users)) {
-        S.users = mergedUsers;
-        saveLocal("users", S.users);
-        syncUserNamesMap();
-        updateSidebarStats();
-        if (UI.tab === "admin-users") viewUsersAdmin();
-        // Alert Admin immediately if a brand-new Sign-Up or Password Reset request just arrived!
-        if (S.currentUser?.role === "admin") {
-          const newPend = S.users.find(u => u.status === "pending" && !prevPendingIds.has(u.email || u.id));
-          if (newPend) toast(`🔔 New Access Request from ${newPend.name} (${newPend.email})!`);
-          const newRst = S.users.find(u => u.resetRequested && !prevResetIds.has(u.email || u.id));
-          if (newRst) toast(`🔑 Password Reset Request from ${newRst.name} (${newRst.email || newRst.username})!`);
-        }
-      }
-    }
-
-    // Re-check after network await so typing that happened while GET was in-flight is NEVER overwritten!
-    if (!force && (inflight > 0 || Object.keys(pending).length > 0 || editing() || (Date.now() - lastLocalMutationAt < 5000))) {
-      setSync();
-      return false;
-    }
-
-    // If server stateRev is older than or equal to our own stateRev, ignore echo for master tables
-    const remoteRev = Number(data._meta?.stateRev) || 0;
-    if (!force && S.stateRev && remoteRev && remoteRev <= S.stateRev) {
-      setSync();
-      return true;
-    }
-
-    // If Neon DB has never been initialized (zero keys in table), seed it once
-    const keysPresent = Object.keys(data).filter(k => k !== "_meta");
-    if (keysPresent.length === 0) {
-      await pushAllToNeon(false, true);
-      return true;
-    }
-
     let changed = false;
-    const applyKey = (k, targetProp) => {
-      if (Object.prototype.hasOwnProperty.call(data, k) && data[k] !== undefined && data[k] !== null) {
-        const curStr = JSON.stringify(S[targetProp]);
-        const newStr = JSON.stringify(data[k]);
-        if (curStr !== newStr) {
-          S[targetProp] = data[k];
+    const keys = ["catalog", "routes", "transporters", "settings", "template", "cycles", "brand_settings", "mlMappings"];
+    keys.forEach(k => {
+      if (data[k] !== undefined && data[k] !== null) {
+        if (JSON.stringify(S[k]) !== JSON.stringify(data[k])) {
+          S[k] = data[k];
           saveLocal(k, data[k]);
           changed = true;
         }
       }
-    };
-
-    applyKey("catalog", "catalog");
-    applyKey("routes", "routes");
-    applyKey("transporters", "transporters");
-    applyKey("settings", "settings");
-    applyKey("template", "template");
-    if (Array.isArray(data.cycles)) applyKey("cycles", "cycles");
-    if (Array.isArray(data.quotes)) applyKey("quotes", "quotes");
-    if (Array.isArray(data.quoteLogs)) applyKey("quoteLogs", "quoteLogs");
-    if (data.mlMappings && typeof data.mlMappings === "object") applyKey("mlMappings", "mlMappings");
-    if (data.quoteSeq) applyKey("quoteSeq", "quoteSeq");
-    if (Array.isArray(data.users)) {
-      const mergedU = mergeUsersLists(S.users, data.users);
-      if (JSON.stringify(mergedU) !== JSON.stringify(S.users)) {
-        S.users = mergedU;
-        saveLocal("users", S.users);
-        changed = true;
-      }
-      if (S.currentUser && !S.isAuthenticatedAdmin) {
-        const latestSelf = S.users.find(u => u.id === S.currentUser.id || (u.email && u.email === S.currentUser.email));
-        if (!latestSelf || latestSelf.active === false || latestSelf.status === "pending" || latestSelf.status === "rejected") {
-          signOutCurrentUser();
-        } else if (JSON.stringify(latestSelf) !== JSON.stringify(S.currentUser)) {
-          applyUserSession(latestSelf, false);
-        }
-      }
-    }
-    if (data.authSettings) applyKey("authSettings", "authSettings");
+    });
 
     if (data.brand_settings) {
-      const curBrand = JSON.stringify(loadLocal("brand_settings", null));
-      const newBrand = JSON.stringify(data.brand_settings);
-      if (curBrand !== newBrand) {
-        saveLocal("brand_settings", data.brand_settings);
-        applyBrandToUI(data.brand_settings);
-        changed = true;
-      }
+      applyBrandToUI(data.brand_settings);
     }
 
-    if (data.workspaceState && !editing()) {
-      const ws = data.workspaceState;
-      const curWs = JSON.stringify(getWorkspaceStateSnapshot());
-      const newWs = JSON.stringify(ws);
-      if (curWs !== newWs) {
-        if (ws.q && typeof ws.q === "object") UI.q = { ...UI.q, ...ws.q };
-        if (ws.qdoc !== undefined) UI.qdoc = ws.qdoc;
-        if (ws.color_mode && ws.color_mode !== loadLocal("color_mode", "white")) {
-          applyColorMode(ws.color_mode, false, true);
-        }
-        saveLocal("workspaceState", ws);
-        changed = true;
-      }
+    if (S.canWrite && S.currentUser && autoHealCatalogAndRoutes()) {
+      saveLocal("catalog", S.catalog);
+      pushKeyToNeon("catalog", S.catalog);
+      changed = true;
     }
 
-    if (data._meta?.stateRev) {
-      S.stateRev = data._meta.stateRev;
-      saveLocal("_stateRev", S.stateRev);
-    }
-
-    if (autoHealCatalogAndRoutes()) { saveLocal("catalog", S.catalog); pushKeyToNeon("catalog", S.catalog); changed = true; }
-    syncUserNamesMap();
     if (changed) dataChanged();
     setSync();
     if (notify) toast("Synced latest version from Neon PostgreSQL!");
     return true;
   } catch (e) {
-    if (notify) toast("Using local store (Neon API offline in preview)");
+    if (notify) toast("Using offline store");
     return false;
   }
+}
+
+async function checkServerVersionStatus() {
+  if (!S.currentUser) return;
+  try {
+    const res = await apiRequest("/api/storage/status", { method: "GET" });
+    if (!res.ok) return;
+    const { versions } = await res.json();
+    S.versions = S.versions || {};
+    let hasDiff = false;
+    for (const [k, ver] of Object.entries(versions || {})) {
+      if (S.versions[k] !== undefined && S.versions[k] !== ver) {
+        const kRes = await apiRequest("/api/storage/" + encodeURIComponent(k));
+        if (kRes.ok) {
+          const kData = await kRes.json();
+          S[k] = kData.value;
+          S.versions[k] = kData.version;
+          saveLocal(k, kData.value);
+          hasDiff = true;
+        }
+      } else {
+        S.versions[k] = ver;
+      }
+    }
+    if (hasDiff) dataChanged();
+  } catch (e) {}
 }
 
 function connectRealtimeSSE() {
   try {
     if (sseConnection) { sseConnection.close(); sseConnection = null; }
-    const base = getApiBase();
-    const url = (base ? base : "") + "/api/events";
+    const token = localStorage.getItem("rc_session_token") || "";
+    if (!token) return;
+    const url = "/api/events?token=" + encodeURIComponent(token);
     const es = new EventSource(url);
     sseConnection = es;
     es.onmessage = evt => {
       try {
         const msg = JSON.parse(evt.data);
         if (msg.type === "sync") {
-          const remoteRev = Number(msg.stateRev) || 0;
-          if (!remoteRev || remoteRev > (S.stateRev || 0)) {
-            pullFromNeon(false, false);
-          }
+          checkServerVersionStatus();
         }
       } catch (e) {}
     };
     es.onerror = () => {
-      // Automatically falls back to fast 2.5s polling and reconnects
+      es.close();
+      sseConnection = null;
     };
   } catch (e) {}
-}
-
-function applyDocToMemoryAndLocal(path, val) {
-  const copy = JSON.parse(JSON.stringify(val));
-  if (path === "master/quoteSeq") {
-    S.quoteSeq = copy;
-    saveLocal("quoteSeq", S.quoteSeq);
-    return { key: "quoteSeq", val: S.quoteSeq };
-  } else if (path.startsWith("master/")) {
-    const k = path.split("/")[1];
-    S[k] = copy;
-    saveLocal(k, S[k]);
-    return { key: k, val: S[k] };
-  } else if (path.startsWith("cycles/")) {
-    const id = path.split("/")[1];
-    const docObj = { ...copy, id };
-    const idx = S.cycles.findIndex(c => c.id === id);
-    if (idx >= 0) S.cycles[idx] = docObj;
-    else S.cycles.push(docObj);
-    saveLocal("cycles", S.cycles);
-    return { key: "cycles", val: S.cycles };
-  }
-  return null;
-}
-
-// Built-in S.db adapter so all S.db.doc(...) and S.db.collection(...) calls work and auto-sync to Neon DB!
-function createHybridDbAdapter() {
-  return {
-    doc(path) {
-      return {
-        async get() {
-          if (path === "master/quoteSeq") return { exists: true, data: () => S.quoteSeq };
-          if (path.startsWith("master/")) {
-            const k = path.split("/")[1];
-            return { exists: !!S[k], data: () => S[k] };
-          }
-          if (path.startsWith("cycles/")) {
-            const id = path.split("/")[1];
-            const found = S.cycles.find(c => c.id === id);
-            return { exists: !!found, data: () => found };
-          }
-          return { exists: false, data: () => null };
-        },
-        async set(val) {
-          markLocalMutation();
-          const res = applyDocToMemoryAndLocal(path, val);
-          if (res) {
-            await pushKeyToNeon(res.key, res.val);
-          }
-        },
-        async delete() {
-          markLocalMutation();
-          if (path.startsWith("cycles/")) {
-            const id = path.split("/")[1];
-            S.cycles = S.cycles.filter(c => c.id !== id);
-            saveLocal("cycles", S.cycles);
-            await pushKeyToNeon("cycles", S.cycles);
-          } else if (path.startsWith("quotes/")) {
-            const id = path.split("/")[1];
-            S.quotes = S.quotes.filter(q => q.id !== id);
-            saveLocal("quotes", S.quotes);
-            await pushKeyToNeon("quotes", S.quotes);
-          }
-        }
-      };
-    },
-    collection(name) {
-      return {
-        async add(doc) {
-          markLocalMutation();
-          const newDoc = { ...JSON.parse(JSON.stringify(doc)), id: "q_" + uid() };
-          if (name === "quotes") {
-            S.quotes.unshift(newDoc);
-            saveLocal("quotes", S.quotes);
-            await pushKeyToNeon("quotes", S.quotes);
-          }
-          return newDoc;
-        }
-      };
-    }
-  };
-}
-
-const pending = {};
-
-// Clean saveDoc without snapshot overwrites:
-// 1. Live S[k] is already mutated in-place by the input listener.
-// 2. saveLocal saves S[k] immediately to localStorage.
-// 3. Debounces pushing the live S[k] to Neon DB (pushes current S[k], never an old snapshot!).
-// 4. Never triggers destructive DOM re-renders while typing.
-function saveDoc(path, data, delay = 500) {
-  if (!S.canWrite) {
-    toast("Read-only access: Sign in as Admin to modify master data.");
-    return;
-  }
-  markLocalMutation();
-  let k = null;
-  if (path === "master/quoteSeq") k = "quoteSeq";
-  else if (path.startsWith("master/")) k = path.split("/")[1];
-  else if (path.startsWith("cycles/")) k = "cycles";
-  if (k && S[k]) {
-    saveLocal(k, S[k]);
-  }
-  updateSidebarStats();
-
-  clearTimeout(pending[path]?.t);
-  pending[path] = {
-    path,
-    k,
-    t: setTimeout(() => flush(path), delay)
-  };
-}
-
-const chains = {};
-async function flush(path) {
-  const p = pending[path];
-  if (!p) return;
-  delete pending[path];
-  inflight++;
-  setSync();
-  try {
-    const k = p.k || (path.startsWith("master/") ? path.split("/")[1] : path.startsWith("cycles/") ? "cycles" : null);
-    if (k && S[k]) {
-      saveLocal(k, S[k]);
-      await pushKeyToNeon(k, S[k]);
-    }
-  } catch (e) {
-    console.error("Flush error for " + path + ":", e);
-  } finally {
-    inflight = Math.max(0, inflight - 1);
-    setSync();
-  }
-}
-
-async function delDoc(path) {
-  if (path.startsWith("quotes/") ? !S.canQuote : !S.canWrite) {
-    toast("Read-only access: Sign in with edit permissions to delete records.");
-    return;
-  }
-  markLocalMutation();
-  try {
-    inflight++;
-    setSync();
-    await S.db.doc(path).delete();
-  } catch (e) {
-    toast("Delete failed: " + (e?.message || e?.code));
-  } finally {
-    inflight = Math.max(0, inflight - 1);
-    setSync();
-  }
-}
-
-async function writeDoc(path, data) {
-  if (!S.canWrite) {
-    toast("Read-only access: Sign in as Admin to save master changes.");
-    return false;
-  }
-  markLocalMutation();
-  inflight++;
-  setSync();
-  try {
-    const res = applyDocToMemoryAndLocal(path, data);
-    if (res) {
-      await pushKeyToNeon(res.key, res.val);
-    }
-    return true;
-  } catch (e) {
-    toast("Save failed: " + (e?.message || e?.code));
-    return false;
-  } finally {
-    inflight = Math.max(0, inflight - 1);
-    setSync();
-  }
 }
 
 function editing() {
@@ -1632,23 +1336,28 @@ async function logQuotationEvent(eventObj) {
 function exportQuoteLogsCsv() {
   const logs = S.quoteLogs || [];
   if (!logs.length) { toast("No quotation logs recorded yet."); return; }
+  const sanitizeCell = v => {
+    let s = String(v ?? '');
+    if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
+    return `"${s.replace(/"/g, '""')}"`;
+  };
   const headers = ["Timestamp", "Quoted By (Gmail)", "Name", "Role", "Action", "Quote No", "Customer", "Delivery Location", "Product", "Quantity", "Refinery", "Rate (₹/Unit)", "Margin (₹/Unit)", "Rate incl GST", "Order Total (₹)"];
   const rows = logs.map(l => [
-    `"${l.ts}"`,
-    `"${l.userEmail || ""}"`,
-    `"${(l.userName || "").replace(/"/g, '""')}"`,
-    `"${l.userRole || ""}"`,
-    `"${(l.action || "").replace(/"/g, '""')}"`,
-    `"${l.quoteNumber || ""}"`,
-    `"${(l.customer || "").replace(/"/g, '""')}"`,
-    `"${(l.location || "").replace(/"/g, '""')}"`,
-    `"${(l.product || "").replace(/"/g, '""')}"`,
-    `"${l.qty || ""}"`,
-    `"${(l.refinery || "").replace(/"/g, '""')}"`,
+    sanitizeCell(l.ts || l.created_at),
+    sanitizeCell(l.user_email || l.userEmail),
+    sanitizeCell(l.user_name || l.userName),
+    sanitizeCell(l.user_role || l.userRole),
+    sanitizeCell(l.action_desc || l.action),
+    sanitizeCell(l.quote_number || l.quoteNumber),
+    sanitizeCell(l.customer),
+    sanitizeCell(l.location),
+    sanitizeCell(l.product),
+    sanitizeCell(l.qty),
+    sanitizeCell(l.refinery),
     l.rate ?? "",
     l.margin ?? "",
-    l.rateGst ?? "",
-    l.orderTotal ?? ""
+    l.rate_gst ?? l.rateGst ?? "",
+    l.order_total ?? l.orderTotal ?? ""
   ]);
   const csvContent = "\uFEFF" + [headers.join(","), ...rows.map(r => r.join(","))].join("\r\n");
   const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
@@ -1658,183 +1367,69 @@ function exportQuoteLogsCsv() {
 }
 
 /* ================= USER & GMAIL AUTHENTICATION ENGINE ================= */
-function formatNameFromEmail(email) {
-  const part = (email || "").split("@")[0] || "User";
-  return part
-    .replace(/[._-]+/g, " ")
-    .replace(/\b\w/g, c => c.toUpperCase())
-    .trim();
-}
-
-function findMatchingUserAccount(identifier) {
-  const q = String(identifier || "").trim().toLowerCase();
-  if (!q) return null;
-  return (S.users || []).find(u =>
-    (u.email && String(u.email).trim().toLowerCase() === q) ||
-    (u.username && String(u.username).trim().toLowerCase() === q)
-  );
-}
-
-function authenticateUserWithPassword(identifier, password) {
-  const u = findMatchingUserAccount(identifier);
-  if (!u) {
-    return { ok: false, status: "not_found", error: "No account found for this Gmail/username. Click 'Request Access (Sign Up)' to request approval from Admin." };
+async function serverLogin(username, password) {
+  try {
+    const res = await apiRequest("/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, password })
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      return { ok: false, error: data.error || "Login failed" };
+    }
+    localStorage.setItem("rc_session_token", data.token);
+    applyUserSession(data.user, false);
+    return { ok: true, user: data.user };
+  } catch (e) {
+    return { ok: false, error: "Network error connecting to login service." };
   }
-  if (u.status === "pending") {
-    return { ok: false, status: "pending", error: "⏳ Your account request is Pending Admin Approval. You can sign in as soon as the Admin approves your request." };
-  }
-  if (u.status === "rejected" || u.active === false) {
-    return { ok: false, status: "disabled", error: "🚫 Your account access has been disabled or revoked by the Admin." };
-  }
-  const isDmegepl = (String(u.username || "").toLowerCase() === "dmegepl" || String(u.email || "").toLowerCase() === "dmegepl@gmail.com");
-  const pwMatch = String(u.password || "") === String(password || "") || (isDmegepl && (password === "admin123" || password === "7256@Mk"));
-  if (!pwMatch) {
-    return { ok: false, status: "wrong_password", error: "❌ Incorrect password. Click 'Forgot Password?' to reset it." };
-  }
-  return { ok: true, user: u };
 }
 
 async function submitAccessRequestSignUp(fullName, email, password, note = "") {
-  const cleanName = String(fullName || "").trim();
-  const cleanEmail = String(email || "").trim().toLowerCase();
-  const cleanPass = String(password || "").trim();
-  if (!cleanName || !cleanEmail.includes("@")) {
-    return { ok: false, error: "Please enter your full name and a valid Gmail address." };
-  }
-  if (cleanPass.length < 4) {
-    return { ok: false, error: "Please choose a password of at least 4 characters." };
-  }
-  // Always pull & merge latest server users right before adding the signup request
   try {
-    const r = await apiRequest("/api/storage?_t=" + Date.now(), { method: "GET", headers: { "Accept": "application/json" } });
-    if (r.ok) {
-      const p = await r.json();
-      const d = p?.data || p;
-      if (Array.isArray(d?.users)) {
-        S.users = mergeUsersLists(S.users, d.users);
-      }
+    const res = await apiRequest("/api/auth/signup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: fullName, email, password, note })
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      return { ok: false, error: data.error || "Sign up failed" };
     }
-  } catch (e) {}
-
-  S.users = S.users || [];
-  // Remove from deletedUserKeys if they were previously rejected and are applying again
-  if (Array.isArray(S.authSettings?.deletedUserKeys)) {
-    S.authSettings.deletedUserKeys = S.authSettings.deletedUserKeys.filter(k => String(k).toLowerCase() !== cleanEmail);
-    saveLocal("authSettings", S.authSettings);
-    await pushKeyToNeon("authSettings", S.authSettings);
+    return { ok: true, message: data.message };
+  } catch (e) {
+    return { ok: false, error: "Failed to connect to sign-up service." };
   }
-
-  const existing = findMatchingUserAccount(cleanEmail);
-  if (existing) {
-    if (existing.status === "pending") {
-      // Re-push to server in case previous push was only local!
-      existing.name = cleanName || existing.name;
-      existing.password = cleanPass || existing.password;
-      existing.requestNote = String(note || "").trim() || existing.requestNote;
-      existing.updatedAtMs = Date.now();
-      saveLocal("users", S.users);
-      await pushKeyToNeon("users", S.users);
-      updateSidebarStats();
-      return { ok: true, user: existing };
-    }
-    if (existing.status === "rejected" || existing.active === false) {
-      existing.name = cleanName;
-      existing.password = cleanPass;
-      existing.status = "pending";
-      existing.active = false;
-      existing.requestNote = String(note || "").trim();
-      existing.createdAt = new Date().toISOString();
-      existing.updatedAtMs = Date.now();
-      saveLocal("users", S.users);
-      await pushKeyToNeon("users", S.users);
-      updateSidebarStats();
-      return { ok: true, user: existing };
-    }
-    return { ok: false, error: "An approved account with this Gmail already exists. Please use the Sign In tab." };
-  }
-  const newReq = {
-    id: "u_" + uid(),
-    username: cleanEmail.split("@")[0],
-    email: cleanEmail,
-    password: cleanPass,
-    name: cleanName,
-    role: "user",
-    canEditMaster: false,
-    canQuote: true,
-    active: false,
-    status: "pending",
-    requestNote: String(note || "").trim(),
-    createdAt: new Date().toISOString(),
-    updatedAtMs: Date.now()
-  };
-  S.users.push(newReq);
-  saveLocal("users", S.users);
-  await pushKeyToNeon("users", S.users);
-  updateSidebarStats();
-  return { ok: true, user: newReq };
 }
 
-
-async function handleForgotPasswordSubmission(identifier, newPassword, recoveryPin = "") {
-  const cleanId = String(identifier || "").trim().toLowerCase();
-  const cleanPass = String(newPassword || "").trim();
-  const cleanPin = String(recoveryPin || "").trim();
-  if (!cleanId) return { ok: false, error: "Please enter your Gmail address or username." };
-  if (cleanPass.length < 4) return { ok: false, error: "New password must be at least 4 characters." };
-
-  S.users = S.users || [];
-  let u = findMatchingUserAccount(cleanId);
-  const masterPin = S.authSettings?.recoveryPin || "GEPL2026";
-  const pinMatches = cleanPin && (cleanPin.toUpperCase() === masterPin.toUpperCase() || cleanPin === "7256");
-
-  // If dmegepl or admin uses the Master Recovery Key even if account wasn't synced yet, ensure account exists
-  if (!u && pinMatches && (cleanId === "dmegepl" || cleanId === "dmegepl@gmail.com" || cleanId === "admin" || cleanId === "admin@gmail.com")) {
-    u = {
-      id: cleanId.includes("dmegepl") ? "u-mohsin" : "u-admin",
-      username: cleanId.split("@")[0],
-      email: cleanId.includes("@") ? cleanId : cleanId + "@gmail.com",
-      password: cleanPass,
-      name: cleanId.includes("dmegepl") ? "Mohsin Khan" : "Admin Desk",
-      role: "admin",
-      canEditMaster: true,
-      canQuote: true,
-      active: true,
-      status: "approved"
-    };
-    S.users.unshift(u);
+async function handleForgotPasswordSubmission(email, newPassword) {
+  try {
+    const res = await apiRequest("/api/auth/forgot-password", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, newPassword })
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      return { ok: false, error: data.error || "Request failed" };
+    }
+    return { ok: true, message: data.message };
+  } catch (e) {
+    return { ok: false, error: "Network error submitting password reset request." };
   }
-
-  if (!u) {
-    return { ok: false, error: "No account found with that Gmail/username. Use the 'Sign Up' tab to request a new account." };
-  }
-
-  if (pinMatches) {
-    // Instant password reset with Master Recovery Key!
-    u.password = cleanPass;
-    u.active = true;
-    u.status = "approved";
-    delete u.resetRequested;
-    delete u.requestedNewPassword;
-    saveLocal("users", S.users);
-    syncUserNamesMap();
-    await pushKeyToNeon("users", S.users);
-    return { ok: true, instant: true, user: u };
-  }
-
-  // Otherwise queue Password Reset Request for Admin approval!
-  u.resetRequested = true;
-  u.requestedNewPassword = cleanPass;
-  u.resetRequestedAt = new Date().toISOString();
-  saveLocal("users", S.users);
-  await pushKeyToNeon("users", S.users);
-  updateSidebarStats();
-  return { ok: true, instant: false, user: u };
 }
 
 function signOutCurrentUser() {
+  apiRequest("/api/auth/logout", { method: "POST" }).catch(() => {});
   S.currentUser = null;
+  S.realUser = null;
   S.isAuthenticatedAdmin = false;
+  S.canWrite = false;
+  S.canQuote = false;
+  if (sseConnection) { sseConnection.close(); sseConnection = null; }
   try {
+    localStorage.removeItem("rc_session_token");
     localStorage.removeItem(LS_PREFIX + "authenticated_user_id");
     localStorage.removeItem(LS_PREFIX + "is_authenticated_admin");
     localStorage.removeItem(LS_PREFIX + "current_user_id");
@@ -1845,7 +1440,6 @@ function signOutCurrentUser() {
   toast("Signed out securely");
 }
 
-/* ================= USER & ADMIN AUTHENTICATION ENGINE ================= */
 function syncUserNamesMap() {
   S.names = {};
   (S.users || []).forEach(u => { S.names[u.id] = u.name; });
@@ -1857,143 +1451,52 @@ function applyUserSession(userObj, isRolePreviewSwitch = false) {
     if (gate) gate.hidden = false;
     return;
   }
-  S.currentUser = userObj;
-  saveLocal("current_user_id", userObj.id);
-  saveLocal("authenticated_user_id", userObj.id);
-
   if (!isRolePreviewSwitch) {
+    S.realUser = userObj;
     S.isAuthenticatedAdmin = userObj.role === "admin";
-    saveLocal("is_authenticated_admin", S.isAuthenticatedAdmin);
   }
+  S.currentUser = userObj;
+  const isAdmin = userObj.role === "admin";
+  S.canWrite = isAdmin || !!userObj.can_edit_master || !!userObj.canEditMaster;
+  S.canQuote = isAdmin || userObj.can_quote !== false;
 
   const gate = $("#auth-gate-overlay");
   if (gate) gate.hidden = true;
 
-  const isAdmin = userObj.role === "admin";
-  S.canWrite = isAdmin || !!userObj.canEditMaster;
-  S.canQuote = isAdmin || userObj.role === "user" || !!userObj.canQuote;
+  const nameEl = $("#user-display-name"); if (nameEl) nameEl.textContent = userObj.name || userObj.username;
+  const roleEl = $("#user-role-badge"); if (roleEl) roleEl.textContent = isAdmin ? "Admin" : (S.canWrite ? "User (Editor)" : "User");
+  const emailEl = $("#user-email-display"); if (emailEl) emailEl.textContent = userObj.email || (userObj.username + "@gmail.com");
 
-  // Update Header UI
-  const badge = $("#header-role-badge");
-  const nameEl = $("#header-user-name");
-  const permEl = $("#header-user-perm");
-  const sidePill = $("#sidebar-master-access-pill");
-  const banner = $("#role-readonly-banner");
-  const bannerRole = $("#banner-role-name");
+  const adminElements = document.querySelectorAll(".admin-only");
+  adminElements.forEach(el => { el.hidden = !isAdmin; });
 
-  if (badge) {
-    badge.textContent = isAdmin ? "👑 ADMIN" : S.canWrite ? "✏️ USER (EDIT)" : userObj.role === "user" ? "👤 SALES USER" : "👁️ VIEWER";
-    badge.className = "px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase " +
-      (isAdmin ? "bg-amber-400 text-slate-950" : S.canWrite ? "bg-emerald-500 text-white" : userObj.role === "user" ? "bg-indigo-500 text-white" : "bg-slate-600 text-slate-200");
-  }
-  if (nameEl) nameEl.textContent = userObj.name || formatNameFromEmail(userObj.email || userObj.username);
-  const emailEl = $("#header-user-email"); if (emailEl) emailEl.textContent = userObj.email || (userObj.username ? userObj.username + "@goverdhanenergy.com" : "");
-  if (permEl) {
-    permEl.textContent = S.canWrite ? "Full Master & Quote Access" : S.canQuote ? "Quote & PDF Access (Master Read-Only)" : "Read-Only Viewer";
-    permEl.className = "text-[10px] font-medium " + (S.canWrite ? "text-emerald-400" : S.canQuote ? "text-sky-300" : "text-slate-400");
-  }
-  if (sidePill) {
-    sidePill.textContent = S.canWrite ? "EDITABLE" : "READ-ONLY";
-    sidePill.className = "text-[9px] font-extrabold px-1.5 py-0.5 rounded " + (S.canWrite ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800");
-  }
-  if (banner) {
-    banner.hidden = S.canWrite;
-    if (bannerRole) bannerRole.textContent = `${userObj.name} (${userObj.role.toUpperCase()})`;
-  }
-  const mUser = $("#auth-modal-cur-user");
-  const mRole = $("#auth-modal-cur-role");
-  if (mUser) mUser.textContent = `${userObj.name} (${userObj.email || userObj.username})`;
-  if (mRole) mRole.textContent = `Role: ${userObj.role.toUpperCase()} · ${S.canWrite ? "Full Master & Quote Edit" : S.canQuote ? "Can Quote & Save PDFs (Master Read-Only)" : "Read-Only"}`;
-
-  // Update Sidebar Profile & Dedicated Role Switcher Card
-  const swName = $("#sidebar-switch-name"); if (swName) swName.textContent = userObj.name || formatNameFromEmail(userObj.email || userObj.username);
-  const swEmail = $("#sidebar-switch-email"); if (swEmail) swEmail.textContent = userObj.email || (userObj.username ? userObj.username + "@goverdhanenergy.com" : "");
-  const swPill = $("#sidebar-switch-role-pill");
-  if (swPill) {
-    swPill.textContent = isAdmin ? "👑 Admin" : S.canWrite ? "✏️ User (Can Edit)" : "👤 User (Quote Only)";
-    swPill.className = "inline-block mt-0.5 px-2 py-0.5 rounded-full text-[9px] font-extrabold uppercase " +
-      (isAdmin ? "bg-emerald-700 text-white" : S.canWrite ? "bg-indigo-600 text-white" : "bg-slate-600 text-white");
+  const rolePill = $("#btn-role-toggle-pill");
+  if (rolePill) {
+    rolePill.hidden = !S.isAuthenticatedAdmin;
+    rolePill.textContent = isAdmin ? "Mode: Admin ▾" : (S.canWrite ? "Mode: User (Edit) ▾" : "Mode: User (Quote) ▾");
   }
 
-  // SECURITY: The 1-Click Role Switcher controls (⇄ Admin / User Edit / User Quote) are ONLY visible if the logged-in session is an authenticated Admin!
-  const swControls = $("#sidebar-admin-role-switcher-controls");
-  if (swControls) swControls.hidden = !S.isAuthenticatedAdmin;
-
-  const swSub = $("#sidebar-switch-mode-sub");
-  if (swSub) swSub.textContent = isAdmin ? "Active: Admin" : S.canWrite ? "Active: User (Editor)" : "Active: User (Quote)";
-  const toggleBtn = $("#btn-role-toggle-pill");
-  const toggleKnob = $("#role-toggle-knob");
-  if (toggleBtn && toggleKnob) {
-    toggleBtn.className = "w-12 h-6 rounded-full p-0.5 flex items-center transition-colors cursor-pointer shrink-0 " + (isAdmin ? "bg-emerald-700" : "bg-slate-400");
-    toggleKnob.className = "w-5 h-5 rounded-full bg-white shadow-sm transition-transform " + (isAdmin ? "translate-x-6" : "translate-x-0");
+  const roleBanner = $("#role-status-banner");
+  if (roleBanner) {
+    roleBanner.hidden = isAdmin;
+    const bannerName = $("#banner-role-name");
+    if (bannerName) bannerName.textContent = S.canWrite ? "Sales User (Editor)" : "Sales User (Quote Only)";
   }
-  const activeFastMode = isAdmin ? "admin" : S.canWrite ? "user-edit" : "user-quote";
-  document.querySelectorAll("[data-fast-role]").forEach(b => {
-    const on = b.getAttribute("data-fast-role") === activeFastMode;
-    b.className = on
-      ? "fast-role-btn py-1 px-1.5 rounded-lg text-[10px] font-extrabold bg-emerald-700 text-white text-center transition-colors shadow-2xs"
-      : "fast-role-btn py-1 px-1.5 rounded-lg text-[10px] font-bold bg-white text-slate-700 border border-slate-200 hover:border-emerald-400 text-center transition-colors";
-  });
 
-  // Strictly hide Admin-only sections from ALL non-admins (even Users with canEditMaster!)
-  const adminSec = $("#sidebar-admin-section"); if (adminSec) adminSec.hidden = !isAdmin;
-  const syncCard = $("#sidebar-multisync-card"); if (syncCard) syncCard.hidden = !isAdmin;
-  const brandSec = $("#sidebar-brand-section"); if (brandSec) brandSec.hidden = !isAdmin;
-  const mobUsers = $("#mobile-pill-users"); if (mobUsers) mobUsers.hidden = !isAdmin;
-  const mngUsersBtn = $("#btn-manage-users-link"); if (mngUsersBtn) mngUsersBtn.hidden = !isAdmin;
-  const upGrid = $("#sidebar-upload-grid"); if (upGrid) upGrid.hidden = !S.canWrite;
-  const brandModal = $("#modal-brand"); if (brandModal && !isAdmin) brandModal.hidden = true;
-
-  if (!isAdmin && (UI.tab === "cloud-sync" || UI.tab === "admin-users" || location.hash === "#cloud-sync" || location.hash === "#admin-users")) {
-    navigateToTab("quote");
-    return;
-  }
+  // Restore user draft
+  try {
+    const dStr = localStorage.getItem("rc_draft_" + userObj.id);
+    if (dStr) {
+      const d = JSON.parse(dStr);
+      if (d.q) UI.q = { ...UI.q, ...d.q };
+      if (d.qdoc) UI.qdoc = d.qdoc;
+    }
+  } catch (e) {}
 
   setSync();
   render();
 }
 
-async function myId() {
-  return S.currentUser?.id || "u-admin";
-}
-
-function initAuthState() {
-  S.users = loadLocal("users", DEFAULT_USERS);
-  let mohsinAcc = S.users.find(u => (u.email || "").toLowerCase() === "dmegepl@gmail.com" || (u.username || "").toLowerCase() === "dmegepl");
-  if (!mohsinAcc) {
-    mohsinAcc = { id: "u-mohsin", username: "dmegepl", email: "dmegepl@gmail.com", password: "admin123", name: "Mohsin Khan", role: "admin", canEditMaster: true, canQuote: true, active: true, status: "approved" };
-    S.users.unshift(mohsinAcc);
-    saveLocal("users", S.users);
-  } else if (!loadLocal("dmegepl_pw_reset_v1", false)) {
-    mohsinAcc.password = "admin123";
-    mohsinAcc.role = "admin";
-    mohsinAcc.canEditMaster = true;
-    mohsinAcc.canQuote = true;
-    mohsinAcc.active = true;
-    mohsinAcc.status = "approved";
-    saveLocal("dmegepl_pw_reset_v1", true);
-    saveLocal("users", S.users);
-  }
-  S.authSettings = loadLocal("authSettings", { allowQuickSwitch: false });
-  syncUserNamesMap();
-
-  const authUserId = loadLocal("authenticated_user_id", null);
-  S.isAuthenticatedAdmin = !!loadLocal("is_authenticated_admin", false);
-
-  if (authUserId) {
-    const found = S.users.find(u => u.id === authUserId && u.active !== false && u.status !== "pending" && u.status !== "rejected");
-    if (found) {
-      applyUserSession(found, true);
-      return;
-    }
-  }
-  // If no valid authenticated session on this browser, show the Mandatory Full-Screen Security Gate!
-  S.currentUser = null;
-  S.canWrite = false;
-  S.canQuote = false;
-  const gate = $("#auth-gate-overlay");
-  if (gate) gate.hidden = false;
-}
 /* ================= PRICING ENGINE (EXACT REFERENCE LOGIC + SPECIFIC REFINERY OPTION) ================= */
 function priceIndex(cycle) {
   const m = {};
@@ -2433,8 +1936,9 @@ function computeQuote(q) {
     const basicBadge = mb > 0 ? "custom basic" : foundPrice.isBrandFallback ? "brand circular rate" : foundPrice.isBenchmarkBasic ? "benchmark basic (editable)" : "circular rate";
 
     const maxD = num(p.maxDiscount) || 0;
-    const disc = q.discEdit[s.id] !== undefined && q.discEdit[s.id] !== "" ? num(q.discEdit[s.id]) || 0 : (discMode === "max" ? maxD : 0);
-    const net = basic - disc;
+    const rawDisc = q.discEdit[s.id] !== undefined && q.discEdit[s.id] !== "" ? num(q.discEdit[s.id]) || 0 : (discMode === "max" ? maxD : 0);
+    const disc = Math.max(0, Math.min(rawDisc, maxD > 0 ? maxD : basic));
+    const net = Math.max(0, basic - disc);
     const ro = routeOptions(s, q.product, q.loc, qty);
     const route = (q.routeSel && ro.list.find(x => x.id === q.routeSel[s.id])) || ro.list[0] || null;
     const fixedRate = route ? num(route.rate) : null;
@@ -2458,13 +1962,17 @@ function computeQuote(q) {
     } else if (!q.loc.trim()) {
       freight = 0;
       freightSrc = "ex-refinery";
-    } else {
-      // Dynamic Road-Distance Freight Auto-Calculation for ANY New Customer Location (e.g. Delhi, Jaipur, etc.)!
-      const effectiveKm = distKm || 650;
-      const rawRoadFreight = Math.max(600, Math.round((effectiveKm * calibratedPerKm) / 50) * 50);
+    } else if (distKm !== null) {
+      // Dynamic Road-Distance Freight Auto-Calculation for resolved locations
+      const rawRoadFreight = Math.max(600, Math.round((distKm * calibratedPerKm) / 50) * 50);
       freight = rawRoadFreight;
       isRoadEst = true;
-      freightSrc = distKm ? `road est. (~${distKm} km @ ₹${calibratedPerKm}/km)` : `locating "${q.loc.trim()}" on map…`;
+      freightSrc = `road est. (~${distKm} km @ ₹${calibratedPerKm}/km)`;
+    } else {
+      // Town is currently being located on map - do NOT guess or quote 650km (H-14)
+      freight = null;
+      isRoadEst = false;
+      freightSrc = `locating "${q.loc.trim()}" on map…`;
     }
 
     const prev = prevIdx[s.id + "|" + q.product];
@@ -2792,10 +2300,13 @@ try {
 } catch (e) {}
 
 // Live OpenStreetMap Nominatim Geocoder: Resolves ANY new customer town, village, MIDC, or PIN code in India on the fly!
+const failedGeocodes = new Set();
+let geocodeDebounceTimer = null;
+
 async function geocodeTownLive(townName) {
   if (!townName) return null;
   const raw = String(townName).toLowerCase().trim();
-  if (raw.length < 2) return null;
+  if (raw.length < 2 || failedGeocodes.has(raw)) return null;
   if (dynamicCoordsCache[raw]) return dynamicCoordsCache[raw];
   if (pendingGeocodes.has(raw)) return null;
   pendingGeocodes.add(raw);
@@ -2811,14 +2322,17 @@ async function geocodeTownLive(townName) {
         const cleanKey = cleanLocTokens(raw);
         if (cleanKey) dynamicCoordsCache[cleanKey] = coords;
         try { localStorage.setItem(CUSTOM_COORDS_KEY, JSON.stringify(dynamicCoordsCache)); } catch (e) {}
-        // Refresh Calculator or Map automatically now that the new town has coordinates!
         if (location.hash === "#map") viewMap();
         else if (!location.hash || location.hash === "#quote") renderQuoteResults();
         return coords;
+      } else {
+        failedGeocodes.add(raw);
       }
+    } else {
+      failedGeocodes.add(raw);
     }
   } catch (e) {
-    // Offline or blocked; fallback handled gracefully
+    failedGeocodes.add(raw);
   } finally {
     pendingGeocodes.delete(raw);
   }
@@ -6814,28 +6328,47 @@ async function saveQuotation() {
   const d = qdoc(); if (!d.lines.length) return;
   if (!d.cust.name.trim()) { toast("Enter the customer name first"); return; }
   try {
-    inflight++; setSync();
-    const date = todayISO(), fy = fyLabel(date);
-    const ref = S.db.doc("master/quoteSeq");
-    const snap = await ref.get();
-    const seq = snap.exists ? (snap.data() || {}) : {};
-    const n = (seq[fy] || 0) + 1;
-    await ref.set({ ...seq, [fy]: n });
-    const number = `${tpl().quotePrefix}/${fy}/${String(n).padStart(4, "0")}`;
+    inflight++; setSync("Saving quotation…");
+    const seqRes = await apiRequest("/api/quotes/next-number", { method: "POST" });
+    if (!seqRes.ok) throw new Error("Failed to generate quotation sequence from server");
+    const seqData = await seqRes.json();
+    const number = seqData.quoteNumber;
+    const date = todayISO();
     const doc = {
-      type: "quotation", number, date, createdAt: new Date().toISOString(), by: (await myId()) || "",
-      cust: { ...d.cust }, ref: d.ref, lines: JSON.parse(JSON.stringify(d.lines)),
-      customer: d.cust.name, location: [...new Set(d.lines.map(l => l.location))].join(", "),
+      id: "q_" + uid(),
+      type: "quotation",
+      number,
+      date,
+      createdAt: new Date().toISOString(),
+      by: S.currentUser?.name || "Sales Desk",
+      cust: { ...d.cust },
+      ref: d.ref,
+      lines: JSON.parse(JSON.stringify(d.lines)),
+      customer: d.cust.name,
+      location: [...new Set(d.lines.map(l => l.location))].join(", "),
       productName: d.lines.map(l => shortNameOf(l.productId, l.product)).join(", ")
     };
-    await S.db.collection("quotes").add(doc);
+    const saveRes = await apiRequest("/api/quotes", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ quote: doc })
+    });
+    if (!saveRes.ok) throw new Error("Server rejected quotation save");
+    S.quotes = S.quotes || [];
+    S.quotes.unshift(doc);
+    saveLocal("quotes", S.quotes);
     toast("Saved as " + number + " & downloading PDF!");
     await logQuotationEvent({ action: "Generated & Downloaded A4 PDF Quotation", actionType: "pdf", quoteNumber: number, customer: d.cust.name, location: [...new Set(d.lines.map(l => l.location))].join(", "), product: d.lines.map(l => l.product).join(", "), qty: d.lines.map(l => l.qty ? l.qty + " " + l.unit : "").filter(Boolean).join(", "), rate: d.lines[0]?.rate, rateGst: d.lines[0]?.rateGst, margin: d.lines[0]?.margin, refinery: d.lines.map(l => l.source).join(", ") });
     await downloadQuotation(doc);
     UI.qdoc = null;
+    saveWorkspaceState(0);
     renderQuoteResults();
-  } catch (e) { toast("Couldn't save: " + (e?.message || e?.code)); }
-  finally { inflight--; setSync(); }
+  } catch (e) {
+    toast("Couldn't save quotation: " + (e?.message || e?.code));
+  } finally {
+    inflight = Math.max(0, inflight - 1);
+    setSync();
+  }
 }
 
 function fillTokens(s, doc) {
@@ -7119,11 +6652,46 @@ function renderAddForm() {
 function viewSaved() {
   const Q = S.quotes || [];
   const logs = S.quoteLogs || [];
-  UI.savedTab = UI.savedTab || "quotes"; // "quotes" or "audit"
+  UI.savedTab = UI.savedTab || "quotes";
   const f = UI.sf = UI.sf || { text: "" };
 
   const visQuotes = Q.filter(q => !f.text || norm([q.number, q.customer, q.location, q.productName].join(" ")).includes(norm(f.text)));
-  const visLogs = logs.filter(l => !f.text || norm([l.userEmail, l.userName, l.action, l.quoteNumber, l.customer, l.location, l.product, l.refinery].join(" ")).includes(norm(f.text)));
+  const visLogs = logs.filter(l => !f.text || norm([l.user_email, l.userEmail, l.user_name, l.userName, l.action_desc, l.action, l.quote_number, l.quoteNumber, l.customer, l.location, l.product, l.refinery].join(" ")).includes(norm(f.text)));
+
+  const quotesTableRows = visQuotes.map(q => {
+    const L = q.lines || [{ product: q.productName, location: q.location, rate: q.price, unit: q.unit, source: q.sourceName, qty: q.qty }];
+    const linesHtml = L.map(l => esc(l.product) + ' <span class="tiny">· ' + esc(l.location) + (l.qty ? ' · ' + nf(l.qty, 2) + ' ' + esc(l.unit) : '') + '</span>').join('<br>');
+    const ratesHtml = L.map(l => inr(l.rate) + '<span class="tiny">/' + esc(l.unit) + '</span>').join('<br>');
+    const srcHtml = L.map(l => esc(l.source || '')).join('<br>');
+    const dateStr = q.createdAt ? new Date(q.createdAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "2-digit" }) : "—";
+    const numHtml = q.number ? '<b>' + esc(q.number) + '</b>' : '<span class="pill flat">quick quote</span>';
+    const pdfBtn = q.type === "quotation" ? '<button class="btn small primary" data-pdf="' + esc(q.id) + '">⬇ PDF</button> ' : '';
+    const reBtn = '<button class="btn small" data-re="' + esc(q.id) + '">🎯 Re-price</button> ';
+    const delBtn = '<button class="btn small danger" data-qdel="' + esc(q.id) + '" ' + (S.canWrite ? '' : 'disabled') + ' aria-label="Delete">✕</button>';
+    return '<tr><td>' + dateStr + '</td><td>' + numHtml + '</td><td><b>' + esc(q.customer || q.cust?.name || '—') + '</b></td><td>' + linesHtml + '</td><td class="n">' + ratesHtml + '</td><td class="tiny">' + srcHtml + '</td><td class="tiny">' + esc(q.by || 'Desk') + '</td><td class="n" style="white-space:nowrap">' + pdfBtn + reBtn + delBtn + '</td></tr>';
+  }).join('');
+
+  const quotesContent = visQuotes.length
+    ? '<div class="tw"><table><thead><tr><th>Date</th><th>Quotation</th><th>Customer</th><th>Products · delivered at</th><th class="n">Rate quoted</th><th>Supplied from</th><th>By</th><th></th></tr></thead><tbody>' + quotesTableRows + '</tbody></table></div>'
+    : '<div class="panel empty"><strong>' + (Q.length ? 'No quotes match your search' : 'No saved quotes yet') + '</strong>Get a price, add it to quotation basket, and choose “Save &amp; Download PDF”.</div>';
+
+  const logsTableRows = visLogs.map(l => {
+    const dt = new Date(l.ts || l.created_at);
+    const timeStr = dt.toLocaleDateString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+    const pillClass = (l.actionType === "pdf" || l.action_type === "pdf") ? "best" : "info";
+    return '<tr><td class="tiny">' + timeStr + '</td><td class="tiny"><b>' + esc(l.user_name || l.userName || 'User') + '</b><div class="text-[10px] text-slate-400 font-mono">' + esc(l.user_email || l.userEmail || '') + '</div></td>' +
+           '<td><span class="pill ' + pillClass + '">' + esc(l.action_desc || l.action || 'Quoted') + '</span></td>' +
+           '<td><span class="font-mono text-xs font-bold">' + esc(l.quote_number || l.quoteNumber || '—') + '</span></td>' +
+           '<td><b>' + esc(l.customer || '—') + '</b><div class="tiny">📍 ' + esc(l.location || '—') + '</div></td>' +
+           '<td>' + esc(l.product || '—') + (l.qty ? ' <span class="tiny">(' + esc(l.qty) + ')</span>' : '') + '</td>' +
+           '<td class="tiny">🏭 ' + esc(l.refinery || '—') + '</td>' +
+           '<td class="n font-mono text-xs">' + (l.margin != null ? '+' + inr(l.margin) : '—') + '</td>' +
+           '<td class="n font-mono font-bold text-xs text-indigo-700">' + (l.rate != null ? inr(l.rate) : '—') + '</td></tr>';
+  }).join('');
+
+  const logsContent = visLogs.length
+    ? '<div class="tw"><table><thead><tr><th>Time &amp; Date</th><th>Quoted By</th><th>Action</th><th>Quote No</th><th>Customer &amp; Town</th><th>Product &amp; Qty</th><th>Refinery</th><th class="n">Margin</th><th class="n">Quoted Rate</th></tr></thead><tbody>' + logsTableRows + '</tbody></table></div>'
+    : '<div class="panel empty"><strong>No activity logs recorded yet</strong></div>';
 
   V().innerHTML = `
   <div class="sechead" style="align-items:flex-end">
@@ -7139,7 +6707,6 @@ function viewSaved() {
     </div>
   </div>
 
-  <!-- Tab Toggle: Saved Formal Quotations vs Sent Quotation Audit Log -->
   <div class="flex items-center gap-2 border-b border-slate-200 mt-2 mb-4">
     <button type="button" id="tab-btn-saved-quotes" class="py-2.5 px-4 font-bold text-xs border-b-2 transition-colors flex items-center gap-2 ${UI.savedTab === "quotes" ? "border-indigo-600 text-indigo-600 bg-indigo-50/50 rounded-t-xl" : "border-transparent text-slate-500 hover:text-slate-900"}">
       <span>📄</span><span>Saved Quotation Documents</span>
@@ -7151,55 +6718,39 @@ function viewSaved() {
     </button>
   </div>
 
-  ${UI.savedTab === "quotes" ? `
-    ${visQuotes.length ? `<div class="tw"><table><thead><tr><th>Date</th><th>Quotation</th><th>Customer</th><th>Products · delivered at</th><th class="n">Rate quoted</th><th>Supplied from</th><th>By (Gmail)</th><th></th></tr></thead><tbody>
-    ${visQuotes.map(q => {
-      const L = q.lines || [{ product: q.productName, location: q.location, rate: q.price, unit: q.unit, source: q.sourceName, qty: q.qty }];
-      return `<tr><td>${new Date(q.createdAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "2-digit" })}</td>
-      <td>${q.number ? `<b>${esc(q.number)}</b>` : '<span class="pill flat">quick quote</span>'}</td><td><b>${esc(q.customer || q.cust?.name || "—")}</b></td>
-      <td>${L.map(l => `${esc(l.product)} <span class="tiny">· ${esc(l.location)}${l.qty ? ` · ${nf(l.qty, 2)} ${l.unit}` : ""}</span>`).join("<br>")}</td>
-      <td class="n">${L.map(l => `${inr(l.rate)}<span class="tiny">/${l.unit}</span>`).join("<br>")}</td>
-      <td class="tiny">${L.map(l => esc(l.source || "")).join("<br>")}</td><td class="tiny">${esc(S.names[q.by] || q.by || "Desk")}</td>
-      <td class="n" style="white-space:nowrap">${q.type === "quotation" ? `<button class="btn small primary" data-pdf="${q.id}">⬇ PDF</button> ` : ""}<button class="btn small" data-re="${q.id}">🎯 Re-price</button> <button class="btn small danger" data-qdel="${q.id}" ${S.canWrite ? "" : "disabled"} aria-label="Delete">✕</button></td></tr>`;
-    }).join("")}
-    </tbody></table></div>` : `<div class="panel empty"><strong>${Q.length ? "No quotes match your search" : "No saved quotes yet"}</strong>Get a price, add it to quotation basket, and choose “Save &amp; Download PDF”.</div>`}
-  ` : `
-    ${visLogs.length ? `<div class="tw"><table><thead><tr><th>Time &amp; Date</th><th>Quoted By (Gmail)</th><th>Action</th><th>Quote No</th><th>Customer &amp; Town</th><th>Product &amp; Qty</th><th>Refinery</th><th class="n">Margin</th><th class="n">Quoted Rate</th></tr></thead><tbody>
-    ${visLogs.map(l => {
-      const dt = new Date(l.ts);
-      const timeStr = dt.toLocaleDateString("en-IN", { day: "2-digit", month: "short" }) + " " + dt.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
-      const badgeClass = l.actionType === "pdf" ? "bg-indigo-100 text-indigo-800" : l.actionType === "copy" ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800";
-      return `<tr>
-        <td class="tiny font-mono">${timeStr}</td>
-        <td><b>${esc(l.userName || "User")}</b><div class="tiny font-mono text-slate-500">${esc(l.userEmail || "—")}</div></td>
-        <td><span class="px-2 py-0.5 rounded-full text-[10px] font-extrabold ${badgeClass}">${esc(l.action)}</span></td>
-        <td class="font-mono text-xs font-bold">${esc(l.quoteNumber)}</td>
-        <td><b>${esc(l.customer)}</b><div class="tiny">📍 ${esc(l.location)}</div></td>
-        <td><b>${esc(l.product)}</b><div class="tiny">${esc(l.qty)}</div></td>
-        <td class="tiny">${esc(l.refinery)}</td>
-        <td class="n font-mono">${l.margin ? `+₹${nf(l.margin)}` : "₹0"}</td>
-        <td class="n font-mono font-bold">${l.rate ? inr(l.rate) : "—"}<div class="tiny font-normal">${l.rateGst ? `Incl GST: ${inr(l.rateGst)}` : ""}</div></td>
-      </tr>`;
-    }).join("")}
-    </tbody></table></div>` : `<div class="panel empty"><strong>${logs.length ? "No quotation logs match your search" : "No sent quotations logged yet"}</strong>When any user generates an A4 PDF or copies a WhatsApp quotation, it is logged here with their Gmail ID.</div>`}
-  `}`;
+  ${UI.savedTab === "quotes" ? quotesContent : logsContent}
+  `;
 
   $("#tab-btn-saved-quotes")?.addEventListener("click", () => { UI.savedTab = "quotes"; viewSaved(); });
   $("#tab-btn-audit-logs")?.addEventListener("click", () => { UI.savedTab = "audit"; viewSaved(); });
   $("#btn-export-audit-csv")?.addEventListener("click", exportQuoteLogsCsv);
+  $("#sf")?.addEventListener("input", e => { f.text = e.target.value; viewSaved(); });
 
-  $("#sf").addEventListener("input", e => { f.text = e.target.value; viewSaved(); const s = $("#sf"); s.focus(); s.setSelectionRange(s.value.length, s.value.length); });
-  document.querySelectorAll("[data-pdf]").forEach(b => b.onclick = () => downloadQuotation(Q.find(x => x.id === b.dataset.pdf)));
+  document.querySelectorAll("[data-pdf]").forEach(b => b.onclick = () => {
+    const q = Q.find(x => x.id === b.dataset.pdf);
+    if (q) downloadQuotation(q);
+  });
   document.querySelectorAll("[data-re]").forEach(b => b.onclick = () => {
-    const q = Q.find(x => x.id === b.dataset.re); const l = (q.lines || [])[0];
+    const q = Q.find(x => x.id === b.dataset.re);
+    if (!q) { toast("Quotation not found or was deleted."); return; }
+    const l = (q.lines || [])[0];
     Object.assign(UI.q, { loc: l ? l.location : q.location, product: l ? l.productId : q.productId, qty: (l ? l.qty : q.qty) || "", days: l ? l.credit : q.creditDays, margin: l ? l.margin ?? "" : q.margin, customer: q.customer || "", cycleId: "", manual: {}, discEdit: {}, routeSel: {}, sel: null });
     if (q.lines) { UI.qdoc = { lines: [], cust: { ...(q.cust || { name: q.customer }) }, ref: q.ref || "" }; }
     location.hash = "#quote";
   });
-  document.querySelectorAll("[data-qdel]").forEach(b => b.onclick = () => {
+  document.querySelectorAll("[data-qdel]").forEach(b => b.onclick = async () => {
     if (!S.canWrite) return;
-    if (!b.dataset.armed) { b.dataset.armed = 1; b.textContent = "Delete?"; return; }
-    delDoc("quotes/" + b.dataset.qdel);
+    if (!b.dataset.armed) { b.dataset.armed = "1"; b.textContent = "Delete?"; return; }
+    const id = b.dataset.qdel;
+    try {
+      await apiRequest("/api/quotes/" + encodeURIComponent(id), { method: "DELETE" });
+      S.quotes = S.quotes.filter(q => q.id !== id);
+      saveLocal("quotes", S.quotes);
+      viewSaved();
+      toast("Quotation deleted");
+    } catch (e) {
+      toast("Failed to delete quote: " + e.message);
+    }
   });
 }
 /* ================= VIEW 10: USER & ADMIN MANAGEMENT PANEL ================= */
@@ -7208,7 +6759,7 @@ function viewUsersAdmin() {
   const dis = isAdmin ? "" : "disabled";
   const allUsers = S.users || [];
   const pendingUsers = allUsers.map((u, i) => ({ u, i })).filter(({ u }) => u.status === "pending");
-  const resetReqUsers = allUsers.map((u, i) => ({ u, i })).filter(({ u }) => u.resetRequested && u.status !== "pending");
+  const resetReqUsers = allUsers.map((u, i) => ({ u, i })).filter(({ u }) => u.reset_requested || u.resetRequested);
   const approvedUsers = allUsers.map((u, i) => ({ u, i })).filter(({ u }) => u.status !== "pending");
 
   V().innerHTML = `
@@ -7218,7 +6769,7 @@ function viewUsersAdmin() {
       <p class="sub" style="margin:0">Only invited or approved users can sign in. Approve new sign-up requests, invite team members by Gmail, and control who can edit master files.</p>
     </div>
     <div class="actions">
-      <button class="btn primary" id="btn-refresh-signup-requests" type="button">🔄 Check for New Sign-Up Requests</button>
+      <button class="btn primary" id="btn-refresh-signup-requests" type="button">🔄 Refresh Users List</button>
       <button class="btn" id="btn-open-login-from-tab" type="button">🔐 Account / Sign Out</button>
     </div>
   </div>
@@ -7253,18 +6804,18 @@ function viewUsersAdmin() {
             <tr>
               <td><b>${esc(u.name)}</b></td>
               <td class="font-mono text-xs font-bold text-indigo-700">${esc(u.email)}</td>
-              <td class="tiny">${esc(u.requestNote || "—")}</td>
-              <td class="tiny">${u.createdAt ? new Date(u.createdAt).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "Just now"}</td>
+              <td class="tiny">${esc(u.request_note || u.requestNote || "—")}</td>
+              <td class="tiny">${u.created_at || u.createdAt ? new Date(u.created_at || u.createdAt).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "Just now"}</td>
               <td>
-                <select data-pend-perm="${i}" style="padding:4px 8px;font-size:12px;font-weight:700;width:auto">
+                <select data-pend-perm="${esc(u.id)}" style="padding:4px 8px;font-size:12px;font-weight:700;width:auto">
                   <option value="user-quote">👤 Sales User (Quote &amp; PDF Only)</option>
                   <option value="user-edit">✏️ Sales User (Can Edit Master Files)</option>
                   <option value="admin">👑 Admin (Full System Access)</option>
                 </select>
               </td>
               <td class="n" style="white-space:nowrap">
-                <button type="button" class="btn small primary" data-approve-user="${i}">✅ Approve &amp; Allow Login</button>
-                <button type="button" class="btn small danger" data-reject-user="${i}">✕ Reject</button>
+                <button type="button" class="btn small primary" data-approve-user="${esc(u.id)}">✅ Approve &amp; Allow Login</button>
+                <button type="button" class="btn small danger" data-reject-user="${esc(u.id)}">✕ Reject</button>
               </td>
             </tr>
           `).join("")}
@@ -7288,8 +6839,7 @@ function viewUsersAdmin() {
           <tr>
             <th>User</th>
             <th>Gmail / Username</th>
-            <th>Requested New Password</th>
-            <th>Requested At</th>
+            <th>Status</th>
             <th class="n">Action</th>
           </tr>
         </thead>
@@ -7298,11 +6848,9 @@ function viewUsersAdmin() {
             <tr>
               <td><b>${esc(u.name)}</b></td>
               <td class="font-mono text-xs">${esc(u.email || u.username)}</td>
-              <td class="font-mono text-xs font-bold text-indigo-700">${esc(u.requestedNewPassword)}</td>
-              <td class="tiny">${u.resetRequestedAt ? new Date(u.resetRequestedAt).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "Just now"}</td>
+              <td class="tiny text-amber-700 font-bold">Awaiting Admin Approval</td>
               <td class="n">
-                <button type="button" class="btn small primary" data-approve-pwreset="${i}">✅ Approve New Password</button>
-                <button type="button" class="btn small danger" data-reject-pwreset="${i}">✕ Dismiss</button>
+                <button type="button" class="btn small primary" data-approve-pwreset="${esc(u.id)}">✅ Approve New Password</button>
               </td>
             </tr>
           `).join("")}
@@ -7331,7 +6879,7 @@ function viewUsersAdmin() {
       </div>
       <div class="field">
         <label class="lbl" for="inv-pass">Set Password</label>
-        <input type="text" id="inv-pass" value="gepl123" placeholder="Password" required class="font-mono">
+        <input type="password" id="inv-pass" placeholder="Password (min 6 chars)" minlength="6" required class="font-mono">
       </div>
       <div class="field">
         <label class="lbl" for="inv-perm">Access Level</label>
@@ -7341,11 +6889,11 @@ function viewUsersAdmin() {
           <option value="admin">👑 Admin (Full Access)</option>
         </select>
       </div>
-      <button type="submit" class="btn primary justify-center py-2.5">✉️ Invite &amp; Copy Login Details</button>
+      <button type="submit" class="btn primary justify-center py-2.5">✉️ Invite &amp; Pre-Approve</button>
     </form>
   </div>` : ""}
 
-  <!-- 3. APPROVED & MANAGEABLE TEAM ACCOUNTS TABLE -->
+  <!-- 3. APPROVED TEAM ACCOUNTS TABLE -->
   <div class="stack" style="gap:8px">
     <h3>Approved Team Accounts (${approvedUsers.length})</h3>
     <div class="tw tbl-edit" data-live>
@@ -7355,12 +6903,11 @@ function viewUsersAdmin() {
             <th>Status</th>
             <th>Full Name</th>
             <th>Gmail Address</th>
-            <th>Username</th>
             <th>Password</th>
             <th>Role</th>
             <th>Allow Master Edit</th>
             <th>Allow Quoting</th>
-            <th>Active (Can Login)</th>
+            <th>Active</th>
             <th>Actions</th>
           </tr>
         </thead>
@@ -7370,24 +6917,15 @@ function viewUsersAdmin() {
               <td>
                 <span class="pill ${u.active !== false ? "best" : "up"}">${u.active !== false ? "✅ Approved" : "🚫 Blocked"}</span>
               </td>
-              <td><input type="text" data-u="${i}" data-uf="name" value="${esc(u.name)}" placeholder="Full Name" style="min-width:145px" ${dis}></td>
-              <td><input type="text" data-u="${i}" data-uf="email" value="${esc(u.email || (u.username ? u.username + "@gmail.com" : ""))}" placeholder="user@gmail.com" style="min-width:175px" class="font-mono" ${dis}></td>
-              <td><input type="text" data-u="${i}" data-uf="username" value="${esc(u.username)}" style="min-width:95px" class="font-mono" ${dis}></td>
-              <td><input type="text" data-u="${i}" data-uf="password" value="${esc(u.password || "")}" style="min-width:95px" class="font-mono" ${dis}></td>
-              <td>
-                <select data-u="${i}" data-uf="role" ${dis}>
-                  <option value="admin" ${u.role === "admin" ? "selected" : ""}>👑 Admin</option>
-                  <option value="user" ${u.role === "user" ? "selected" : ""}>👤 Sales User</option>
-                  <option value="viewer" ${u.role === "viewer" ? "selected" : ""}>👁️ Viewer</option>
-                </select>
-              </td>
-              <td class="text-center"><input type="checkbox" data-u="${i}" data-uf="canEditMaster" ${(u.role === "admin" || u.canEditMaster) ? "checked" : ""} ${u.role === "admin" || !isAdmin ? "disabled" : ""}></td>
-              <td class="text-center"><input type="checkbox" data-u="${i}" data-uf="canQuote" ${(u.role !== "viewer" || u.canQuote) ? "checked" : ""} ${u.role === "admin" || !isAdmin ? "disabled" : ""}></td>
-              <td class="text-center"><input type="checkbox" data-u="${i}" data-uf="active" ${u.active !== false ? "checked" : ""} ${(u.email || "").toLowerCase() === "dmegepl@gmail.com" || !isAdmin ? "disabled" : ""}></td>
+              <td><b>${esc(u.name)}</b></td>
+              <td><span class="font-mono text-xs">${esc(u.email || "")}</span></td>
+              <td class="font-mono text-xs text-slate-400">••••••••</td>
+              <td><span class="pill info">${esc(u.role ? u.role.toUpperCase() : "USER")}</span></td>
+              <td class="text-center"><span class="pill ${u.can_edit_master || u.role === 'admin' ? 'best' : 'flat'}">${u.can_edit_master || u.role === 'admin' ? 'Yes' : 'No'}</span></td>
+              <td class="text-center"><span class="pill best">Yes</span></td>
+              <td class="text-center"><span class="pill ${u.active !== false ? 'best' : 'up'}">${u.active !== false ? 'Active' : 'Disabled'}</span></td>
               <td class="n" style="white-space:nowrap">
-                <button class="btn small" type="button" data-copy-invite="${i}" title="Copy login link & credentials">📋 Copy Invite</button>
-                <button class="btn small" type="button" data-use-acc="${u.id}">Switch To</button>
-                ${(u.email || "").toLowerCase() !== "dmegepl@gmail.com" ? `<button class="btn small danger" type="button" data-udel="${i}" ${dis}>✕</button>` : ""}
+                ${(u.email || "").toLowerCase() !== (S.currentUser?.email || "").toLowerCase() ? `<button class="btn small danger" type="button" data-del-user="${esc(u.id)}" ${dis}>✕ Delete</button>` : `<span class="tiny text-slate-400">Current</span>`}
               </td>
             </tr>
           `).join("")}
@@ -7398,172 +6936,120 @@ function viewUsersAdmin() {
 
   $("#btn-open-login-from-tab")?.addEventListener("click", () => { $("#modal-auth").hidden = false; });
   $("#btn-refresh-signup-requests")?.addEventListener("click", async () => {
-    await pullFromNeon(false, true);
-    viewUsersAdmin();
-    const pend = (S.users || []).filter(u => u.status === "pending").length;
-    toast(pend ? `🔔 Found ${pend} pending sign-up request(s)!` : "✓ Synced with Cloud DB — 0 pending requests.");
+    try {
+      const res = await apiRequest("/api/admin/users");
+      if (res.ok) {
+        const d = await res.json();
+        S.users = d.users || [];
+        viewUsersAdmin();
+        const pend = S.users.filter(u => u.status === "pending").length;
+        toast(pend ? `🔔 Found ${pend} pending sign-up request(s)!` : "✓ Users list up to date.");
+      }
+    } catch (e) {
+      toast("Failed to refresh users list: " + e.message);
+    }
   });
 
-  // Approve / Dismiss Password Reset Requests
-  document.querySelectorAll("[data-approve-pwreset]").forEach(btn => btn.onclick = async () => {
-    if (!isAdmin) return;
-    const u = S.users[+btn.getAttribute("data-approve-pwreset")];
-    if (!u) return;
-    u.password = u.requestedNewPassword || u.password;
-    delete u.resetRequested;
-    delete u.requestedNewPassword;
-    saveLocal("users", S.users);
-    await pushKeyToNeon("users", S.users);
-    updateSidebarStats();
-    viewUsersAdmin();
-    toast(`✅ Password reset approved for ${u.name} (${u.email || u.username})!`);
-  });
-  document.querySelectorAll("[data-reject-pwreset]").forEach(btn => btn.onclick = async () => {
-    if (!isAdmin) return;
-    const u = S.users[+btn.getAttribute("data-reject-pwreset")];
-    if (!u) return;
-    delete u.resetRequested;
-    delete u.requestedNewPassword;
-    saveLocal("users", S.users);
-    await pushKeyToNeon("users", S.users);
-    updateSidebarStats();
-    viewUsersAdmin();
-    toast("Password reset request dismissed");
-  });
-
-  // Approve Pending User
   document.querySelectorAll("[data-approve-user]").forEach(btn => btn.onclick = async () => {
     if (!isAdmin) return;
-    const idx = +btn.getAttribute("data-approve-user");
-    const perm = document.querySelector(`select[data-pend-perm="${idx}"]`)?.value || "user-quote";
-    const u = S.users[idx];
-    if (!u) return;
-    u.status = "approved";
-    u.active = true;
-    if (perm === "admin") { u.role = "admin"; u.canEditMaster = true; u.canQuote = true; }
-    else if (perm === "user-edit") { u.role = "user"; u.canEditMaster = true; u.canQuote = true; }
-    else { u.role = "user"; u.canEditMaster = false; u.canQuote = true; }
-    u.updatedAtMs = Date.now();
-    saveLocal("users", S.users);
-    syncUserNamesMap();
-    await pushKeyToNeon("users", S.users);
-    updateSidebarStats();
-    viewUsersAdmin();
-    toast(`✅ Approved ${u.name} (${u.email})! They can now sign in.`);
+    const uid = btn.getAttribute("data-approve-user");
+    const perm = document.querySelector(`select[data-pend-perm="${uid}"]`)?.value || "user-quote";
+    try {
+      const res = await apiRequest(`/api/admin/users/${encodeURIComponent(uid)}/approve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          role: perm === "admin" ? "admin" : "user",
+          can_edit_master: perm === "admin" || perm === "user-edit"
+        })
+      });
+      if (res.ok) {
+        toast("✅ User approved! They can now sign in.");
+        $("#btn-refresh-signup-requests")?.click();
+      } else {
+        const err = await res.json().catch(() => ({}));
+        toast("Failed to approve: " + (err.error || res.statusText));
+      }
+    } catch (e) {
+      toast("Error approving user: " + e.message);
+    }
   });
 
-  // Reject Pending User
   document.querySelectorAll("[data-reject-user]").forEach(btn => btn.onclick = async () => {
     if (!isAdmin) return;
-    const idx = +btn.getAttribute("data-reject-user");
-    const u = S.users[idx];
-    if (u) {
-      const k = String(u.email || u.username || u.id).toLowerCase();
-      S.authSettings = S.authSettings || {};
-      S.authSettings.deletedUserKeys = [...new Set([...(S.authSettings.deletedUserKeys || []), k])];
-      saveLocal("authSettings", S.authSettings);
-      await pushKeyToNeon("authSettings", S.authSettings);
+    const uid = btn.getAttribute("data-reject-user");
+    try {
+      const res = await apiRequest(`/api/admin/users/${encodeURIComponent(uid)}`, { method: "DELETE" });
+      if (res.ok) {
+        toast("Access request rejected and removed.");
+        $("#btn-refresh-signup-requests")?.click();
+      }
+    } catch (e) {
+      toast("Error rejecting request: " + e.message);
     }
-    S.users.splice(idx, 1);
-    saveLocal("users", S.users);
-    syncUserNamesMap();
-    await pushKeyToNeon("users", S.users);
-    updateSidebarStats();
-    viewUsersAdmin();
-    toast(`Removed access request from ${u?.email || "user"}`);
   });
 
-  // Admin Quick Invite Form
+  document.querySelectorAll("[data-del-user]").forEach(btn => btn.onclick = async () => {
+    if (!isAdmin) return;
+    if (!btn.dataset.armed) { btn.dataset.armed = "1"; btn.textContent = "Del?"; return; }
+    const uid = btn.getAttribute("data-del-user");
+    try {
+      const res = await apiRequest(`/api/admin/users/${encodeURIComponent(uid)}`, { method: "DELETE" });
+      if (res.ok) {
+        toast("User account removed.");
+        $("#btn-refresh-signup-requests")?.click();
+      }
+    } catch (e) {
+      toast("Error deleting user: " + e.message);
+    }
+  });
+
+  document.querySelectorAll("[data-approve-pwreset]").forEach(btn => btn.onclick = async () => {
+    if (!isAdmin) return;
+    const uid = btn.getAttribute("data-approve-pwreset");
+    try {
+      const res = await apiRequest(`/api/admin/users/${encodeURIComponent(uid)}/approve-reset`, { method: "POST" });
+      if (res.ok) {
+        toast("✅ New password approved for user.");
+        $("#btn-refresh-signup-requests")?.click();
+      }
+    } catch (e) {
+      toast("Error approving password reset: " + e.message);
+    }
+  });
+
   $("#form-admin-invite")?.addEventListener("submit", async e => {
     e.preventDefault();
     if (!isAdmin) return;
     const name = ($("#inv-name")?.value || "").trim();
     const email = ($("#inv-email")?.value || "").trim().toLowerCase();
-    const password = ($("#inv-pass")?.value || "").trim() || "gepl123";
+    const password = ($("#inv-pass")?.value || "").trim();
     const perm = $("#inv-perm")?.value || "user-quote";
-    if (!name || !email.includes("@")) { toast("Enter name and valid Gmail address"); return; }
-
-    let u = findMatchingUserAccount(email);
-    const role = perm === "admin" ? "admin" : "user";
-    const canEditMaster = perm === "admin" || perm === "user-edit";
-    if (u) {
-      u.name = name; u.email = email; u.password = password; u.role = role; u.canEditMaster = canEditMaster; u.canQuote = true; u.active = true; u.status = "approved";
-    } else {
-      u = { id: "u_" + uid(), username: email.split("@")[0], email, password, name, role, canEditMaster, canQuote: true, active: true, status: "approved", createdAt: new Date().toISOString() };
-      S.users.push(u);
+    try {
+      const res = await apiRequest("/api/admin/users/invite", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name,
+          email,
+          password,
+          role: perm === "admin" ? "admin" : "user",
+          can_edit_master: perm === "admin" || perm === "user-edit"
+        })
+      });
+      if (res.ok) {
+        toast(`✅ Invited & approved ${email}!`);
+        $("#form-admin-invite").reset();
+        $("#btn-refresh-signup-requests")?.click();
+      } else {
+        const err = await res.json().catch(() => ({}));
+        toast("Invite failed: " + (err.error || res.statusText));
+      }
+    } catch (e) {
+      toast("Error sending invite: " + e.message);
     }
-    saveLocal("users", S.users);
-    syncUserNamesMap();
-    await pushKeyToNeon("users", S.users);
-    updateSidebarStats();
-    const inviteText = `Goverdhan Quote Desk Access Invited:\nLink: ${location.origin}\nGmail: ${email}\nPassword: ${password}`;
-    navigator.clipboard?.writeText(inviteText).catch(() => {});
-    viewUsersAdmin();
-    toast(`✅ Invited & approved ${email} (Invite details copied to clipboard!)`);
-  });
-
-  // Copy Invite Credentials Button
-  document.querySelectorAll("[data-copy-invite]").forEach(btn => btn.onclick = () => {
-    const u = S.users[+btn.getAttribute("data-copy-invite")];
-    if (!u) return;
-    const text = `Goverdhan Quote Desk Login:\nLink: ${location.origin}\nGmail: ${u.email || u.username}\nPassword: ${u.password}`;
-    navigator.clipboard?.writeText(text).then(() => toast(`📋 Copied login invite for ${u.email || u.name}!`), () => toast("Login: " + (u.email || u.username)));
-  });
-
-  document.querySelectorAll("[data-use-acc]").forEach(b => b.onclick = () => {
-    const target = S.users.find(u => u.id === b.dataset.useAcc);
-    if (target) {
-      applyUserSession(target, true);
-      toast(`Switched preview to ${target.name} (${target.role.toUpperCase()})`);
-    }
-  });
-
-  let userSaveTimer = null;
-  document.querySelectorAll("[data-u]").forEach(inp => inp.addEventListener((inp.type === "checkbox" || inp.tagName === "SELECT") ? "change" : "input", e => {
-    if (!isAdmin) return;
-    const idx = +inp.dataset.u;
-    const f = inp.dataset.uf;
-    const u = S.users[idx];
-    if (!u) return;
-    if (inp.type === "checkbox") u[f] = inp.checked;
-    else u[f] = inp.value;
-    if (u.role === "admin") { u.canEditMaster = true; u.canQuote = true; }
-    u.status = "approved";
-    u.updatedAtMs = Date.now();
-    markLocalMutation();
-    saveLocal("users", S.users);
-    syncUserNamesMap();
-    clearTimeout(userSaveTimer);
-    userSaveTimer = setTimeout(async () => {
-      await pushKeyToNeon("users", S.users);
-    }, 500);
-    if (inp.type === "checkbox" || inp.tagName === "SELECT") {
-      if (S.currentUser?.id === u.id) applyUserSession(u, true);
-      else viewUsersAdmin();
-    }
-  }));
-
-  document.querySelectorAll("[data-udel]").forEach(b => b.onclick = async () => {
-    if (!isAdmin) return;
-    if (!b.dataset.armed) { b.dataset.armed = 1; b.textContent = "Del?"; return; }
-    const u = S.users[+b.dataset.udel];
-    if (u) {
-      const k = String(u.email || u.username || u.id).toLowerCase();
-      S.authSettings = S.authSettings || {};
-      S.authSettings.deletedUserKeys = [...new Set([...(S.authSettings.deletedUserKeys || []), k])];
-      saveLocal("authSettings", S.authSettings);
-      await pushKeyToNeon("authSettings", S.authSettings);
-    }
-    S.users.splice(+b.dataset.udel, 1);
-    saveLocal("users", S.users);
-    syncUserNamesMap();
-    await pushKeyToNeon("users", S.users);
-    updateSidebarStats();
-    viewUsersAdmin();
-    toast("User removed");
   });
 }
-
 /* ================= VIEW 11: NEON / RENDER MULTI-PC CLOUD SYNC ================= */
 function viewCloudSync() {
   V().innerHTML = `
@@ -7678,7 +7164,6 @@ function applyColorMode(mode, notify = false, fromRemote = false) {
 }
 
 async function boot() {
-  // 1. Initialize synchronous local state from seed or localStorage
   S.db = createHybridDbAdapter();
   S.catalog = loadLocal("catalog", DEFAULT_CATALOG);
   S.routes = loadLocal("routes", DEFAULT_ROUTES);
@@ -7686,23 +7171,17 @@ async function boot() {
   S.settings = loadLocal("settings", DEF_SETTINGS);
   S.template = loadLocal("template", DEF_TEMPLATE);
   S.cycles = loadLocal("cycles", DEFAULT_CYCLES);
-  S.quotes = loadLocal("quotes", DEFAULT_QUOTES);
+  S.quotes = loadLocal("quotes", []);
   S.quoteLogs = loadLocal("quoteLogs", []);
   S.mlMappings = loadLocal("mlMappings", {});
-  S.quoteSeq = loadLocal("quoteSeq", { "26-27": 1 });
   S.got = { all: true, catalog: true, routes: true, cycles: true, settings: true, transporters: true, quotes: true };
 
-  autoHealCatalogAndRoutes();
-  // 2. Initialize User/Admin session
-  initAuthState();
-
-  // 3. Apply saved Color Mode & Brand Settings
   const savedMode = loadLocal("color_mode", "white");
   applyColorMode(savedMode, false, true);
   const savedBrand = loadLocal("brand_settings", null);
   if (savedBrand) applyBrandToUI(savedBrand);
 
-  // 4. Wire Global Header, Sidebar & Modal Listeners
+  // Wire Global UI Listeners
   $("#mobile-menu-btn")?.addEventListener("click", () => {
     const sb = $("#app-sidebar");
     if (sb?.classList.contains("hidden")) openMobileSidebar();
@@ -7711,7 +7190,6 @@ async function boot() {
   $("#mobile-sidebar-close-btn")?.addEventListener("click", closeMobileSidebar);
   $("#mobile-sidebar-backdrop")?.addEventListener("click", closeMobileSidebar);
 
-  // Explicit click handlers on all sidebar links & mobile quick-nav pills so mobile always navigates & closes drawer
   document.querySelectorAll(".sidebar-link").forEach(a => {
     a.addEventListener("click", e => {
       e.preventDefault();
@@ -7724,11 +7202,9 @@ async function boot() {
     });
   });
   $("#btn-header-home")?.addEventListener("click", () => navigateToTab("quote"));
-
   $("#btn-mode-white")?.addEventListener("click", () => applyColorMode("white", true));
   $("#btn-mode-dark")?.addEventListener("click", () => applyColorMode("dark", true));
 
-  // Sidebar Quick Master Download / Upload
   $("#sidebar-btn-dl-master")?.addEventListener("click", downloadMaster);
   $("#sidebar-btn-up-master")?.addEventListener("click", () => {
     if (!S.canWrite) { toast("Sign in as Admin to upload Master Excel files."); return; }
@@ -7739,45 +7215,30 @@ async function boot() {
     e.target.value = "";
   });
 
-  // Sidebar Cloud Sync Buttons
   $("#btn-sidebar-pull")?.addEventListener("click", () => pullFromNeon(true, true));
   $("#btn-sidebar-push")?.addEventListener("click", () => pushAllToNeon(true));
 
-  // Effortless Sidebar Role Switcher Wiring (1-Click Switch Between Admin, User with Edit Access, and User Quote-Only)
+  // Role Preview Switcher (In-Memory Simulation Only - H-10)
   function switchRoleMode(mode) {
-    if (!S.isAuthenticatedAdmin) { toast("Admin authentication required to switch roles."); return; }
-    S.users = S.users || DEFAULT_USERS;
-    if (mode === "admin") {
-      let adm = S.users.find(u => u.role === "admin") || S.users[0];
-      adm.role = "admin"; adm.canEditMaster = true; adm.canQuote = true;
-      applyUserSession(adm, true);
-      toast("👑 Switched to Admin Mode (Full System & Master Access)");
-    } else if (mode === "user-edit") {
-      let usr = S.users.find(u => u.role === "user") || { id: "u-sales", username: "sales", email: "sales@goverdhanenergy.com", name: "Sales User (Editor)", role: "user", active: true };
-      usr.role = "user";
-      usr.canEditMaster = true;
-      usr.canQuote = true;
-      applyUserSession(usr, true);
-      toast("✏️ Switched to User Dashboard (Can Edit Master Files · Admin SQL/Users Hidden)");
-    } else {
-      let usr = S.users.find(u => u.role === "user") || { id: "u-sales", username: "sales", email: "sales@goverdhanenergy.com", name: "Sales User", role: "user", active: true };
-      usr.role = "user";
-      usr.canEditMaster = false;
-      usr.canQuote = true;
-      applyUserSession(usr, true);
-      toast("👤 Switched to User Dashboard (Quote & PDF Only · Master Read-Only)");
+    if (!S.realUser || S.realUser.role !== "admin") {
+      toast("Admin authentication required to preview roles.");
+      return;
     }
+    const previewUser = {
+      ...S.realUser,
+      role: mode === "admin" ? "admin" : "user",
+      can_edit_master: mode === "admin" || mode === "user-edit",
+      canEditMaster: mode === "admin" || mode === "user-edit",
+      can_quote: true
+    };
+    applyUserSession(previewUser, true);
+    toast(mode === "admin" ? "👑 Switched to Admin View" : (mode === "user-edit" ? "✏️ Previewing User (Can Edit Master Files)" : "👤 Previewing User (Quote Only)"));
   }
 
   const toggleRoleClick = () => {
+    if (!S.realUser || S.realUser.role !== "admin") return;
     const isCurrentlyAdmin = S.currentUser?.role === "admin";
-    // Flip effortlessly between Admin and User (preserving user's configured canEditMaster or toggling to User Editor)
-    if (isCurrentlyAdmin) {
-      const salesUser = (S.users || []).find(u => u.role === "user");
-      switchRoleMode(salesUser?.canEditMaster ? "user-edit" : "user-edit");
-    } else {
-      switchRoleMode("admin");
-    }
+    switchRoleMode(isCurrentlyAdmin ? "user-edit" : "admin");
   };
   $("#btn-effortless-role-switch")?.addEventListener("click", toggleRoleClick);
   $("#btn-role-toggle-pill")?.addEventListener("click", toggleRoleClick);
@@ -7785,7 +7246,6 @@ async function boot() {
     btn.addEventListener("click", () => switchRoleMode(btn.getAttribute("data-fast-role")));
   });
 
-  // Auth Modal Wiring
   $("#btn-open-auth-modal")?.addEventListener("click", () => { $("#modal-auth").hidden = false; });
   $("#btn-banner-switch-admin")?.addEventListener("click", () => { $("#modal-auth").hidden = false; });
   $("#btn-close-auth-modal")?.addEventListener("click", () => { $("#modal-auth").hidden = true; });
@@ -7794,7 +7254,7 @@ async function boot() {
     location.hash = "#admin-users";
   });
 
-  // Full-Screen Security Gate Tab Switching (Sign In / Sign Up / Forgot Password)
+  // Security Gate Tabs
   const setGateTab = tab => {
     $("#form-gate-signin").hidden = tab !== "signin";
     $("#form-gate-signup").hidden = tab !== "signup";
@@ -7818,15 +7278,13 @@ async function boot() {
     setGateTab("forgot");
   });
 
-  // Full-Screen Security Gate: Forgot / Reset Password Submit
-  $("#form-gate-forgot")?.addEventListener("submit", async e => {
+  // Sign In Submit (H-03)
+  $("#form-gate-signin")?.addEventListener("submit", async e => {
     e.preventDefault();
-    const idVal = ($("#gate-forgot-email")?.value || "").trim();
-    const newPw = $("#gate-forgot-newpass")?.value || "";
-    const pinVal = ($("#gate-forgot-pin")?.value || "").trim();
-    const msgEl = $("#gate-forgot-msg");
-    await pullFromNeon(false, true);
-    const res = await handleForgotPasswordSubmission(idVal, newPw, pinVal);
+    const idVal = ($("#gate-login-email")?.value || "").trim();
+    const pwVal = $("#gate-login-password")?.value || "";
+    const msgEl = $("#gate-signin-msg");
+    const res = await serverLogin(idVal, pwVal);
     if (!res.ok) {
       if (msgEl) {
         msgEl.hidden = false;
@@ -7835,41 +7293,32 @@ async function boot() {
       }
       return;
     }
-    if (res.instant) {
-      if (msgEl) msgEl.hidden = true;
-      $("#form-gate-forgot").reset();
-      applyUserSession(res.user, false);
-      toast(`🔑 Password reset successful! Signed in as ${res.user.name}.`);
-    } else if (msgEl) {
-      msgEl.hidden = false;
-      msgEl.textContent = "✅ Password Reset Request Sent! Ask your Admin to click 'Approve New Password' in User & Admin Options (or enter Master Recovery Key GEPL2026 for instant reset).";
-      msgEl.className = "p-3 rounded-xl text-xs font-bold bg-emerald-50 border border-emerald-300 text-emerald-900";
-    }
-  });
-
-  // Full-Screen Security Gate: Sign In Submit (Checks Neon DB first so newly approved users can log in immediately)
-  $("#form-gate-signin")?.addEventListener("submit", async e => {
-    e.preventDefault();
-    const idVal = ($("#gate-login-email")?.value || "").trim();
-    const pwVal = $("#gate-login-password")?.value || "";
-    const msgEl = $("#gate-signin-msg");
-    await pullFromNeon(false, true);
-    const res = authenticateUserWithPassword(idVal, pwVal);
-    if (!res.ok) {
-      if (msgEl) {
-        msgEl.hidden = false;
-        msgEl.textContent = res.error;
-        msgEl.className = "p-3 rounded-xl text-xs font-bold " + (res.status === "pending" ? "bg-amber-50 border border-amber-300 text-amber-900" : "bg-rose-50 border border-rose-200 text-rose-700");
-      }
-      return;
-    }
     if (msgEl) msgEl.hidden = true;
     $("#gate-login-password").value = "";
-    applyUserSession(res.user, false);
     toast(`🔓 Welcome back, ${res.user.name}!`);
+    await pullFromNeon(false, true);
+    connectRealtimeSSE();
   });
 
-  // Full-Screen Security Gate: Sign Up / Request Access Submit
+  // In-App Switch Modal Submit
+  $("#form-gmail-login")?.addEventListener("submit", async e => {
+    e.preventDefault();
+    const gm = ($("#login-gmail-address")?.value || "").trim();
+    const pw = $("#login-gmail-password")?.value || "";
+    const errEl = $("#modal-login-error");
+    const res = await serverLogin(gm, pw);
+    if (!res.ok) {
+      if (errEl) { errEl.hidden = false; errEl.textContent = res.error; }
+      return;
+    }
+    if (errEl) errEl.hidden = true;
+    $("#login-gmail-password").value = "";
+    $("#modal-auth").hidden = true;
+    toast(`🔓 Signed in as ${res.user.name}`);
+    await pullFromNeon(false, true);
+  });
+
+  // Sign Up Submit
   $("#form-gate-signup")?.addEventListener("submit", async e => {
     e.preventDefault();
     const nm = ($("#gate-signup-name")?.value || "").trim();
@@ -7877,12 +7326,11 @@ async function boot() {
     const pw = $("#gate-signup-password")?.value || "";
     const nt = ($("#gate-signup-note")?.value || "").trim();
     const msgEl = $("#gate-signup-msg");
-    await pullFromNeon(false, true);
     const res = await submitAccessRequestSignUp(nm, em, pw, nt);
     if (msgEl) {
       msgEl.hidden = false;
       if (res.ok) {
-        msgEl.textContent = "✅ Access Request Submitted! Your account is now in the Admin Approval Queue. You can sign in as soon as the Admin approves your Gmail.";
+        msgEl.textContent = "✅ Access Request Submitted! An Admin will review and approve your account.";
         msgEl.className = "p-3 rounded-xl text-xs font-bold bg-emerald-50 border border-emerald-300 text-emerald-900";
         $("#form-gate-signup").reset();
       } else {
@@ -7892,121 +7340,76 @@ async function boot() {
     }
   });
 
-  // In-App Switch Account Modal Submit (Requires Valid Password & Approved Status)
-  $("#form-gmail-login")?.addEventListener("submit", async e => {
+  // Forgot Password Submit
+  $("#form-gate-forgot")?.addEventListener("submit", async e => {
     e.preventDefault();
-    const gm = ($("#login-gmail-address")?.value || "").trim();
-    const pw = $("#login-gmail-password")?.value || "";
-    const errEl = $("#modal-login-error");
-    await pullFromNeon(false, true);
-    const res = authenticateUserWithPassword(gm, pw);
-    if (!res.ok) {
-      if (errEl) { errEl.hidden = false; errEl.textContent = res.error; }
-      return;
+    const em = ($("#gate-forgot-email")?.value || "").trim();
+    const pw = $("#gate-forgot-newpass")?.value || "";
+    const msgEl = $("#gate-forgot-msg");
+    const res = await handleForgotPasswordSubmission(em, pw);
+    if (msgEl) {
+      msgEl.hidden = false;
+      if (res.ok) {
+        msgEl.textContent = "✅ Password Reset Request Recorded! Contact your Administrator to approve it.";
+        msgEl.className = "p-3 rounded-xl text-xs font-bold bg-emerald-50 border border-emerald-300 text-emerald-900";
+        $("#form-gate-forgot").reset();
+      } else {
+        msgEl.textContent = res.error;
+        msgEl.className = "p-3 rounded-xl text-xs font-bold bg-rose-50 border border-rose-200 text-rose-700";
+      }
     }
-    if (errEl) errEl.hidden = true;
-    $("#login-gmail-password").value = "";
-    $("#modal-auth").hidden = true;
-    applyUserSession(res.user, false);
-    toast(`🔓 Signed in as ${res.user.name} (${res.user.role.toUpperCase()})`);
   });
 
-  // Sign Out Buttons
   $("#btn-modal-signout")?.addEventListener("click", signOutCurrentUser);
   $("#btn-sidebar-signout")?.addEventListener("click", signOutCurrentUser);
 
-  // Brand Customizer Modal Wiring (Logo & Company Name in Header now navigate to Home / Calculator!)
-  const openBrand = () => {
-    if (S.currentUser?.role !== "admin") {
-      toast("Only Admin can change company logo & brand.");
+  // Reset Default Master Data confirmation (H-04)
+  $("#btn-reset-all-defaults")?.addEventListener("click", async () => {
+    if (!S.canWrite) return;
+    const confirmText = prompt('⚠️ DANGER: This will reset all Refineries, Routes, Transporters, Settings, and Cycles to default Goverdhan seed data.\n\nType "RESET MASTER DATA" to confirm:');
+    if (confirmText !== "RESET MASTER DATA") {
+      toast("Reset aborted — confirmation text did not match.");
       return;
     }
-    closeMobileSidebar();
-    $("#modal-brand").hidden = false;
-  };
-  $("#btn-open-brand-modal")?.addEventListener("click", openBrand);
-  $("#logo-trigger-box")?.addEventListener("click", () => navigateToTab("quote"));
-  $("#brand-name-trigger")?.addEventListener("click", () => navigateToTab("quote"));
-  $("#btn-close-brand-modal")?.addEventListener("click", () => { $("#modal-brand").hidden = true; });
-  $("#btn-trigger-logo-upload")?.addEventListener("click", () => { $("#input-brand-logo-file")?.click(); });
-
-  let pendingLogoUrl = savedBrand?.logoDataUrl || null;
-  $("#input-brand-logo-file")?.addEventListener("change", e => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = evt => {
-      pendingLogoUrl = evt.target.result;
-      const prev = $("#brand-preview-img");
-      if (prev) prev.src = pendingLogoUrl;
-      toast("Logo loaded! Click Save & Sync Brand to apply.");
-    };
-    reader.readAsDataURL(file);
+    S.catalog = JSON.parse(JSON.stringify(DEFAULT_CATALOG));
+    S.routes = JSON.parse(JSON.stringify(DEFAULT_ROUTES));
+    S.transporters = JSON.parse(JSON.stringify(DEFAULT_TRANSPORTERS));
+    S.settings = JSON.parse(JSON.stringify(DEF_SETTINGS));
+    S.template = JSON.parse(JSON.stringify(DEF_TEMPLATE));
+    S.cycles = JSON.parse(JSON.stringify(DEFAULT_CYCLES));
+    for (const k of ["catalog", "routes", "transporters", "settings", "template", "cycles"]) {
+      saveLocal(k, S[k]);
+      await pushKeyToNeon(k, S[k]);
+    }
+    render();
+    toast("Master Data reset to Goverdhan default seed!");
   });
 
-  $("#btn-save-brand")?.addEventListener("click", async () => {
-    if (S.currentUser?.role !== "admin") { toast("Only Admin can change company logo & branding."); return; }
-    const name = ($("#input-brand-name")?.value || "").trim() || "Goverdhan Energy & Petrochemicals Pvt. Ltd.";
-    const tagline = ($("#input-brand-tagline")?.value || "").trim() || "Refinery Quote Desk & Transporter Price Optimizer";
-    const brandObj = { name, tagline, logoDataUrl: pendingLogoUrl || $("#company-logo-img")?.src };
-    saveLocal("brand_settings", brandObj);
-    applyBrandToUI(brandObj);
-    await pushKeyToNeon("brand_settings", brandObj);
-    $("#modal-brand").hidden = true;
-    toast("Company brand & logo saved across all PCs!");
-  });
-
-  $("#btn-reset-brand-default")?.addEventListener("click", async () => {
-    if (S.currentUser?.role !== "admin") return;
-    pendingLogoUrl = null;
-    const defObj = { name: "Goverdhan Energy & Petrochemicals Pvt. Ltd.", tagline: "Refinery Quote Desk & Transporter Price Optimizer", logoDataUrl: DEFAULT_LOGO_LT };
-    saveLocal("brand_settings", defObj);
-    applyBrandToUI(defObj);
-    await pushKeyToNeon("brand_settings", defObj);
-    toast("Restored Goverdhan default logo & brand");
-  });
-
-  // Restore saved workspaceState (calculator inputs & quotation draft)
-  const savedWs = loadLocal("workspaceState", null);
-  if (savedWs && typeof savedWs === "object") {
-    if (savedWs.q && typeof savedWs.q === "object") UI.q = { ...UI.q, ...savedWs.q };
-    if (savedWs.qdoc !== undefined) UI.qdoc = savedWs.qdoc;
+  // Check existing session on load (H-03)
+  try {
+    const meRes = await apiRequest("/api/auth/me");
+    if (meRes.ok) {
+      const meData = await meRes.json();
+      applyUserSession(meData.user, false);
+      await pullFromNeon(false, true);
+      connectRealtimeSSE();
+    } else {
+      const gate = $("#auth-gate-overlay");
+      if (gate) gate.hidden = false;
+    }
+  } catch (e) {
+    const gate = $("#auth-gate-overlay");
+    if (gate) gate.hidden = false;
   }
-  S.stateRev = loadLocal("_stateRev", 0) || 0;
 
-  // 5. Render initial route immediately, then pull latest state from Neon DB
   route();
 
-  // 6. Connect to Neon PostgreSQL (await authoritative server state first, then enable live SSE + 2.5s poll)
-  await pullFromNeon(false, true);
-  initialPullDone = true;
-  connectRealtimeSSE();
-
-  window.addEventListener("storage", e => {
-    if (!e.key || !e.key.startsWith(LS_PREFIX)) return;
-    S.catalog = loadLocal("catalog", DEFAULT_CATALOG);
-    S.routes = loadLocal("routes", DEFAULT_ROUTES);
-    S.transporters = loadLocal("transporters", DEFAULT_TRANSPORTERS);
-    S.settings = loadLocal("settings", DEF_SETTINGS);
-    S.template = loadLocal("template", DEF_TEMPLATE);
-    S.cycles = loadLocal("cycles", DEFAULT_CYCLES);
-    S.quotes = loadLocal("quotes", DEFAULT_QUOTES);
-    S.users = loadLocal("users", DEFAULT_USERS);
-    const ws = loadLocal("workspaceState", null);
-    if (ws?.q) UI.q = { ...UI.q, ...ws.q };
-    if (ws?.qdoc !== undefined) UI.qdoc = ws.qdoc;
-    syncUserNamesMap();
-    dataChanged();
-  });
-
-  window.addEventListener("focus", () => pullFromNeon(false, false));
-  document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "visible") pullFromNeon(false, false);
-  });
-
+  // Lightweight 30s version polling instead of 2.5s full-table download (H-21)
   setInterval(() => {
-    if (document.visibilityState === "visible") pullFromNeon(false, false);
-  }, 2500);
+    if (document.visibilityState === "visible") {
+      checkServerVersionStatus();
+    }
+  }, 30000);
 }
 
 boot();

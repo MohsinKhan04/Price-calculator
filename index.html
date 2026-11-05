@@ -948,6 +948,7 @@ const UI = {
 };
 
 const $ = s => document.querySelector(s);
+const $$ = (s, root) => Array.from((root || document).querySelectorAll(s));
 const esc = v => String(v ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const norm = s => String(s ?? "").trim().toLowerCase().replace(/\s+/g, " ");
 const key = s => String(s ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");

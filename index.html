@@ -5767,7 +5767,7 @@ function viewRefineries() {
 
   const targetEl = $("#master-body") || $("#master-refineries");
 if (targetEl) {
-  targetEl.innerHTML =
+  targetEl.innerHTML = `
     <div class="p-4 sm:p-6">
       <div class="flex flex-wrap items-center justify-between gap-2 mb-4">
         <div>
@@ -5960,7 +5960,9 @@ if (targetEl) {
     const isActive = ($("#new-ref-active")?.value || "true") === "true";
     if (!city) return toast("Please enter the refinery City.");
     const state = inferStateForCity(city, stateInput);
-    const duplicate = realRefineries.find(it => norm(it.s.loading || it.s.name) === norm(city));
+    const duplicate = realRefineries.find(it =>
+      norm(it.s.loading || it.s.name) === norm(city)
+    );
     if (duplicate) return toast(`${selectedCompany.brandName} — ${city} already exists.`);
 
     const placeholderIdx = S.catalog.sources.findIndex(

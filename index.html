@@ -5218,9 +5218,24 @@ function viewCredit() {
 }
 
 /* ================= VIEW 7: MASTER FILE — REFINERIES & PRODUCTS ================= */
+function getSourceBrandName(s) {
+  if (!s) return "Other";
+  if (s.brandName && String(s.brandName).trim()) return String(s.brandName).trim();
+  if (s.company && String(s.company).trim()) return String(s.company).trim();
+  const raw = String(s.name || "").trim();
+  const m = raw.match(/^([^(—\-]+)/);
+  return (m ? m[1] : raw || "Other").trim();
+}
+
+function getRefineryProducts(s) {
+  if (!s) return [];
+  if (Array.isArray(s.products)) return s.products.slice();
+  return (S.catalog?.products || []).map(p => p.id);
+}
+
 function syncRefineryProductsToLatestCycle(sourceId, productIds) {
-  const lc = latestCycle();
-  if (!lc) return;
+  const lc = typeof latestCycle === "function" ? latestCycle() : null;
+  if (!lc || !Array.isArray(lc.prices)) return;
   let added = false;
   (productIds || []).forEach(pid => {
     if (!lc.prices.find(p => p.sourceId === sourceId && p.productId === pid)) {
@@ -5284,9 +5299,7 @@ function getRefineryBrandGroups() {
   return groups;
 }
 
-function flushRefineriesDomToCatalog() {
-  // Kept for compatibility with Quick Add / Master Shell callers
-}
+function flushRefineriesDomToCatalog() {}
 
 function addLocationToBrandGroup(brandIdx, rawLocationText) {
   const groups = getRefineryBrandGroups();
@@ -5322,7 +5335,7 @@ function addInlineProductToSupplyPoint(sourceIndex, rawProdName) {
   let prod = (S.catalog.products || []).find(p => norm(p.name) === norm(cleanName));
   if (!prod) {
     const newPid = "p_" + norm(cleanName).replace(/[^a-z0-9]+/g, "_") + "_" + uid().slice(0, 4);
-    prod = { id: newPid, name: cleanName, cat: "Industrial Fuel", unit: "MT", density: 0.9, active: true };
+    prod = { id: newPid, name: cleanName, cat: "White liquid", unit: "MT", density: 0.9, active: true };
     S.catalog.products.push(prod);
   }
   const curProds = getRefineryProducts(s);
@@ -5337,17 +5350,17 @@ function addInlineProductToSupplyPoint(sourceIndex, rawProdName) {
 }
 
 function viewRefineries() {
-  const host = $("#master-subview") || $("#master-body");
+  const host = $("#master-subview") || $("#master-body") || $("#master-content") || $("#master-refineries");
   if (!host) return;
 
   S.catalog = S.catalog || { sources: [], products: [] };
-  autoHealCatalogAndRoutes();
+  if (typeof autoHealCatalogAndRoutes === "function") autoHealCatalogAndRoutes();
 
   const saveC = (delay = 0) => saveDoc("master/catalog", S.catalog, delay);
-  const canEdit = !!S.canWrite;
+  const canEdit = typeof canWrite === "function" ? !!canWrite() : (S.canWrite !== false);
   const namedProds = (S.catalog.products || []).filter(p => (p.name || "").trim());
-  const P = prodMap();
-  const lc = latestCycle();
+  const P = typeof prodMap === "function" ? prodMap() : Object.fromEntries(namedProds.map(p => [p.id, p]));
+  const lc = typeof latestCycle === "function" ? latestCycle() : null;
   const brandGroups = getRefineryBrandGroups();
 
   UI.refMgr = UI.refMgr || {
@@ -5387,7 +5400,6 @@ function viewRefineries() {
     return s.productStatus[pid] !== false;
   };
 
-  // Top Header + Excel Upload / Delete All Controls (Preserved from your working version)
   const topToolbarHtml = `
     <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
       <div>
@@ -5405,7 +5417,6 @@ function viewRefineries() {
     </div>
   `;
 
-  // 3-Step Breadcrumb Bar
   const breadcrumbHtml = `
     <div class="flex flex-wrap items-center justify-between gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 mb-4">
       <div class="flex flex-wrap items-center gap-1.5 text-xs sm:text-sm">
@@ -5436,7 +5447,6 @@ function viewRefineries() {
     </div>
   `;
 
-  // Optional Central Product Catalogue Drawer
   const catalogDrawerHtml = rm.showCatalogDrawer ? `
     <div class="bg-indigo-50/60 border border-indigo-200 rounded-xl p-4 mb-5">
       <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
@@ -5481,9 +5491,6 @@ function viewRefineries() {
 
   let stepBodyHtml = "";
 
-  // =========================================================================
-  // STEP 1: COMPANY MANAGEMENT (e.g. BPCL, IOCL, HPCL, NAYARA)
-  // =========================================================================
   if (!selectedCompany) {
     stepBodyHtml = `
       <div>
@@ -5590,12 +5597,7 @@ function viewRefineries() {
         `}
       </div>
     `;
-  }
-
-  // =========================================================================
-  // STEP 2: REFINERY MANAGEMENT UNDER SELECTED COMPANY (City — State)
-  // =========================================================================
-  else if (selectedCompany && !selectedRefineryItem) {
+  } else if (selectedCompany && !selectedRefineryItem) {
     stepBodyHtml = `
       <div>
         <div class="flex flex-wrap items-center justify-between gap-3 mb-4 pb-3 border-b border-slate-200">
@@ -5743,12 +5745,7 @@ function viewRefineries() {
         `}
       </div>
     `;
-  }
-
-  // =========================================================================
-  // STEP 3: PRODUCT ASSIGNMENT FOR SELECTED REFINERY ONLY
-  // =========================================================================
-  else if (selectedCompany && selectedRefineryItem) {
+  } else if (selectedCompany && selectedRefineryItem) {
     const s = selectedRefineryItem.s;
     const city = (s.loading || (s.locations && s.locations[0]) || "").trim() || s.name || "Location";
     const state = (s.state || inferStateForCity(city)).trim();
@@ -5894,10 +5891,9 @@ function viewRefineries() {
     </div>
   `;
 
-  // =========================================================================
-  // EVENT LISTENERS
-  // =========================================================================
-  $("#btn-upload-refineries-step2")?.addEventListener("click", () => triggerStepExcelUpload("refineries"));
+  $("#btn-upload-refineries-step2")?.addEventListener("click", () => {
+    if (typeof triggerStepExcelUpload === "function") triggerStepExcelUpload("refineries");
+  });
   $("#btn-delete-all-sources")?.addEventListener("click", async () => {
     if (!confirm("Are you sure you want to delete ALL Refineries and Supply Points?")) return;
     S.catalog.sources = [];
@@ -5905,7 +5901,7 @@ function viewRefineries() {
     rm.refineryId = null;
     await writeDoc("master/catalog", S.catalog);
     toast("All refineries deleted.");
-    viewMaster();
+    if (typeof viewMaster === "function") viewMaster();
   });
 
   $$("[data-nav-step]").forEach(btn => {
@@ -5946,7 +5942,6 @@ function viewRefineries() {
     toast(`Added ${name} (${unit}) to central catalogue.`);
   });
 
-  // Step 1 Listeners
   $("#btn-show-add-company")?.addEventListener("click", () => {
     rm.showAddCompany = true;
     viewRefineries();
@@ -6049,7 +6044,6 @@ function viewRefineries() {
     });
   });
 
-  // Step 2 Listeners (Refineries under Selected Company)
   $("#btn-show-add-refinery")?.addEventListener("click", () => {
     rm.showAddRefinery = true;
     viewRefineries();
@@ -6171,7 +6165,6 @@ function viewRefineries() {
     });
   });
 
-  // Step 3 Listeners (Products & Prices for Selected Refinery)
   $("#btn-show-add-product")?.addEventListener("click", () => {
     rm.showAddProduct = true;
     rm.productSearch = "";

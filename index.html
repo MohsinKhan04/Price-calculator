@@ -5337,7 +5337,7 @@ function addInlineProductToSupplyPoint(sourceIndex, rawProdName) {
 }
 
 function viewRefineries() {
-  const host = $("#master-body");
+  const host = $("#master-subview") || $("#master-body");
   if (!host) return;
 
   S.catalog = S.catalog || { sources: [], products: [] };

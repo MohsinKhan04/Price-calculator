@@ -4636,152 +4636,375 @@ function viewTransporters() {
   T.forEach(ensureTransporterSubcategories);
   const rows = S.routes?.rows || [];
   const namedProds = (S.catalog?.products || []).filter(p => (p.name || "").trim());
+  const PM = Object.fromEntries(namedProds.map(p => [p.id, p]));
   const allLoadingLocs = loadingPoints();
   const allDelLocs = allLocations();
   const saveT = (delay = 400) => saveDoc("master/transporters", S.transporters, delay);
-  const dis = S.canWrite ? "" : "disabled";
+  const canEdit = !!S.canWrite;
+  const dis = canEdit ? "" : "disabled";
+
+  UI.trMgr = UI.trMgr || { transporterId: null, showAdd: false, search: "" };
+  const tm = UI.trMgr;
+
+  let selIdx = tm.transporterId ? T.findIndex(t => t.id === tm.transporterId) : -1;
+  if (selIdx < 0) tm.transporterId = null;
+  const selT = selIdx >= 0 ? T[selIdx] : null;
+
+  const routeCountOf = t => rows.filter(r => r.transporterId === t.id).length;
+  const trLabel = t => (t.name || "").trim() || "Unnamed transporter";
+
+  /* ---------- Header toolbar ---------- */
+  const topToolbarHtml = `
+    <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+      <div>
+        <div class="font-bold text-base text-slate-900">Step 3 · Transporters, Products Carried &amp; Delivery Locations (Transporter → Products → Origin → Delivery)</div>
+        <div class="text-xs text-slate-500">Select a Transporter, then manage its fleet, the <b>Products</b> it carries (e.g. MTO, C9, LDO) and its <b>Origin → Delivery Sub-Locations</b> with rates.</div>
+      </div>
+      <div class="flex flex-wrap gap-2">
+        ${S.currentUser?.role === "admin" && T.length ? `<button type="button" id="del-all-transporters" class="btn small danger">🗑️ Delete All (${T.length})</button>` : ""}
+        ${canEdit ? `<label class="btn small" for="up-step-transporters" style="cursor:pointer">⬆ Upload Transporters (.xlsx)</label><input type="file" id="up-step-transporters" accept=".xlsx,.xls,.csv" hidden>` : `<span class="badge badge-gray">🔒 View-Only</span>`}
+      </div>
+    </div>`;
+
+  /* ---------- Breadcrumb ---------- */
+  const breadcrumbHtml = `
+    <div class="flex flex-wrap items-center justify-between gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 mb-4">
+      <div class="flex flex-wrap items-center gap-1.5 text-xs sm:text-sm">
+        <button type="button" data-tr-nav="list" class="px-3 py-1.5 rounded-lg font-bold transition ${!selT ? "bg-indigo-600 text-white shadow-sm" : "bg-white text-slate-700 border border-slate-200 hover:bg-slate-100"}">
+          🚚 1. Transporters (${T.length})
+        </button>
+        <span class="text-slate-400 font-bold">→</span>
+        ${selT ? `
+          <span class="px-3 py-1.5 rounded-lg font-bold bg-indigo-600 text-white shadow-sm">
+            🛢️ 2. ${esc(trLabel(selT))} — Products &amp; Locations
+          </span>` : `
+          <span class="px-3 py-1.5 rounded-lg text-slate-400 bg-white border border-dashed border-slate-200 text-xs">
+            2. Select Transporter to Manage
+          </span>`}
+      </div>
+    </div>`;
+
+  let bodyHtml = "";
+
+  if (!selT) {
+    /* =================== LEVEL 1: TRANSPORTER CARDS =================== */
+    const q = norm(tm.search || "");
+    const visible = T.map((t, ti) => ({ t, ti })).filter(({ t }) => {
+      if (!q) return true;
+      const hay = [
+        t.name, t.phone,
+        ...(t.locationGroups || []).map(lg => lg.loading),
+        ...(t.products || []).map(pid => PM[pid]?.name || "")
+      ].map(x => norm(x || "")).join(" | ");
+      return hay.includes(q);
+    });
+
+    bodyHtml = `
+      <div>
+        <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+          <div class="text-xs font-bold uppercase tracking-wider text-slate-500">
+            Select a Transporter to manage products &amp; locations (${visible.length}${q ? ` of ${T.length}` : ""} Transporters)
+          </div>
+          <div class="flex flex-wrap items-center gap-2">
+            <input id="tr-search-input" class="input input-sm bg-white" style="width:230px;padding:5px 9px;font-size:12px" placeholder="Search name, phone, origin, product…" value="${esc(tm.search || "")}" />
+            ${canEdit ? `<button type="button" id="btn-show-add-transporter" class="btn small primary">＋ Add Transporter</button>` : ""}
+          </div>
+        </div>
+
+        ${tm.showAdd && canEdit ? `
+          <div class="bg-indigo-50/70 border border-indigo-200 rounded-xl p-4 mb-4">
+            <div class="font-bold text-xs text-indigo-950 uppercase tracking-wider mb-2">Add New Transporter</div>
+            <div class="grid grid-cols-1 sm:grid-cols-4 gap-3 items-end">
+              <div>
+                <label class="lbl">Transporter Name *</label>
+                <input id="new-tr-name" class="input input-sm bg-white" placeholder="e.g. Rudra Logistics" />
+              </div>
+              <div>
+                <label class="lbl">Phone (Optional)</label>
+                <input id="new-tr-phone" class="input input-sm bg-white" placeholder="e.g. 98409 74997" />
+              </div>
+              <div>
+                <label class="lbl">First Tanker (Optional)</label>
+                <input id="new-tr-vehicle" class="input input-sm bg-white" value="20 KL Tanker" />
+              </div>
+              <div class="flex items-center gap-2">
+                <button type="button" id="btn-save-new-transporter" class="btn small primary">Save Transporter</button>
+                <button type="button" id="btn-cancel-new-transporter" class="btn small">Cancel</button>
+              </div>
+            </div>
+          </div>` : ""}
+
+        ${T.length === 0 ? `
+          <div class="text-center py-10 text-slate-400 text-sm border border-dashed border-slate-200 rounded-xl">
+            No transporters yet. Click <b>＋ Add Transporter</b> above or upload your Transporters Excel file.
+          </div>
+        ` : visible.length === 0 ? `
+          <div class="text-center py-10 text-slate-400 text-sm border border-dashed border-slate-200 rounded-xl">
+            No transporters match "<b>${esc(tm.search)}</b>".
+          </div>
+        ` : `
+          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
+            ${visible.map(({ t, ti }) => {
+              const carried = (t.products || []).filter(pid => PM[pid]);
+              const lGroups = t.locationGroups || [];
+              const delCount = lGroups.reduce((n, lg) => n + (lg.deliveries || []).length, 0);
+              const vehicles = (t.vehicles || []).map(v => (v.category || "").trim()).filter(Boolean);
+              const vehText = vehicles.length ? [...new Set(vehicles)].join(", ") : "No vehicles added";
+              const shown = carried.slice(0, 6);
+              const more = carried.length - shown.length;
+              return `
+                <div class="border border-slate-200 bg-white rounded-xl p-4 shadow-sm hover:border-indigo-300 transition flex flex-col justify-between">
+                  <div>
+                    <div class="flex items-start justify-between gap-2 mb-2">
+                      <div class="flex items-center gap-2.5 min-w-0">
+                        <span class="w-9 h-9 shrink-0 rounded-lg bg-indigo-50 border border-indigo-100 text-indigo-700 font-extrabold text-xs flex items-center justify-center">
+                          ${esc(trLabel(t).slice(0, 2).toUpperCase())}
+                        </span>
+                        <div class="min-w-0">
+                          <h4 class="font-bold text-slate-900 text-base leading-tight truncate">${esc(trLabel(t))}</h4>
+                          <span class="text-xs text-slate-500 font-mono">${esc(t.phone || "No phone")}</span>
+                        </div>
+                      </div>
+                      <span class="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-slate-100 text-slate-600 border border-slate-200 whitespace-nowrap">${routeCountOf(t)} route(s)</span>
+                    </div>
+
+                    <div class="text-xs text-slate-500 mb-2">🚚 ${esc(vehText)}</div>
+
+                    <div class="mt-2 pt-2 border-t border-slate-100">
+                      <div class="text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1.5">Products Carried (${carried.length})</div>
+                      ${carried.length ? `
+                        <div class="flex flex-wrap gap-1.5">
+                          ${shown.map(pid => `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium border bg-indigo-50 text-indigo-800 border-indigo-200">${esc(PM[pid].name)}</span>`).join("")}
+                          ${more > 0 ? `<span class="text-xs text-slate-400 self-center">+${more} more</span>` : ""}
+                        </div>` : `<span class="text-xs italic text-slate-400">No products assigned yet</span>`}
+                    </div>
+
+                    <div class="mt-3 pt-2 border-t border-slate-100">
+                      <div class="text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1.5">Origins (${lGroups.length}) · ${delCount} delivery location(s)</div>
+                      ${lGroups.length ? `
+                        <div class="flex flex-wrap gap-1.5">
+                          ${lGroups.map(lg => `<span class="px-1.5 py-0.5 rounded bg-emerald-700 text-white text-[10px] font-extrabold">🏭 ${esc(lg.loading)}</span>`).join("")}
+                        </div>` : `<span class="text-xs italic text-slate-400">No origin locations added yet</span>`}
+                    </div>
+                  </div>
+
+                  <div class="pt-3 mt-4 border-t border-slate-100 flex items-center justify-between gap-1.5">
+                    <button type="button" data-tr-open="${esc(t.id)}" class="btn small primary flex-1" style="justify-content:center">Manage Products &amp; Locations →</button>
+                    ${canEdit ? `<button type="button" data-tdel="${ti}" class="btn small danger text-xs px-2" title="Delete ${esc(trLabel(t))}">Delete</button>` : ""}
+                  </div>
+                </div>`;
+            }).join("")}
+          </div>
+        `}
+      </div>`;
+  } else {
+    /* =================== LEVEL 2: ONE TRANSPORTER =================== */
+    const t = selT;
+    const ti = selIdx;
+    const carried = t.products || [];
+    const lGroups = t.locationGroups || [];
+
+    bodyHtml = `
+      <div>
+        <div class="flex flex-wrap items-center justify-between gap-3 mb-4 pb-3 border-b border-slate-200">
+          <div class="flex items-center gap-2.5">
+            <button type="button" data-tr-nav="list" class="btn small text-xs">← Back to Transporters</button>
+            <div>
+              <h3 class="text-base font-bold text-slate-900">${esc(trLabel(t))}</h3>
+              <p class="text-xs text-slate-500 mt-0.5">Changes here apply <b>only</b> to <b>${esc(trLabel(t))}</b>. ${routeCountOf(t)} route(s) linked.</p>
+            </div>
+          </div>
+          ${canEdit ? `<button type="button" data-tdel="${ti}" class="btn small danger text-xs">Delete Transporter</button>` : ""}
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+
+          <!-- PANEL 1: DETAILS & FLEET -->
+          <div class="border border-slate-200 bg-white rounded-xl p-4 shadow-sm">
+            <div class="text-xs font-bold uppercase tracking-wider text-slate-500 mb-3">1. Transporter &amp; Tanker Fleet</div>
+            <div class="space-y-2">
+              <div>
+                <label class="lbl">Transporter Name</label>
+                <input type="text" data-t="${ti}" data-f="name" value="${esc(t.name)}" placeholder="Transporter Name" class="input input-sm" style="font-weight:800" ${dis}>
+              </div>
+              <div>
+                <label class="lbl">Phone</label>
+                <input type="text" data-t="${ti}" data-f="phone" value="${esc(t.phone || "")}" placeholder="Phone" class="input input-sm font-mono" ${dis}>
+              </div>
+              <div>
+                <label class="lbl">Notes</label>
+                <input type="text" data-t="${ti}" data-f="notes" value="${esc(t.notes || "")}" placeholder="Optional notes" class="input input-sm" ${dis}>
+              </div>
+              <div class="pt-1">
+                <div class="lbl">Vehicles</div>
+                <div class="space-y-1.5">
+                  ${(t.vehicles || []).map((v, vi) => `
+                    <div class="flex items-center gap-1">
+                      <span class="text-[11px] text-slate-400">🚚</span>
+                      <input type="text" data-t="${ti}" data-v="${vi}" data-f="category" value="${esc(v.category)}" placeholder="20 KL Tanker" style="font-size:11.5px;padding:3px 6px;flex:1;min-width:0" ${dis}>
+                      <input type="number" step="any" data-t="${ti}" data-v="${vi}" data-f="capacity" value="${v.capacity ?? ""}" placeholder="Cap" style="width:56px;font-size:11.5px;padding:3px 5px" class="font-mono" ${dis}>
+                      <select data-t="${ti}" data-v="${vi}" data-f="unit" style="width:54px;font-size:11.5px;padding:3px 3px" ${dis}>
+                        <option ${v.unit === "KL" ? "selected" : ""}>KL</option>
+                        <option ${v.unit === "MT" ? "selected" : ""}>MT</option>
+                      </select>
+                      ${canEdit ? `<button type="button" class="text-rose-500 hover:text-rose-700 text-sm font-bold px-1" data-vdel="${ti}:${vi}" title="Remove vehicle">×</button>` : ""}
+                    </div>`).join("") || `<div class="text-xs italic text-slate-400">No vehicles added</div>`}
+                </div>
+                ${canEdit ? `<button type="button" class="mt-2 text-xs font-bold text-indigo-600 hover:text-indigo-800 cursor-pointer" data-vadd="${ti}">+ Add Vehicle</button>` : ""}
+              </div>
+            </div>
+          </div>
+
+          <!-- PANEL 2: PRODUCTS CARRIED -->
+          <div class="border border-slate-200 bg-white rounded-xl p-4 shadow-sm">
+            <div class="text-xs font-bold uppercase tracking-wider text-slate-500 mb-3">2. Products Carried (${carried.filter(pid => PM[pid]).length})</div>
+            <div class="flex flex-wrap gap-1.5 mb-3">
+              ${carried.map(pid => {
+                const p = PM[pid];
+                if (!p) return "";
+                return `<span class="chip" style="padding:3px 9px;font-size:11.5px;background:var(--accent);border-color:var(--accent);color:#fff">
+                  <span class="dot" style="background:${clsDotColor(p.cls)};border:1px solid #fff;width:6px;height:6px"></span>
+                  <span>${esc(p.name)}</span>
+                  ${canEdit ? `<button type="button" data-tr-rmprod="${ti}|${esc(p.id)}" class="ml-1 text-white/80 hover:text-white font-extrabold" title="Remove ${esc(p.name)}">×</button>` : ""}
+                </span>`;
+              }).join("") || `<span class="text-xs italic text-slate-400">No products assigned yet</span>`}
+            </div>
+            ${canEdit ? `
+            <div class="space-y-2 pt-3 border-t border-slate-100">
+              <select data-tr-pickprod="${ti}" class="input input-sm bg-white" style="width:100%">
+                <option value="">+ Pick from Product Catalogue…</option>
+                ${namedProds.filter(p => !carried.includes(p.id)).map(p => `<option value="${esc(p.id)}">${esc(p.name)} (${esc(p.unit)})</option>`).join("")}
+                <option value="__ALL__">✓ All Products</option>
+                <option value="__CLEAR__">✕ Clear All</option>
+              </select>
+              <div class="flex items-center gap-1.5">
+                <input type="text" data-tr-newprod-in="${ti}" class="input input-sm bg-white" placeholder="Or type new: MTO, C9" style="flex:1;min-width:0">
+                <button type="button" data-tr-newprod-btn="${ti}" class="btn small primary">＋ Add</button>
+              </div>
+            </div>` : ""}
+          </div>
+
+          <!-- PANEL 3: ORIGIN -> DELIVERY -->
+          <div class="border border-slate-200 bg-white rounded-xl p-4 shadow-sm lg:col-span-1">
+            <div class="text-xs font-bold uppercase tracking-wider text-slate-500 mb-3">3. Origin ➔ Delivery Sub-Locations (${lGroups.length})</div>
+            <div class="space-y-3">
+              ${lGroups.map((lg, lgi) => {
+                const dels = lg.deliveries || [];
+                const key = `${ti}|${lgi}`;
+                return `
+                <div class="rounded-lg bg-slate-50 border border-slate-200 p-2.5">
+                  <div class="flex items-center justify-between mb-2">
+                    <span class="px-2 py-0.5 rounded bg-emerald-700 text-white text-[11px] font-extrabold">🏭 ${esc(lg.loading)}</span>
+                    ${canEdit ? `<button type="button" data-tr-rmorig="${key}" class="text-[11px] text-rose-500 hover:text-rose-700 font-bold" title="Remove ${esc(lg.loading)}">Remove origin ×</button>` : ""}
+                  </div>
+                  <div class="space-y-1">
+                    ${dels.map((dObj, di) => `
+                      <div class="flex items-center gap-1.5 bg-white border border-slate-200 rounded-md px-2 py-1">
+                        <span class="text-xs flex-1 min-w-0 truncate">📍 <b>${esc(dObj.town)}</b></span>
+                        <span class="text-[11px] text-slate-400">₹</span>
+                        <input type="number" step="any" data-tr-delrate="${key}|${di}" value="${dObj.rate ?? ""}" placeholder="Rate" class="font-mono text-right" style="width:70px;font-size:11.5px;padding:2px 5px" ${dis}>
+                        ${canEdit ? `<button type="button" data-tr-rmdel="${key}|${di}" class="text-rose-500 hover:text-rose-700 font-extrabold px-1" title="Remove ${esc(dObj.town)}">×</button>` : ""}
+                      </div>`).join("") || `<div class="text-xs italic text-slate-400">No delivery locations yet</div>`}
+                  </div>
+                  ${canEdit ? `
+                  <div class="flex items-center gap-1 mt-2">
+                    <input type="text" data-tr-newdel-town="${key}" list="dl-tr-dellocs" placeholder="+ Delivery town" style="padding:3px 6px;font-size:11.5px;flex:1;min-width:0">
+                    <input type="number" step="any" data-tr-newdel-rate="${key}" placeholder="₹ Rate" style="padding:3px 5px;font-size:11.5px;width:70px" class="font-mono">
+                    <button type="button" data-tr-newdel-btn="${key}" class="btn small primary" style="padding:3px 8px">+</button>
+                  </div>` : ""}
+                </div>`;
+              }).join("") || `<div class="text-xs italic text-slate-400">No origin locations added yet</div>`}
+
+              ${canEdit ? `
+              <div class="flex items-center gap-1.5 pt-2 border-t border-slate-100">
+                <input type="text" data-tr-addorig-in="${ti}" list="dl-tr-loadlocs" placeholder="+ Add Origin (e.g. Munda, Vadodara, Dahej)" style="padding:4px 7px;font-size:11.5px;flex:1;min-width:0">
+                <button type="button" data-tr-addorig-btn="${ti}" class="btn small">＋ Origin</button>
+              </div>` : ""}
+            </div>
+          </div>
+
+        </div>
+      </div>`;
+  }
 
   V().innerHTML = `
-   <div class="actions" style="justify-content:space-between;margin-bottom:10px">
-     <div>
-       <h3>Step 3 · Transporters, Products Carried &amp; Location Subcategories</h3>
-       <p class="tiny" style="margin:2px 0 0">Compact view: set each transporter's fleet, choose the <b>Products</b> they carry (e.g. <b>MTO</b>, <b>C9</b>, <b>LDO</b>), and add their <b>Origin → Delivery Sub-Locations</b>.</p>
-     </div>
-     <div class="actions">
-       ${S.currentUser?.role === "admin" && T.length ? `<button class="btn small danger" id="del-all-transporters" type="button">🗑️ Delete All (${T.length})</button>` : ""}
-       ${S.canWrite ? `<label class="btn small" for="up-step-transporters">⬆ Upload Transporters (.xlsx)</label><input type="file" id="up-step-transporters" accept=".xlsx,.xls,.csv" hidden>` : ""}
-       <button class="btn small primary" id="addt" type="button" ${dis}>＋ Add transporter</button>
-     </div>
-   </div>
+    <datalist id="dl-tr-loadlocs">${allLoadingLocs.map(l => `<option value="${esc(l)}">`).join("")}</datalist>
+    <datalist id="dl-tr-dellocs">${allDelLocs.map(l => `<option value="${esc(l)}">`).join("")}</datalist>
+    <div class="card p-5">
+      ${topToolbarHtml}
+      ${breadcrumbHtml}
+      ${bodyHtml}
+    </div>`;
 
-   <datalist id="dl-tr-loadlocs">${allLoadingLocs.map(l => `<option value="${esc(l)}">`).join("")}</datalist>
-   <datalist id="dl-tr-dellocs">${allDelLocs.map(l => `<option value="${esc(l)}">`).join("")}</datalist>
+  /* ================= LISTENERS ================= */
 
-   ${T.length ? `
-   <div class="tw tbl-edit" data-live>
-     <table>
-       <thead>
-         <tr>
-           <th style="width:255px;min-width:235px">Transporter &amp; Tanker Fleet</th>
-           <th style="width:270px;min-width:240px">1. Products Carried (MTO, C9, etc.)</th>
-           <th style="min-width:390px">2. Origin Location ➔ Delivery Sub-Locations</th>
-           <th style="width:44px"></th>
-         </tr>
-       </thead>
-       <tbody>
-         ${T.map((t, ti) => {
-           const carried = t.products || [];
-           const lGroups = t.locationGroups || [];
-           const routeCount = rows.filter(r => r.transporterId === t.id).length;
+  // Navigation
+  document.querySelectorAll("[data-tr-nav]").forEach(b => b.onclick = () => {
+    flushTransportersDomToState();
+    tm.transporterId = null;
+    viewTransporters();
+  });
+  document.querySelectorAll("[data-tr-open]").forEach(b => b.onclick = () => {
+    tm.transporterId = b.getAttribute("data-tr-open");
+    viewTransporters();
+  });
 
-           return `<tr>
-             <!-- COLUMN 1: COMPACT TRANSPORTER DETAILS & FLEET -->
-             <td style="vertical-align:top;padding:8px 10px">
-               <div class="space-y-1.5">
-                 <div class="grid grid-cols-12 gap-1.5">
-                   <input type="text" data-t="${ti}" data-f="name" value="${esc(t.name)}" placeholder="Transporter Name" class="col-span-7" style="font-weight:800;font-size:12.5px;padding:4px 7px" ${dis}>
-                   <input type="text" data-t="${ti}" data-f="phone" value="${esc(t.phone || "")}" placeholder="Phone" class="col-span-5 font-mono" style="font-size:11.5px;padding:4px 6px" ${dis}>
-                 </div>
-                 <div class="space-y-1 pt-0.5">
-                   ${(t.vehicles || []).map((v, vi) => `
-                     <div class="flex items-center gap-1">
-                       <span class="text-[10px] text-slate-400">🚚</span>
-                       <input type="text" data-t="${ti}" data-v="${vi}" data-f="category" value="${esc(v.category)}" placeholder="20 KL Tanker" style="font-size:11px;padding:2px 6px;flex:1" ${dis}>
-                       <input type="number" step="any" data-t="${ti}" data-v="${vi}" data-f="capacity" value="${v.capacity ?? ""}" placeholder="Cap" style="width:52px;font-size:11px;padding:2px 5px" class="font-mono" ${dis}>
-                       <select data-t="${ti}" data-v="${vi}" data-f="unit" style="width:48px;font-size:11px;padding:2px 3px" ${dis}>
-                         <option ${v.unit === "KL" ? "selected" : ""}>KL</option>
-                         <option ${v.unit === "MT" ? "selected" : ""}>MT</option>
-                       </select>
-                       ${S.canWrite ? `<button type="button" class="text-rose-500 hover:text-rose-700 text-xs font-bold px-1" data-vdel="${ti}:${vi}" title="Remove vehicle">×</button>` : ""}
-                     </div>
-                   `).join("")}
-                   <div class="flex items-center justify-between text-[10px] text-slate-400 pt-0.5">
-                     <span>${routeCount} route(s)</span>
-                     ${S.canWrite ? `<button type="button" class="font-bold text-indigo-600 hover:text-indigo-800 cursor-pointer" data-vadd="${ti}">+ Add Vehicle</button>` : ""}
-                   </div>
-                 </div>
-               </div>
-             </td>
+  // Search (keeps focus & caret while re-rendering)
+  const srch = document.getElementById("tr-search-input");
+  if (srch) srch.addEventListener("input", e => {
+    tm.search = e.target.value || "";
+    const pos = e.target.selectionStart ?? tm.search.length;
+    viewTransporters();
+    const again = document.getElementById("tr-search-input");
+    if (again) { again.focus(); try { again.setSelectionRange(pos, pos); } catch (_) {} }
+  });
 
-             <!-- COLUMN 2: COMPACT PRODUCTS TRANSPORTED (CHOOSE BY PRODUCT NAME LIKE MTO, C9) -->
-             <td style="vertical-align:top;padding:8px 10px">
-               <div class="space-y-1.5">
-                 <div class="chips" style="gap:4px">
-                   ${carried.map(pid => {
-                     const p = namedProds.find(x => x.id === pid);
-                     if (!p) return "";
-                     return `<span class="chip" style="padding:2px 8px;font-size:11px;background:var(--accent);border-color:var(--accent);color:#fff">
-                       <span class="dot" style="background:${clsDotColor(p.cls)};border:1px solid #fff;width:6px;height:6px"></span>
-                       <span>${esc(p.name)}</span>
-                       ${S.canWrite ? `<button type="button" data-tr-rmprod="${ti}|${esc(p.id)}" class="ml-1 text-white/80 hover:text-white font-extrabold" title="Remove ${esc(p.name)}">×</button>` : ""}
-                     </span>`;
-                   }).join("") || `<span class="tiny text-slate-400">All products (or pick below)</span>`}
-                 </div>
-                 ${S.canWrite ? `
-                 <div class="flex items-center gap-1">
-                   <select data-tr-pickprod="${ti}" style="width:auto;min-width:120px;max-width:145px;padding:3px 6px;font-size:11px">
-                     <option value="">+ Product…</option>
-                     ${namedProds.filter(p => !carried.includes(p.id)).map(p => `<option value="${esc(p.id)}">${esc(p.name)} (${p.unit})</option>`).join("")}
-                     <option value="__ALL__">✓ All Products</option>
-                     <option value="__CLEAR__">✕ Clear All</option>
-                   </select>
-                   <input type="text" data-tr-newprod-in="${ti}" placeholder="Or type MTO, C9" style="padding:3px 6px;font-size:11px;width:95px">
-                   <button type="button" data-tr-newprod-btn="${ti}" class="btn small primary" style="padding:3px 7px;font-size:11px">+</button>
-                 </div>` : ""}
-               </div>
-             </td>
+  // Add transporter (inline form)
+  const showAddBtn = document.getElementById("btn-show-add-transporter");
+  if (showAddBtn) showAddBtn.onclick = () => {
+    tm.showAdd = true;
+    viewTransporters();
+    document.getElementById("new-tr-name")?.focus();
+  };
+  const cancelAddBtn = document.getElementById("btn-cancel-new-transporter");
+  if (cancelAddBtn) cancelAddBtn.onclick = () => { tm.showAdd = false; viewTransporters(); };
+  const saveNewTr = () => {
+    if (!canEdit) return;
+    const name = (document.getElementById("new-tr-name")?.value || "").trim();
+    const phone = (document.getElementById("new-tr-phone")?.value || "").trim();
+    const veh = (document.getElementById("new-tr-vehicle")?.value || "").trim();
+    if (!name) { toast("Please enter a transporter name."); return; }
+    const list = (S.transporters = S.transporters || { list: [] }).list;
+    if (list.some(x => norm(x.name) === norm(name))) { toast(`${name} already exists.`); return; }
+    const capMatch = veh.match(/(\d+(?:\.\d+)?)/);
+    const unit = /mt/i.test(veh) ? "MT" : "KL";
+    const nt = {
+      id: "t" + uid(),
+      name,
+      phone,
+      notes: "",
+      vehicles: veh ? [{ category: veh, capacity: capMatch ? Number(capMatch[1]) : 20, unit }] : [],
+      products: [],
+      locationGroups: []
+    };
+    list.push(nt);
+    saveT(0);
+    tm.showAdd = false;
+    tm.transporterId = nt.id;
+    viewTransporters();
+    toast(`Added transporter ${name}.`);
+  };
+  const saveNewTrBtn = document.getElementById("btn-save-new-transporter");
+  if (saveNewTrBtn) saveNewTrBtn.onclick = saveNewTr;
+  ["new-tr-name", "new-tr-phone", "new-tr-vehicle"].forEach(id => {
+    document.getElementById(id)?.addEventListener("keydown", e => {
+      if (e.key === "Enter") { e.preventDefault(); saveNewTr(); }
+    });
+  });
 
-             <!-- COLUMN 3: COMPACT ORIGIN LOCATION -> DELIVERY SUB-LOCATIONS -->
-             <td style="vertical-align:top;padding:8px 10px">
-               <div class="space-y-1.5">
-                 <!-- Compact 1-Line Sub-Rows for Each Origin Location -->
-                 ${lGroups.map((lg, lgi) => {
-                   const dels = lg.deliveries || [];
-                   return `<div class="p-1.5 rounded-lg bg-slate-50 border border-slate-200/90 flex flex-wrap items-center justify-between gap-1.5">
-                     <div class="flex items-center gap-1 shrink-0">
-                       <span class="px-1.5 py-0.5 rounded bg-emerald-700 text-white text-[10px] font-extrabold">🏭 ${esc(lg.loading)}</span>
-                       ${S.canWrite ? `<button type="button" data-tr-rmorig="${ti}|${lgi}" class="text-[11px] text-rose-500 hover:text-rose-700 font-bold px-0.5" title="Remove ${esc(lg.loading)}">×</button>` : ""}
-                       <span class="text-slate-300 text-xs">➔</span>
-                     </div>
-                     <div class="chips flex-1" style="gap:3px">
-                       ${dels.map((dObj, di) => `
-                         <span class="chip" style="padding:1px 7px;font-size:10.5px;background:var(--surface);border-color:var(--line);color:var(--ink)">
-                           <span>📍 <b>${esc(dObj.town)}</b>${dObj.rate != null ? ` <span class="font-mono text-indigo-700 font-bold">${inr(dObj.rate)}</span>` : ""}</span>
-                           ${S.canWrite ? `<button type="button" data-tr-rmdel="${ti}|${lgi}|${di}" class="ml-0.5 text-rose-500 hover:text-rose-700 font-extrabold">×</button>` : ""}
-                         </span>
-                       `).join("")}
-                     </div>
-                     ${S.canWrite ? `
-                     <div class="flex items-center gap-1 shrink-0">
-                       <input type="text" data-tr-newdel-town="${ti}|${lgi}" list="dl-tr-dellocs" placeholder="+ Delivery town" style="padding:2px 6px;font-size:11px;width:105px">
-                       <input type="number" step="any" data-tr-newdel-rate="${ti}|${lgi}" placeholder="₹ Rate" style="padding:2px 5px;font-size:11px;width:64px" class="font-mono">
-                       <button type="button" data-tr-newdel-btn="${ti}|${lgi}" class="btn small primary" style="padding:2px 6px;font-size:10.5px">+</button>
-                     </div>` : ""}
-                   </div>`;
-                 }).join("")}
-
-                 <!-- Compact Add Origin Bar -->
-                 ${S.canWrite ? `
-                 <div class="flex items-center gap-1">
-                   <input type="text" data-tr-addorig-in="${ti}" list="dl-tr-loadlocs" placeholder="+ Add Origin Location (e.g. Munda, Vadodara, Dahej)" style="padding:3px 7px;font-size:11px;max-width:260px">
-                   <button type="button" data-tr-addorig-btn="${ti}" class="btn small" style="padding:3px 8px;font-size:11px">+ Origin</button>
-                 </div>` : ""}
-               </div>
-             </td>
-
-             <!-- COLUMN 4: DELETE TRANSPORTER -->
-             <td style="vertical-align:top;padding:8px 6px;text-align:center">
-               <button class="btn small danger" style="padding:3px 7px" type="button" data-tdel="${ti}" title="Delete ${esc(t.name)}" ${dis}>✕</button>
-             </td>
-           </tr>`;
-         }).join("")}
-       </tbody>
-     </table>
-   </div>` : `<div class="panel empty"><strong>No transporters yet</strong>Click <b>＋ Add transporter</b> above to add each transporter with their products and location subcategories.</div>`}`;
-
-  // 1. Basic Transporter & Vehicle input listeners
+  // 1. Basic transporter & vehicle inputs
   document.querySelectorAll("[data-t]").forEach(inp => inp.addEventListener(inp.tagName === "SELECT" ? "change" : "input", e => {
-    if (!S.canWrite) return;
+    if (!canEdit) return;
     const list = (S.transporters = S.transporters || { list: [] }).list;
     const t = list[+inp.dataset.t];
     if (!t) return;
@@ -4793,7 +5016,7 @@ function viewTransporters() {
   }));
 
   document.querySelectorAll("[data-vadd]").forEach(b => b.onclick = () => {
-    if (!S.canWrite) return;
+    if (!canEdit) return;
     flushTransportersDomToState();
     const list = (S.transporters = S.transporters || { list: [] }).list;
     const t = list[+b.dataset.vadd];
@@ -4804,7 +5027,7 @@ function viewTransporters() {
   });
 
   document.querySelectorAll("[data-vdel]").forEach(b => b.onclick = () => {
-    if (!S.canWrite) return;
+    if (!canEdit) return;
     flushTransportersDomToState();
     const list = (S.transporters = S.transporters || { list: [] }).list;
     const [a, c] = b.dataset.vdel.split(":").map(Number);
@@ -4813,9 +5036,9 @@ function viewTransporters() {
     viewTransporters();
   });
 
-  // 2. Column 2 Listeners: Choose Directly by Product Name (e.g. MTO, C9)
+  // 2. Products carried
   document.querySelectorAll("[data-tr-rmprod]").forEach(btn => btn.onclick = () => {
-    if (!S.canWrite) return;
+    if (!canEdit) return;
     flushTransportersDomToState();
     const [tiStr, pid] = btn.getAttribute("data-tr-rmprod").split("|");
     const t = S.transporters.list[+tiStr];
@@ -4826,7 +5049,7 @@ function viewTransporters() {
   });
 
   document.querySelectorAll("[data-tr-pickprod]").forEach(sel => sel.onchange = () => {
-    if (!S.canWrite || !sel.value) return;
+    if (!canEdit || !sel.value) return;
     flushTransportersDomToState();
     const ti = +sel.getAttribute("data-tr-pickprod");
     const t = S.transporters.list[ti];
@@ -4845,7 +5068,7 @@ function viewTransporters() {
   });
 
   const addNewProdToTransporter = (ti, rawNames) => {
-    if (!S.canWrite) return;
+    if (!canEdit) return;
     flushTransportersDomToState();
     const names = String(rawNames || "").split(",").map(x => x.trim()).filter(Boolean);
     if (!names.length) { toast("Type a product name first (e.g. MTO, C9)"); return; }
@@ -4881,9 +5104,9 @@ function viewTransporters() {
     }
   }));
 
-  // 3. Column 3 Listeners: Add Origin Location & Manage Delivery Sub-Locations
+  // 3. Origins & delivery sub-locations
   const addOriginLocToTransporter = (ti, rawOrig) => {
-    if (!S.canWrite) return;
+    if (!canEdit) return;
     flushTransportersDomToState();
     const parts = String(rawOrig || "").split(",").map(x => x.trim()).filter(Boolean);
     if (!parts.length) { toast("Enter an origin location first (e.g. Munda, Vadodara)"); return; }
@@ -4912,7 +5135,7 @@ function viewTransporters() {
   }));
 
   document.querySelectorAll("[data-tr-rmorig]").forEach(btn => btn.onclick = () => {
-    if (!S.canWrite) return;
+    if (!canEdit) return;
     flushTransportersDomToState();
     const [ti, lgi] = btn.getAttribute("data-tr-rmorig").split("|").map(Number);
     const t = S.transporters.list[ti];
@@ -4928,7 +5151,7 @@ function viewTransporters() {
   });
 
   const addDeliverySubLocToTransporter = (ti, lgi, rawTowns, rawRate) => {
-    if (!S.canWrite) return;
+    if (!canEdit) return;
     flushTransportersDomToState();
     const towns = String(rawTowns || "").split(",").map(x => x.trim()).filter(Boolean);
     if (!towns.length) { toast("Enter a delivery town first (e.g. Nagpur)"); return; }
@@ -4969,8 +5192,21 @@ function viewTransporters() {
     }
   }));
 
+  // Edit an existing delivery rate in place
+  document.querySelectorAll("[data-tr-delrate]").forEach(inp => inp.addEventListener("change", () => {
+    if (!canEdit) return;
+    const [ti, lgi, di] = inp.getAttribute("data-tr-delrate").split("|").map(Number);
+    const t = S.transporters.list[ti];
+    const delObj = t?.locationGroups?.[lgi]?.deliveries?.[di];
+    if (!delObj) return;
+    delObj.rate = num(inp.value);
+    syncTransporterSubcategoriesToRoutes(t);
+    saveT(300);
+    toast(`Saved rate for ${delObj.town}.`);
+  }));
+
   document.querySelectorAll("[data-tr-rmdel]").forEach(btn => btn.onclick = () => {
-    if (!S.canWrite) return;
+    if (!canEdit) return;
     flushTransportersDomToState();
     const [ti, lgi, di] = btn.getAttribute("data-tr-rmdel").split("|").map(Number);
     const t = S.transporters.list[ti];
@@ -4986,48 +5222,31 @@ function viewTransporters() {
     viewTransporters();
   });
 
-  // 4. Delete Transporter & Top Action Buttons
+  // 4. Delete transporter (two-click confirm) & top buttons
   document.querySelectorAll("[data-tdel]").forEach(b => b.onclick = () => {
-    if (!S.canWrite) return;
+    if (!canEdit) return;
     flushTransportersDomToState();
-    if (!b.dataset.armed) { b.dataset.armed = 1; b.textContent = "Del?"; return; }
+    if (!b.dataset.armed) { b.dataset.armed = 1; b.textContent = "Confirm delete?"; return; }
     const list = (S.transporters = S.transporters || { list: [] }).list;
-    list.splice(+b.dataset.tdel, 1);
+    const removed = list.splice(+b.dataset.tdel, 1)[0];
+    if (removed && tm.transporterId === removed.id) tm.transporterId = null;
     saveT(0);
     viewTransporters();
   });
 
-  const dat = $("#del-all-transporters");
+  const dat = document.getElementById("del-all-transporters");
   if (dat) dat.onclick = async () => {
-    if (!S.canWrite) return;
+    if (!canEdit) return;
     if (!dat.dataset.armed) { dat.dataset.armed = "1"; dat.textContent = "⚠️ Confirm Delete All?"; return; }
     S.transporters = { list: [] };
+    tm.transporterId = null;
     saveT(0);
     viewTransporters();
     toast("🗑️ Deleted all transporters!");
   };
 
-  const ust = $("#up-step-transporters");
+  const ust = document.getElementById("up-step-transporters");
   if (ust) ust.onchange = e => { if (e.target.files?.[0]) uploadMaster(e.target.files[0], "transporters"); e.target.value = ""; };
-
-  $("#addt").onclick = () => {
-    if (!S.canWrite) return;
-    flushTransportersDomToState();
-    const list = (S.transporters = S.transporters || { list: [] }).list;
-    list.push({
-      id: "t" + uid(),
-      name: "",
-      phone: "",
-      notes: "",
-      vehicles: [{ category: "20 KL Tanker", capacity: 20, unit: "KL" }],
-      products: [],
-      locationGroups: []
-    });
-    saveT(0);
-    viewTransporters();
-    const allNameInps = document.querySelectorAll('input[data-f="name"][data-t]');
-    allNameInps[allNameInps.length - 1]?.focus();
-  };
 }
 
 /* ================= MASTER FILE BAR & NAVIGATION ================= */

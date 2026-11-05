@@ -5765,7 +5765,8 @@ function viewRefineries() {
     `;
   }
 
-  $("#master-refineries").innerHTML = `
+  const targetEl = $("#master-body") || $("#master-refineries");
+if (targetEl) targetEl.innerHTML =
     <div class="p-4 sm:p-6">
       <div class="flex flex-wrap items-center justify-between gap-2 mb-4">
         <div>

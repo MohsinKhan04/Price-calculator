@@ -4173,7 +4173,20 @@ function viewCycles() {
    }).join("") || `<tr><td colspan="5" class="empty">No cycles yet.</td></tr>`}
    </tbody></table></div><p class="hint mt-2">Importing reads blocks headed “PRICE REVISED EFF. ON dd-mm-yyyy” with Supply location, Product, Basic price and Max discount columns, or standard Master .xlsx sheets.</p>`;
   const buildCycleEditorRows = (basePrices, oldIndex) => {
-    const rows = (basePrices || []).map(p => ({ ...p, old: oldIndex ? num(oldIndex[p.sourceId + "|" + p.productId]?.basic) : num(p.basic) }));
+    const rows = [];
+    const seenLine = new Map();
+    (basePrices || []).forEach(p => {
+      const k = p.sourceId + "|" + p.productId + "|" + (p.variant || "");
+      const row = { ...p, old: oldIndex ? num(oldIndex[p.sourceId + "|" + p.productId]?.basic) : num(p.basic) };
+      if (seenLine.has(k)) {
+        // true duplicate line: keep one, but never lose a price that only the duplicate had
+        const keep = seenLine.get(k);
+        if (!(num(keep.basic) > 0) && num(row.basic) > 0) { keep.basic = row.basic; keep.maxDiscount = row.maxDiscount; }
+        return;
+      }
+      seenLine.set(k, row);
+      rows.push(row);
+    });
     (S.catalog?.sources || []).filter(s => s.active !== false).forEach(s => {
       const sold = Array.isArray(s.products) ? s.products : [];
       sold.forEach(pid => {
@@ -4229,23 +4242,58 @@ function renderImport() {
 }
 function viewEditor() {
   const E = UI.editor, SM = srcMap(), P = prodMap();
-  const lines = E.rows.map((r, i) => {
-    const d = num(r.basic) != null && r.old != null ? num(r.basic) - r.old : null;
-    return `<tr>
-    <td><span class="co" style="--co:${coVar(SM[r.sourceId]?.company)}">${esc(SM[r.sourceId]?.company || "")}</span><b>${esc(SM[r.sourceId]?.name || r.sourceId)}</b></td><td>${esc(P[r.productId]?.name || r.productId)}${r.variant ? ` <span class="tiny">${esc(r.variant)}</span>` : ""}</td><td class="tiny">${P[r.productId]?.unit || ""}</td>
-    <td class="n">${inr(r.old)}</td>
-    <td class="n"><input type="number" step="any" data-i="${i}" data-f="basic" value="${r.basic ?? ""}" aria-label="Basic price" ${S.canWrite ? "" : "disabled"}></td>
-    <td class="n" id="d${i}">${d == null ? "—" : chgPill(d)}</td>
-    <td class="n"><input type="number" step="any" data-i="${i}" data-f="maxDiscount" value="${r.maxDiscount ?? ""}" aria-label="Max discount" ${S.canWrite ? "" : "disabled"}></td>
-    <td class="n"><button class="btn small danger" data-rm="${i}" aria-label="Remove row" ${S.canWrite ? "" : "disabled"}>✕</button></td></tr>`;
-  }).join("");
+  const F = (UI.edFilter = UI.edFilter || { text: "", missingOnly: false });
+  const fq = norm(F.text || "");
+  const isPriced = r => num(r.basic) != null && num(r.basic) > 0;
+  const vis = E.rows.map((r, i) => ({ r, i })).filter(({ r }) => {
+    if (F.missingOnly && isPriced(r)) return false;
+    if (!fq) return true;
+    const src = SM[r.sourceId];
+    return norm(`${src?.company || ""} ${src?.name || r.sourceId} ${src?.loading || ""} ${P[r.productId]?.name || r.productId}`).includes(fq);
+  });
+  // Group lines by refinery so each refinery name appears ONCE, with its products listed under it
+  const groups = [], gmap = new Map();
+  vis.forEach(it => {
+    let g = gmap.get(it.r.sourceId);
+    if (!g) { g = { sid: it.r.sourceId, items: [] }; gmap.set(it.r.sourceId, g); groups.push(g); }
+    g.items.push(it);
+  });
+  groups.sort((x, y) =>
+    String(SM[x.sid]?.company || "").localeCompare(String(SM[y.sid]?.company || "")) ||
+    String(SM[x.sid]?.name || x.sid).localeCompare(String(SM[y.sid]?.name || y.sid)));
+  const totalLines = E.rows.length;
+  const pricedLines = E.rows.filter(isPriced).length;
+  const lines = groups.map(g => {
+    const src = SM[g.sid];
+    const done = g.items.filter(({ r }) => isPriced(r)).length;
+    const head = `<tr><td colspan="7" style="background:rgba(100,116,139,.10);padding:9px 12px;border-top:2px solid rgba(100,116,139,.25)">
+      <span class="co" style="--co:${coVar(src?.company)}">${esc(src?.company || "")}</span><b>${esc(src?.name || g.sid)}</b>
+      <span class="tiny" style="margin-left:8px">${g.items.length} product${g.items.length === 1 ? "" : "s"} · ${done} of ${g.items.length} priced</span>
+    </td></tr>`;
+    const body = g.items.map(({ r, i }) => {
+      const d = num(r.basic) != null && r.old != null ? num(r.basic) - r.old : null;
+      return `<tr>
+      <td style="padding-left:30px"><b>${esc(P[r.productId]?.name || r.productId)}</b>${r.variant ? ` <span class="tiny">${esc(r.variant)}</span>` : ""}</td><td class="tiny">${P[r.productId]?.unit || ""}</td>
+      <td class="n">${inr(r.old)}</td>
+      <td class="n"><input type="number" step="any" data-i="${i}" data-f="basic" value="${r.basic ?? ""}" placeholder="Enter price" aria-label="Basic price" ${S.canWrite ? "" : "disabled"}></td>
+      <td class="n" id="d${i}">${d == null ? "—" : chgPill(d)}</td>
+      <td class="n"><input type="number" step="any" data-i="${i}" data-f="maxDiscount" value="${r.maxDiscount ?? ""}" aria-label="Max discount" ${S.canWrite ? "" : "disabled"}></td>
+      <td class="n"><button class="btn small danger" data-rm="${i}" aria-label="Remove row" ${S.canWrite ? "" : "disabled"}>✕</button></td></tr>`;
+    }).join("");
+    return head + body;
+  }).join("") || `<tr><td colspan="7" class="empty">No lines match your filter.</td></tr>`;
   V().innerHTML = `
    <div class="actions" style="justify-content:space-between;margin-bottom:12px"><div><h3>${E.id ? "Edit" : "New"} rate revision</h3><p class="sub" style="margin:0">Enter basic prices before GST. Leave a price blank if the refinery isn't offering the product this cycle.</p></div>
    <div class="actions"><button class="btn" id="ecancel">Back</button><button class="btn primary" id="esave" ${S.canWrite ? "" : "disabled"}>Save revision</button></div></div>
    <div class="panel pad" style="margin-bottom:12px"><div class="toolbar" style="margin:0">
      <div class="field"><label class="lbl" for="e-date">Effective from</label><input type="date" id="e-date" value="${E.effectiveDate}" ${S.canWrite ? "" : "disabled"}></div>
      <div class="field" style="max-width:none;flex:3 1 260px"><label class="lbl" for="e-note">Note</label><input type="text" id="e-note" value="${esc(E.note)}" placeholder="e.g. Circular received from IOCL/BPCL" ${S.canWrite ? "" : "disabled"}></div></div></div>
-   <div class="tw tbl-edit" data-live><table><thead><tr><th>Refinery</th><th>Product</th><th>Unit</th><th class="n">Previous basic</th><th class="n">New basic</th><th class="n">Change</th><th class="n">Max discount</th><th></th></tr></thead><tbody>${lines}</tbody></table></div>
+   <div class="panel pad" style="margin-bottom:12px"><div class="toolbar" style="margin:0;align-items:flex-end">
+     <div class="field" style="max-width:none;flex:2 1 240px"><label class="lbl" for="e-filter">Find refinery or product</label><input type="text" id="e-filter" value="${esc(F.text)}" placeholder="e.g. BPCL, Mumbai, MTO"></div>
+     <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;font-weight:600;padding-bottom:8px;cursor:pointer"><input type="checkbox" id="e-missing" ${F.missingOnly ? "checked" : ""}> Show only lines without a price</label>
+     <div class="tiny" style="padding-bottom:9px;margin-left:auto"><b>${pricedLines}</b> of <b>${totalLines}</b> lines priced · ${groups.length} refiner${groups.length === 1 ? "y" : "ies"} shown</div>
+   </div></div>
+   <div class="tw tbl-edit" data-live><table><thead><tr><th>Product</th><th>Unit</th><th class="n">Previous basic</th><th class="n">New basic (₹)</th><th class="n">Change</th><th class="n">Max discount (₹)</th><th></th></tr></thead><tbody>${lines}</tbody></table></div>
    <div class="panel pad" style="margin-top:12px"><div class="toolbar" style="margin:0"><h3 style="flex:1 1 100%">Add a refinery–product line</h3>
      <div class="field"><label class="lbl" for="a-src">Refinery</label><select id="a-src">${S.catalog.sources.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join("")}</select></div>
      <div class="field"><label class="lbl" for="a-prod">Product</label><select id="a-prod">${S.catalog.products.map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join("")}</select></div>
@@ -4266,6 +4314,16 @@ function viewEditor() {
     autoSaveCycle(350);
   }));
   document.querySelectorAll("[data-rm]").forEach(b => b.onclick = () => { E.rows.splice(+b.dataset.rm, 1); autoSaveCycle(0); viewEditor(); });
+  const efi = $("#e-filter");
+  if (efi) efi.addEventListener("input", e => {
+    F.text = e.target.value || "";
+    const pos = e.target.selectionStart ?? F.text.length;
+    viewEditor();
+    const again = $("#e-filter");
+    if (again) { again.focus(); try { again.setSelectionRange(pos, pos); } catch (_) {} }
+  });
+  const emi = $("#e-missing");
+  if (emi) emi.onchange = e => { F.missingOnly = !!e.target.checked; viewEditor(); };
   $("#e-date").onchange = e => { E.effectiveDate = e.target.value; autoSaveCycle(100); };
   $("#e-note").oninput = e => { E.note = e.target.value; autoSaveCycle(350); };
   $("#a-add").onclick = () => {
@@ -4273,7 +4331,7 @@ function viewEditor() {
     if (E.rows.find(r => r.sourceId === s && r.productId === p)) { toast("That line is already in the cycle"); return; }
     E.rows.push({ sourceId: s, productId: p, basic: null, maxDiscount: 0, old: null }); autoSaveCycle(100); viewEditor();
   };
-  $("#ecancel").onclick = () => { UI.editor = null; viewCycles(); };
+  $("#ecancel").onclick = () => { UI.editor = null; UI.edFilter = null; viewCycles(); };
   $("#esave").onclick = async () => {
     if (!S.canWrite) return;
     if (!/^\d{4}-\d\d-\d\d$/.test(E.effectiveDate)) { toast("Enter the effective date"); return; }
@@ -4284,7 +4342,7 @@ function viewEditor() {
       inflight++; setSync();
       await S.db.doc("cycles/" + id).set(doc);
       if (E.id && E.id !== id) await S.db.doc("cycles/" + E.id).delete();
-      UI.editor = null;
+      UI.editor = null; UI.edFilter = null;
       toast("Rates effective " + fmtDate(id) + " saved & synced!");
       viewCycles();
     } catch (e) { toast("Save failed: " + (e?.message || e?.code)); }

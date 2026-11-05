@@ -559,7 +559,7 @@
       <form id="form-gate-forgot" hidden class="space-y-3.5">
         <div class="p-3 rounded-xl bg-indigo-50 border border-indigo-200 text-indigo-950 text-xs space-y-1">
           <div><b>Forgot your password?</b> Enter your Gmail/username and your new password below:</div>
-          <div class="text-[11px] text-indigo-800">• <b>Admin Instant Reset:</b> Enter Master Recovery Key (default: <code>GEPL2026</code>) to reset and log in immediately.<br>• <b>Team Member Reset:</b> Leave Recovery Key blank to send a 1-click password reset request to Admin.</div>
+          <div class="text-[11px] text-indigo-800">• <b>Admin Instant Reset:</b> Enter the Master Recovery Key to reset and log in immediately.<br>• <b>Team Member Reset:</b> Leave Recovery Key blank to send a 1-click password reset request to Admin.</div>
         </div>
         <div class="field">
           <label class="lbl" for="gate-forgot-email">Your Gmail Address or Username</label>
@@ -571,7 +571,7 @@
         </div>
         <div class="field">
           <label class="lbl" for="gate-forgot-pin">Master Recovery Key (For Instant Reset · Optional for Users)</label>
-          <input type="text" id="gate-forgot-pin" placeholder="Enter GEPL2026 for instant reset, or leave blank">
+          <input type="text" id="gate-forgot-pin" placeholder="Enter the Master Recovery Key for instant reset, or leave blank">
         </div>
         <div id="gate-forgot-msg" hidden class="p-3 rounded-xl text-xs font-bold"></div>
         <button type="submit" class="w-full py-3 px-4 bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold rounded-xl text-xs shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer">
@@ -1022,6 +1022,10 @@ let initialPullDone = false;
 let lastLocalMutationAt = 0;
 let wsSyncTimer = null;
 let sseConnection = null;
+// Cloud saves that failed and are being retried (so the user is told, instead of seeing "All changes saved")
+const failedPushKeys = new Set();
+let pushRetryTimer = null;
+let lastPushFailToastAt = 0;
 
 function markLocalMutation() {
   lastLocalMutationAt = Date.now();
@@ -1037,7 +1041,7 @@ async function apiRequest(endpoint, options = {}) {
   const base = getApiBase();
   const url = base ? (base + endpoint) : endpoint;
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 8000);
+  const timer = setTimeout(() => controller.abort(), options.timeoutMs || 8000); // saves pass a longer timeout so a sleeping Render server can wake up
   try {
     return await fetch(url, {
       cache: "no-store",
@@ -1076,6 +1080,9 @@ function setSync(customText) {
   if (inflight > 0) {
     el.textContent = "Auto-saving to Cloud…";
     if (dot) dot.className = "w-2 h-2 rounded-full bg-amber-500 animate-pulse";
+  } else if (failedPushKeys.size) {
+    el.textContent = "⚠ Not saved to cloud yet — retrying";
+    if (dot) dot.className = "w-2 h-2 rounded-full bg-rose-500 animate-pulse";
   } else if (!S.canWrite) {
     el.textContent = "Live Sync (" + (S.currentUser?.role || "user") + ")";
     if (dot) dot.className = "w-2 h-2 rounded-full bg-sky-500";
@@ -1085,22 +1092,53 @@ function setSync(customText) {
   }
 }
 
+// Remembers which saves failed, tells the user once in a while, and retries the retryable ones every 10 seconds
+function noteCloudSaveResult(k, ok, retryable) {
+  if (ok) { failedPushKeys.delete(k); return; }
+  if (Date.now() - lastPushFailToastAt > 15000) {
+    lastPushFailToastAt = Date.now();
+    toast(retryable
+      ? "⚠ Could not save to the cloud. Your change is kept on this device and will be retried automatically."
+      : "⚠ The server refused this save (not stored in the cloud). Reload the page or sign in again.");
+  }
+  if (retryable) { failedPushKeys.add(k); schedulePushRetry(); }
+}
+
+function schedulePushRetry() {
+  if (pushRetryTimer || !failedPushKeys.size) return;
+  pushRetryTimer = setTimeout(async () => {
+    pushRetryTimer = null;
+    for (const k of Array.from(failedPushKeys)) {
+      const val = k === "brand_settings" ? loadLocal("brand_settings", null) : k === "workspaceState" ? getWorkspaceStateSnapshot() : S[k];
+      if (val === undefined) { failedPushKeys.delete(k); continue; }
+      await pushKeyToNeon(k, val);
+    }
+    schedulePushRetry();
+  }, 10000);
+}
+
 async function pushKeyToNeon(k, val) {
   markLocalMutation();
   inflight++;
   setSync();
+  let ok = false;
+  let retryable = true; // network errors, timeouts and 5xx are worth retrying; 4xx answers are not
   try {
     const res = await apiRequest("/api/storage/" + encodeURIComponent(k), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ value: val, stateRev: S.stateRev })
+      body: JSON.stringify({ value: val, stateRev: S.stateRev }),
+      timeoutMs: 30000
     });
+    ok = res.ok;
+    if (!res.ok) retryable = res.status >= 500;
     if (res.ok) cloudConnected = true;
     return res.ok;
   } catch (e) {
     return false;
   } finally {
     inflight = Math.max(0, inflight - 1);
+    noteCloudSaveResult(k, ok, retryable);
     setSync();
   }
 }
@@ -1155,7 +1193,15 @@ function flushActiveEditorToState() {
   }
 }
 
-async function pushAllToNeon(notify = false, replaceAll = true) {
+// The two "Push All" buttons ask first: this device's copy of everything goes to the cloud and replaces what other devices saved
+function confirmAndPushAll() {
+  if (confirm("Upload this device's data to the cloud?\n\nThis replaces the catalog, routes, rates, quotes and users that other devices have saved. If another device may have newer changes, click Cancel and use Pull first.")) {
+    pushAllToNeon(true);
+  }
+}
+
+// replaceAll now defaults to false (nothing is deleted from the cloud); the server ignores replaceAll anyway
+async function pushAllToNeon(notify = false, replaceAll = false) {
   flushActiveEditorToState();
   markLocalMutation();
   inflight++;
@@ -1180,7 +1226,8 @@ async function pushAllToNeon(notify = false, replaceAll = true) {
     const res = await apiRequest("/api/storage", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ entries, stateRev: S.stateRev, replaceAll })
+      body: JSON.stringify({ entries, stateRev: S.stateRev, replaceAll }),
+      timeoutMs: 30000
     });
     if (res.ok) {
       cloudConnected = true;
@@ -1296,10 +1343,11 @@ async function pullFromNeon(notify = false, force = false) {
       return true;
     }
 
-    // If Neon DB has never been initialized (zero keys in table), seed it once
+    // If Neon DB has never been initialized (zero keys in table), a signed-in editor seeds it once.
+    // A signed-out visitor never seeds, and seeding never deletes anything.
     const keysPresent = Object.keys(data).filter(k => k !== "_meta");
     if (keysPresent.length === 0) {
-      await pushAllToNeon(false, true);
+      if (S.canWrite) await pushAllToNeon(false, false);
       return true;
     }
 
@@ -1374,7 +1422,8 @@ async function pullFromNeon(notify = false, force = false) {
       saveLocal("_stateRev", S.stateRev);
     }
 
-    if (autoHealCatalogAndRoutes()) { saveLocal("catalog", S.catalog); pushKeyToNeon("catalog", S.catalog); changed = true; }
+    // The repair is applied on this device for everyone, but only a signed-in editor may upload the repaired catalog
+    if (autoHealCatalogAndRoutes()) { saveLocal("catalog", S.catalog); if (S.canWrite) pushKeyToNeon("catalog", S.catalog); changed = true; }
     syncUserNamesMap();
     if (changed) dataChanged();
     setSync();
@@ -1633,18 +1682,24 @@ function exportQuoteLogsCsv() {
   const logs = S.quoteLogs || [];
   if (!logs.length) { toast("No quotation logs recorded yet."); return; }
   const headers = ["Timestamp", "Quoted By (Gmail)", "Name", "Role", "Action", "Quote No", "Customer", "Delivery Location", "Product", "Quantity", "Refinery", "Rate (₹/Unit)", "Margin (₹/Unit)", "Rate incl GST", "Order Total (₹)"];
+  // A text cell that starts with = + - @ (or a tab/line break) would be run as a formula by Excel, so it gets a leading apostrophe
+  const csvText = v => {
+    let t = String(v ?? "");
+    if (/^[=+\-@\t\r\n]/.test(t)) t = "'" + t;
+    return `"${t.replace(/"/g, '""')}"`;
+  };
   const rows = logs.map(l => [
-    `"${l.ts}"`,
-    `"${l.userEmail || ""}"`,
-    `"${(l.userName || "").replace(/"/g, '""')}"`,
-    `"${l.userRole || ""}"`,
-    `"${(l.action || "").replace(/"/g, '""')}"`,
-    `"${l.quoteNumber || ""}"`,
-    `"${(l.customer || "").replace(/"/g, '""')}"`,
-    `"${(l.location || "").replace(/"/g, '""')}"`,
-    `"${(l.product || "").replace(/"/g, '""')}"`,
-    `"${l.qty || ""}"`,
-    `"${(l.refinery || "").replace(/"/g, '""')}"`,
+    csvText(l.ts),
+    csvText(l.userEmail),
+    csvText(l.userName),
+    csvText(l.userRole),
+    csvText(l.action),
+    csvText(l.quoteNumber),
+    csvText(l.customer),
+    csvText(l.location),
+    csvText(l.product),
+    csvText(l.qty),
+    csvText(l.refinery),
     l.rate ?? "",
     l.margin ?? "",
     l.rateGst ?? "",
@@ -3636,7 +3691,7 @@ function renderQuoteResults() {
                 <td class="tiny">📍 ${esc(getRefineryLocations(s).join(", ") || s.loading || "—")}</td>
                 <td class="n"><input type="number" step="any" data-qbasic="${s.id}" value="${esc(q.manualBasic?.[s.id] ?? "")}" placeholder="e.g. 48500" style="width:130px"></td>
                 <td class="n"><input type="number" step="any" data-qtrans="${s.id}" value="${esc(q.manual?.[s.id] ?? "")}" placeholder="e.g. 2200 (optional)" style="width:140px"></td>
-                <td class="n"><button type="button" class="btn small primary" data-qsavebasic="${s.id}">⚡ Save Rate &amp; Calculate</button></td>
+                <td class="n"><button type="button" class="btn small primary" data-qsavebasic="${esc(s.id)}">⚡ Save Rate &amp; Calculate</button></td>
               </tr>`).join("")}
             </tbody>
           </table>
@@ -3809,7 +3864,7 @@ function renderQuoteResults() {
     </div>` : `<div class="banner"><span><b>No transport rate to ${esc(q.loc)} yet.</b> Type a transporter's rate against a refinery below to price it, or add this location with its transport rates.</span><button class="btn small lime" type="button" id="addloc">＋ Add ${esc(q.loc)} as a location</button></div>`;
 
   const cards = R.priced.map((r, i) => `
-    <button type="button" class="rcard ${i === 0 ? "first" : ""} ${r === sel ? "sel" : ""}" data-sel="${r.s.id}" style="--co:${coVar(r.s.company)}" aria-pressed="${r === sel}">
+    <button type="button" class="rcard ${i === 0 ? "first" : ""} ${r === sel ? "sel" : ""}" data-sel="${esc(r.s.id)}" style="--co:${coVar(r.s.company)}" aria-pressed="${r === sel}">
       <span class="rank">${i + 1}</span>
       <span style="min-width:0">
         <span class="rname"><span class="co">${esc(r.s.company)}</span>${esc(r.s.name)}${i === 0 ? ' <span class="pill best">Suitable</span>' : ""}${q.specificSource === r.s.id ? ' <span class="pill warn">📌 Customer Choice</span>' : ""}${r.freightSrc === "estimated" ? ' <span class="pill warn">transport estimated</span>' : ""}${r.freightSrc === "manual" ? ' <span class="pill info">your transport rate</span>' : ""}</span>
@@ -5163,7 +5218,16 @@ function viewCredit() {
 }
 
 /* ================= VIEW 7: MASTER FILE — REFINERIES & PRODUCTS ================= */
-/* ================= VIEW 7: MASTER FILE — REFINERIES & PRODUCTS ================= */
+function getRefineryProducts(s) {
+  const validIds = new Set((S.catalog?.products || []).filter(p => (p.name || "").trim()).map(p => p.id));
+  if (Array.isArray(s.products)) {
+    return s.products.filter(id => validIds.has(id));
+  }
+  const fromCycles = [...new Set((S.cycles || []).flatMap(c => (c.prices || []).filter(p => p.sourceId === s.id && num(p.basic) > 0 && validIds.has(p.productId)).map(p => p.productId)))];
+  s.products = fromCycles.length ? fromCycles : [...validIds];
+  return s.products;
+}
+
 function syncRefineryProductsToLatestCycle(sourceId, productIds) {
   const lc = latestCycle();
   if (!lc) return;
@@ -5179,45 +5243,16 @@ function syncRefineryProductsToLatestCycle(sourceId, productIds) {
   }
 }
 
-const CITY_STATE_MAP = {
-  "kochi": "Kerala", "cochin": "Kerala", "ambalamugal": "Kerala",
-  "mumbai": "Maharashtra", "mahul": "Maharashtra", "taloja": "Maharashtra", "pune": "Maharashtra", "nagpur": "Maharashtra", "panvel": "Maharashtra",
-  "bina": "Madhya Pradesh", "indore": "Madhya Pradesh", "bhopal": "Madhya Pradesh",
-  "hazira": "Gujarat", "vadodara": "Gujarat", "koyali": "Gujarat", "jamnagar": "Gujarat", "vadinar": "Gujarat", "dahej": "Gujarat", "ahmedabad": "Gujarat", "surat": "Gujarat", "kandla": "Gujarat", "mundra": "Gujarat",
-  "mathura": "Uttar Pradesh", "kanpur": "Uttar Pradesh", "lucknow": "Uttar Pradesh",
-  "panipat": "Haryana", "karnal": "Haryana", "gurugram": "Haryana",
-  "visakhapatnam": "Andhra Pradesh", "vizag": "Andhra Pradesh", "visakh": "Andhra Pradesh", "kakinada": "Andhra Pradesh", "tatipaka": "Andhra Pradesh",
-  "chennai": "Tamil Nadu", "manali": "Tamil Nadu", "cauvery basin": "Tamil Nadu", "nagapattinam": "Tamil Nadu",
-  "mangalore": "Karnataka", "mangaluru": "Karnataka", "bengaluru": "Karnataka",
-  "haldia": "West Bengal", "kolkata": "West Bengal",
-  "paradip": "Odisha", "paradeep": "Odisha",
-  "barauni": "Bihar",
-  "bathinda": "Punjab", "bhatinda": "Punjab",
-  "guwahati": "Assam", "digboi": "Assam", "bongaigaon": "Assam", "numaligarh": "Assam",
-  "delhi": "Delhi NCR", "barmer": "Rajasthan", "jodhpur": "Rajasthan"
-};
-
-function inferStateForCity(cityStr, existingState = "") {
-  if (existingState && String(existingState).trim()) return String(existingState).trim();
-  const c = norm(cityStr);
-  if (!c) return "";
-  if (CITY_STATE_MAP[c]) return CITY_STATE_MAP[c];
-  for (const [k, st] of Object.entries(CITY_STATE_MAP)) {
-    if (c.includes(k)) return st;
-  }
-  return "";
-}
-
 function getRefineryBrandGroups() {
   const groups = [];
   const map = new Map();
   (S.catalog?.sources || []).forEach((s, sourceIndex) => {
-    const brand = (getSourceBrandName(s) || s.company || "Other").trim();
-    if (!s.state) {
-      const inferred = inferStateForCity(s.loading || (s.locations && s.locations[0]) || "");
-      if (inferred) s.state = inferred;
+    const brand = getSourceBrandName(s);
+    // Keep a stable groupId on each source so typing into a blank row NEVER changes its group identity!
+    if (!s._groupId) {
+      s._groupId = norm(brand) ? ("grp_" + norm(brand)) : ("grp_new_" + (s.id || sourceIndex));
     }
-    const gKey = norm(brand) || ("grp_" + (s.id || sourceIndex));
+    const gKey = norm(brand) || s._groupId;
     if (!map.has(gKey)) {
       const g = { brandKey: gKey, brandName: brand, items: [], indices: [] };
       map.set(gKey, g);
@@ -5230,952 +5265,497 @@ function getRefineryBrandGroups() {
   return groups;
 }
 
+// Before any button click re-renders viewRefineries(), flush all current DOM input values into S.catalog so zero typed letters are ever lost!
 function flushRefineriesDomToCatalog() {
-  // No-op compatibility stub so any external caller remains safe
+  document.querySelectorAll("[data-brand-indices]").forEach(inp => {
+    const indices = (inp.getAttribute("data-brand-indices") || "").split(",").filter(Boolean).map(Number);
+    const val = inp.value;
+    const firstWord = val.trim().split(/\s+/)[0] || "";
+    indices.forEach(idx => {
+      const s = S.catalog?.sources?.[idx];
+      if (s) {
+        s.brandName = val;
+        if (firstWord) s.company = firstWord;
+        s.name = formatSupplyPointDisplayName(val, s.loading);
+      }
+    });
+  });
+  document.querySelectorAll("[data-sp-loc]").forEach(inp => {
+    const idx = +inp.getAttribute("data-sp-loc");
+    const s = S.catalog?.sources?.[idx];
+    if (s) {
+      const loc = inp.value.trim();
+      s.loading = loc;
+      s.locations = loc ? [loc] : [];
+      s.name = formatSupplyPointDisplayName(getSourceBrandName(s), loc);
+    }
+  });
+  document.querySelectorAll("[data-p]").forEach(inp => {
+    const idx = +inp.getAttribute("data-p");
+    const p = S.catalog?.products?.[idx];
+    if (p && inp.dataset.f) {
+      p[inp.dataset.f] = inp.value;
+    }
+  });
+}
+
+function addLocationToBrandGroup(indicesStr, rawLoc) {
+  if (!S.canWrite) return;
+  flushRefineriesDomToCatalog();
+  const parts = String(rawLoc || "").split(",").map(x => x.trim()).filter(Boolean);
+  if (!parts.length) { toast("Type a location name first (e.g. Bina, Kochi)"); return; }
+  const idxs = String(indicesStr || "").split(",").filter(Boolean).map(Number);
+  const items = idxs.map(i => ({ s: S.catalog.sources[i], sourceIndex: i })).filter(x => x.s);
+  if (!items.length) return;
+  const g = { items, brandName: getSourceBrandName(items[0].s) };
+  const brand = g.brandName || "Refinery";
+
+  parts.forEach(loc => {
+    const cleanLoc = loc.charAt(0).toUpperCase() + loc.slice(1);
+    // Check if first item in group has no location yet — if so, populate it directly!
+    const emptyLocItem = g.items.find(it => !String(it.s.loading || "").trim());
+    if (emptyLocItem) {
+      emptyLocItem.s.loading = cleanLoc;
+      emptyLocItem.s.locations = [cleanLoc];
+      emptyLocItem.s.brandName = brand;
+      emptyLocItem.s.company = brand.split(/\s+/)[0] || brand;
+      emptyLocItem.s.name = formatSupplyPointDisplayName(brand, cleanLoc);
+    } else if (!g.items.some(it => norm(it.s.loading) === norm(cleanLoc))) {
+      const newSp = {
+        id: sourceIdFor(`${brand}-${cleanLoc}`),
+        brandName: brand,
+        company: brand.split(/\s+/)[0] || brand,
+        name: formatSupplyPointDisplayName(brand, cleanLoc),
+        loading: cleanLoc,
+        locations: [cleanLoc],
+        creditDays: g.items[0]?.s?.creditDays || 0,
+        active: true,
+        products: [],
+        aliases: []
+      };
+      S.catalog.sources.push(newSp);
+    }
+  });
+
+  saveDoc("master/catalog", S.catalog, 0);
+  viewRefineries();
+  toast(`Added location(s) ${parts.join(", ")} to ${brand} — now assign the products sold at each location!`);
+}
+
+function addInlineProductToSupplyPoint(si, rawProdName) {
+  if (!S.canWrite) return;
+  flushRefineriesDomToCatalog();
+  const names = String(rawProdName || "").split(",").map(x => x.trim()).filter(Boolean);
+  if (!names.length) { toast("Type a product name first (e.g. MTO, LDO)"); return; }
+  const row = S.catalog.sources[si];
+  if (!row) return;
+  const sold = getRefineryProducts(row);
+  const addedNames = [];
+
+  for (const pName of names) {
+    let prod = (S.catalog.products || []).find(p => norm(p.name) === norm(pName) || norm(p.id) === norm(pName));
+    if (!prod) {
+      const emptyProd = (S.catalog.products || []).find(p => !(p.name || "").trim());
+      const newId = productIdFor(pName, "");
+      const autoType = inferProductType(pName, "");
+      if (emptyProd) {
+        emptyProd.id = newId;
+        emptyProd.name = pName;
+        emptyProd.unit = emptyProd.unit || "MT";
+        emptyProd.cls = autoType;
+        emptyProd.aliases = [pName.toUpperCase()];
+        delete emptyProd._autoCode;
+        prod = emptyProd;
+      } else {
+        prod = { id: newId, name: pName, unit: "MT", cls: autoType, aliases: [pName.toUpperCase()] };
+        S.catalog.products.push(prod);
+      }
+    }
+    if (!sold.includes(prod.id)) {
+      sold.push(prod.id);
+      syncRefineryProductsToLatestCycle(row.id, [prod.id]);
+    }
+    addedNames.push(prod.name);
+  }
+
+  row.products = sold;
+  saveDoc("master/catalog", S.catalog, 0);
+  viewRefineries();
+  toast(`Added ${addedNames.join(", ")} to ${row.name || "location"}`);
 }
 
 function viewRefineries() {
   S.catalog = S.catalog || { sources: [], products: [] };
   autoHealCatalogAndRoutes();
-
-  const saveC = (delay = 0) => saveDoc("master/catalog", S.catalog, delay);
-  const canEdit = !!S.canWrite;
+  const saveC = (delay = 500) => saveDoc("master/catalog", S.catalog, delay);
+  const dis = S.canWrite ? "" : "disabled";
   const namedProds = (S.catalog.products || []).filter(p => (p.name || "").trim());
-  const P = prodMap();
-  const lc = latestCycle();
   const brandGroups = getRefineryBrandGroups();
 
-  UI.refMgr = UI.refMgr || {
-    companyKey: null,
-    refineryId: null,
-    showAddCompany: false,
-    editingCompanyKey: null,
-    showAddRefinery: false,
-    editingRefineryId: null,
-    showAddProduct: false,
-    productSearch: "",
-    showCatalogDrawer: false
-  };
-  const rm = UI.refMgr;
+  V().innerHTML = `<div class="stack">
+   <section class="stack" style="gap:8px">
+     <div class="sechead">
+       <div>
+         <h3>Step 2 · Refineries and supply points (Location-Specific Products)</h3>
+         <p class="tiny" style="margin:2px 0 0">Each refinery (e.g. <b>BPCL</b>, <b>IOCL</b>, <b>Nayara</b>) can have multiple locations (e.g. <b>Kochi</b>, <b>Mumbai</b>, <b>Bina</b>), and <b>each location has its own Products Sold list</b> so calculation and transport matching are 100% accurate per location.</p>
+       </div>
+       <div class="actions">
+         ${S.currentUser?.role === "admin" && (S.catalog.sources || []).length ? `<button class="btn small danger" id="del-all-sources" type="button">🗑️ Delete All Refineries (${brandGroups.length})</button>` : ""}
+         ${S.canWrite ? `<label class="btn small" for="up-step-refineries">⬆ Upload Refineries (.xlsx)</label><input type="file" id="up-step-refineries" accept=".xlsx,.xls,.csv" hidden>` : ""}
+         <button class="btn small primary" id="adds" type="button" ${dis}>＋ Add refinery / source</button>
+       </div>
+     </div>
+     <div class="tw tbl-edit" data-live>
+       <table>
+         <thead>
+           <tr>
+             <th style="width:240px;min-width:210px">Refinery / Source</th>
+             <th style="min-width:520px">Location &amp; Products Sold at That Specific Location</th>
+             <th style="width:60px"></th>
+           </tr>
+         </thead>
+         <tbody>
+         ${brandGroups.map((g, gi) => {
+           return `<tr>
+             <td style="vertical-align:top;padding-top:12px">
+               <div class="stack" style="gap:8px">
+                 <div>
+                   <label class="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 block mb-1">Refinery Brand / Company</label>
+                   <input type="text" data-brand-indices="${g.indices.join(",")}" value="${esc(g.brandName)}" placeholder="e.g. BPCL, IOCL, NAYARA Energy" style="font-weight:800;font-size:14px" ${dis}>
+                 </div>
+                 ${S.canWrite ? `
+                 <div class="p-2 rounded-xl bg-slate-50 border border-slate-200 space-y-1.5">
+                   <span class="text-[10px] font-bold text-indigo-700 block">+ Add Location under ${esc(g.brandName || "this refinery")}:</span>
+                   <div class="flex items-center gap-1">
+                     <input type="text" data-add-brand-loc-in="${gi}" data-bindices="${g.indices.join(",")}" list="dl-all-locs" placeholder="e.g. Bina, Kochi, Mumbai" style="padding:4px 8px;font-size:12px">
+                     <button type="button" data-add-brand-loc-btn="${gi}" data-bindices="${g.indices.join(",")}" class="btn small primary" style="padding:4px 9px">+ Add</button>
+                   </div>
+                 </div>` : ""}
+               </div>
+             </td>
+             <td style="vertical-align:top">
+               <div class="stack" style="gap:8px">
+                 ${g.items.map(({ s, sourceIndex }) => {
+                   const sold = getRefineryProducts(s);
+                   const locVal = s.loading || (s.locations && s.locations[0]) || "";
+                   return `<div class="p-3 rounded-xl bg-slate-50/90 border border-slate-200/90 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+                     <!-- Left: Specific Location Input -->
+                     <div class="flex items-center gap-2 shrink-0" style="min-width:190px">
+                       <span class="px-2.5 py-1 rounded-lg bg-indigo-600 text-white text-xs font-extrabold">📍</span>
+                       <div class="flex-1">
+                         <span class="text-[10px] font-extrabold uppercase text-slate-400 block">Location</span>
+                         <input type="text" data-sp-loc="${sourceIndex}" list="dl-all-locs" value="${esc(locVal)}" placeholder="Type location (e.g. Kochi)" style="font-weight:700;padding:4px 8px;font-size:12.5px;width:155px" ${dis}>
+                       </div>
+                     </div>
 
-  const selectedCompany = rm.companyKey
-    ? brandGroups.find(g => g.brandKey === rm.companyKey)
-    : null;
-  if (!selectedCompany) {
-    rm.companyKey = null;
-    rm.refineryId = null;
-  }
+                     <!-- Middle: Products Sold at THIS Specific Location -->
+                     <div class="flex-1 stack" style="gap:6px">
+                       <div class="flex items-center justify-between">
+                         <span class="text-[10px] font-extrabold uppercase text-slate-400">Products Sold at ${esc(locVal || "this location")} (${sold.length})</span>
+                         <label class="text-[11px] text-slate-500 flex items-center gap-1 cursor-pointer">
+                           <input type="checkbox" data-sp-active="${sourceIndex}" ${s.active !== false ? "checked" : ""} ${dis}>
+                           <span>Active</span>
+                         </label>
+                       </div>
+                       <div class="chips" style="gap:5px">
+                         ${sold.map(pid => {
+                           const p = namedProds.find(x => x.id === pid);
+                           if (!p) return "";
+                           return `<span class="chip" style="padding:3px 10px;font-size:11.5px;background:var(--accent);border-color:var(--accent);color:#fff">
+                             <span class="dot" style="background:${clsDotColor(p.cls)};border:1px solid #fff"></span>
+                             <span>${esc(p.name)}</span>
+                             ${S.canWrite ? `<button type="button" data-sprod="${sourceIndex}|${esc(p.id)}" class="ml-1 text-white/80 hover:text-white font-extrabold" title="Remove ${esc(p.name)} from ${esc(locVal)}">×</button>` : ""}
+                           </span>`;
+                         }).join("") || `<span class="tiny text-amber-700 font-semibold">No products assigned to ${esc(locVal || "this location")} yet — select or add below</span>`}
+                       </div>
+                       ${S.canWrite ? `
+                       <div class="flex flex-wrap items-center gap-1.5 pt-0.5">
+                         <select data-pickprod-sel="${sourceIndex}" style="width:auto;min-width:155px;padding:4px 8px;font-size:11.5px">
+                           <option value="">+ Select product for ${esc(locVal || "location")}…</option>
+                           ${namedProds.filter(p => !sold.includes(p.id)).map(p => `<option value="${esc(p.id)}">${esc(p.name)} (${p.unit})</option>`).join("")}
+                           <option value="__ALL__">✓ Assign All Products (${namedProds.length})</option>
+                           <option value="__CLEAR__">✕ Clear Products on ${esc(locVal || "location")}</option>
+                         </select>
+                         <div class="flex items-center gap-1">
+                           <input type="text" data-addprod-in="${sourceIndex}" placeholder="Or type new (e.g. MTO, FO)" style="padding:4px 8px;font-size:11.5px;min-width:145px">
+                           <button type="button" data-addprod-btn="${sourceIndex}" class="btn small primary" style="padding:4px 8px">+ Add</button>
+                         </div>
+                       </div>` : ""}
+                     </div>
 
-  const realRefineries = selectedCompany
-    ? selectedCompany.items.filter(it => !it.s._companyPlaceholder)
-    : [];
+                     <!-- Right: Remove This Location -->
+                     <div class="shrink-0 self-end lg:self-center">
+                       <button class="btn small danger" type="button" data-sdel="${sourceIndex}" title="Remove ${esc(locVal || "location")}" ${dis}>✕ Loc</button>
+                     </div>
+                   </div>`;
+                 }).join("")}
+               </div>
+             </td>
+             <td style="vertical-align:top;padding-top:12px">
+               <button class="btn small danger" type="button" data-bdel="${g.indices.join(",")}" title="Delete entire ${esc(g.brandName)} refinery group" ${dis}>✕ All</button>
+             </td>
+           </tr>`;
+         }).join("") || `<tr><td colspan="3" class="empty">No refineries added yet. Click <b>＋ Add refinery / source</b> above.</td></tr>`}
+         </tbody>
+       </table>
+     </div>
+     <datalist id="dl-all-locs">${loadingPoints().map(l => `<option value="${esc(l)}">`).join("")}</datalist>
+   </section>
 
-  const selectedRefineryItem = (selectedCompany && rm.refineryId)
-    ? realRefineries.find(it => it.s.id === rm.refineryId)
-    : null;
-  if (!selectedRefineryItem) {
-    rm.refineryId = null;
-  }
+   <section class="stack" style="gap:8px">
+     <div class="sechead">
+       <div>
+         <h3>Step 1 · Products Master (Feed This First)</h3>
+         <p class="tiny" style="margin:2px 0 0">Feed your clean list of products, their unit (MT or KL), and color/type (White liquid, Yellow liquid, Black, Bitumen) first so Refineries, Routes, and Rates match them cleanly.</p>
+       </div>
+       <div class="actions">
+         ${S.currentUser?.role === "admin" && (S.catalog.products || []).length ? `<button class="btn small danger" id="del-all-products" type="button">🗑️ Delete All Products (${S.catalog.products.length})</button>` : ""}
+         ${S.canWrite ? `<label class="btn small" for="up-step-products">⬆ Upload Products (.xlsx)</label><input type="file" id="up-step-products" accept=".xlsx,.xls,.csv" hidden>` : ""}
+         <button class="btn small primary" id="addp" type="button" ${dis}>＋ Add product</button>
+       </div>
+     </div>
+     <datalist id="dl-product-types">
+       <option value="White liquid">
+       <option value="Yellow">
+       <option value="Yellow liquid">
+       <option value="Black">
+       <option value="Black oil">
+       <option value="Bitumen">
+     </datalist>
+     <div class="tw tbl-edit" data-live>
+       <table>
+         <thead>
+           <tr>
+             <th>Name</th>
+             <th>Unit</th>
+             <th>Type (write e.g. White liquid, Yellow, Black)</th>
+             <th></th>
+           </tr>
+         </thead>
+         <tbody>
+         ${(S.catalog.products || []).map((p, i) => `<tr>
+           <td><input type="text" data-p="${i}" data-f="name" value="${esc(p.name)}" placeholder="e.g. MTO or Light Diesel Oil (LDO)" style="min-width:220px" ${dis}></td>
+           <td><select data-p="${i}" data-f="unit" style="width:95px" ${dis}><option ${p.unit === "MT" ? "selected" : ""}>MT</option><option ${p.unit === "KL" ? "selected" : ""}>KL</option></select></td>
+           <td><input type="text" list="dl-product-types" data-p="${i}" data-f="cls" value="${esc(displayTypeLabel(p.cls))}" placeholder="Write type: White liquid, Yellow, Black…" style="min-width:210px" ${dis}></td>
+           <td><button class="btn small danger" type="button" data-pdel="${i}" ${dis}>✕</button></td>
+         </tr>`).join("")}
+         </tbody>
+       </table>
+     </div>
+   </section>
+  </div>`;
 
-  const isProdAvailableAtRefinery = (s, pid) => {
-    if (!s.productStatus || typeof s.productStatus !== "object") return true;
-    return s.productStatus[pid] !== false;
-  };
-
-  // Top Breadcrumb Navigation
-  const breadcrumbHtml = `
-    <div class="flex flex-wrap items-center justify-between gap-3 bg-white border border-slate-200 rounded-xl px-4 py-3 mb-4 shadow-sm">
-      <div class="flex flex-wrap items-center gap-1.5 text-sm">
-        <button type="button" data-nav-step="companies" class="px-3 py-1.5 rounded-lg font-semibold transition ${!selectedCompany ? 'bg-indigo-600 text-white shadow-sm' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}">
-          🏢 1. Companies (${brandGroups.length})
-        </button>
-        <span class="text-slate-400 font-bold">→</span>
-        ${selectedCompany ? `
-          <button type="button" data-nav-step="refineries" class="px-3 py-1.5 rounded-lg font-semibold transition ${selectedCompany && !selectedRefineryItem ? 'bg-indigo-600 text-white shadow-sm' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}">
-            🏭 2. ${esc(selectedCompany.brandName)} Refineries (${realRefineries.length})
-          </button>
-        ` : `
-          <span class="px-3 py-1.5 rounded-lg text-slate-400 bg-slate-50 border border-dashed border-slate-200 text-xs font-medium">
-            2. Select a Company
-          </span>
-        `}
-        <span class="text-slate-400 font-bold">→</span>
-        ${selectedRefineryItem ? `
-          <span class="px-3 py-1.5 rounded-lg font-semibold bg-indigo-600 text-white shadow-sm">
-            🛢️ 3. ${esc(selectedCompany.brandName)} — ${esc(selectedRefineryItem.s.loading || selectedRefineryItem.s.name)} Products & Prices
-          </span>
-        ` : `
-          <span class="px-3 py-1.5 rounded-lg text-slate-400 bg-slate-50 border border-dashed border-slate-200 text-xs font-medium">
-            3. Select a Refinery
-          </span>
-        `}
-      </div>
-      <div class="flex items-center gap-2">
-        <button type="button" id="btn-toggle-catalog-drawer" class="btn btn-sm ${rm.showCatalogDrawer ? 'btn-primary' : 'btn-ghost'} text-xs">
-          📦 Central Product Catalogue (${namedProds.length})
-        </button>
-      </div>
-    </div>
-  `;
-
-  // Optional Central Product Catalogue Drawer
-  const catalogDrawerHtml = rm.showCatalogDrawer ? `
-    <div class="bg-slate-50 border border-indigo-200 rounded-xl p-4 mb-5 shadow-sm">
-      <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
-        <div>
-          <h4 class="font-bold text-slate-800 text-sm">📦 Central Product Catalogue (${namedProds.length} Products)</h4>
-          <p class="text-xs text-slate-500">Master list of products available in the "+ Add Product" dropdown when assigning products to a refinery.</p>
-        </div>
-        <button type="button" id="btn-close-catalog-drawer" class="btn btn-sm btn-ghost text-xs">✕ Close</button>
-      </div>
-      ${canEdit ? `
-      <div class="grid grid-cols-1 sm:grid-cols-4 gap-2 mb-3 bg-white p-3 rounded-lg border border-slate-200">
-        <div>
-          <label class="label text-[11px]">Product Name</label>
-          <input id="cat-new-prod-name" class="input input-sm" placeholder="e.g. MTO, LSFO, FO, LDO" />
-        </div>
-        <div>
-          <label class="label text-[11px]">Unit</label>
-          <select id="cat-new-prod-unit" class="input input-sm">
-            <option value="MT">MT (Metric Ton)</option>
-            <option value="KL">KL (Kilolitre)</option>
-          </select>
-        </div>
-        <div>
-          <label class="label text-[11px]">Category / Type</label>
-          <input id="cat-new-prod-cat" class="input input-sm" placeholder="Industrial Fuel / Solvent" value="Industrial Fuel" />
-        </div>
-        <div class="flex items-end">
-          <button type="button" id="btn-cat-add-prod" class="btn btn-sm btn-primary w-full">＋ Add to Catalogue</button>
-        </div>
-      </div>
-      ` : ""}
-      <div class="flex flex-wrap gap-1.5">
-        ${namedProds.map(p => `
-          <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-white border border-slate-200 text-slate-700">
-            <span class="font-semibold">${esc(p.name)}</span>
-            <span class="text-[10px] text-slate-400">(${esc(p.unit || "MT")})</span>
-          </span>
-        `).join("")}
-      </div>
-    </div>
-  ` : "";
-
-  let stepBodyHtml = "";
-
-  // =========================================================================
-  // LEVEL 1: COMPANY MANAGEMENT
-  // =========================================================================
-  if (!selectedCompany) {
-    stepBodyHtml = `
-      <div class="bg-white border border-slate-200 rounded-xl p-5 shadow-sm">
-        <div class="flex flex-wrap items-center justify-between gap-3 mb-4 pb-3 border-b border-slate-100">
-          <div>
-            <h3 class="text-base font-bold text-slate-800">1. Company Management</h3>
-            <p class="text-xs text-slate-500 mt-0.5">Select a company to view its refineries by city & state, or add a new refinery company.</p>
-          </div>
-          ${canEdit ? `
-            <button type="button" id="btn-show-add-company" class="btn btn-sm btn-primary">＋ Add Company</button>
-          ` : `<span class="badge badge-gray">View-Only Mode</span>`}
-        </div>
-
-        ${rm.showAddCompany && canEdit ? `
-          <div class="bg-indigo-50/70 border border-indigo-200 rounded-xl p-4 mb-5">
-            <div class="font-bold text-xs text-indigo-950 uppercase tracking-wider mb-2">Add New Refinery Company</div>
-            <div class="grid grid-cols-1 sm:grid-cols-4 gap-3 items-end">
-              <div class="sm:col-span-1">
-                <label class="label text-xs">Company Code / Name *</label>
-                <input id="new-company-name" class="input input-sm bg-white" placeholder="e.g. BPCL, IOCL, HPCL, RIL" />
-              </div>
-              <div class="sm:col-span-1">
-                <label class="label text-xs">First Refinery City (Optional)</label>
-                <input id="new-company-city" class="input input-sm bg-white" placeholder="e.g. Kochi, Mumbai" />
-              </div>
-              <div class="sm:col-span-1">
-                <label class="label text-xs">State (Optional)</label>
-                <input id="new-company-state" class="input input-sm bg-white" placeholder="e.g. Kerala, Maharashtra" />
-              </div>
-              <div class="flex items-center gap-2">
-                <button type="button" id="btn-save-new-company" class="btn btn-sm btn-primary">Save Company</button>
-                <button type="button" id="btn-cancel-new-company" class="btn btn-sm btn-ghost">Cancel</button>
-              </div>
-            </div>
-          </div>
-        ` : ""}
-
-        ${brandGroups.length === 0 ? `
-          <div class="text-center py-10 text-slate-400 text-sm">No refinery companies found. Click <b>+ Add Company</b> above to add one.</div>
-        ` : `
-          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            ${brandGroups.map(grp => {
-              const realItems = grp.items.filter(it => !it.s._companyPlaceholder);
-              const activeCount = realItems.filter(it => it.s.active !== false).length;
-              const isCompanyActive = realItems.length === 0
-                ? grp.items.every(it => it.s.active !== false)
-                : activeCount > 0;
-              const isEditing = rm.editingCompanyKey === grp.brandKey && canEdit;
-              const citiesPreview = realItems.map(it => it.s.loading || (it.s.locations && it.s.locations[0]) || it.s.name).filter(Boolean);
-
-              return `
-                <div class="border ${isCompanyActive ? 'border-slate-200 bg-white' : 'border-slate-200 bg-slate-50 opacity-80'} rounded-xl p-4 shadow-sm hover:border-indigo-300 transition flex flex-col justify-between">
-                  <div>
-                    <div class="flex items-start justify-between gap-2 mb-2">
-                      ${isEditing ? `
-                        <div class="flex items-center gap-1.5 flex-1">
-                          <input type="text" id="edit-company-input-${esc(grp.brandKey)}" class="input input-sm font-bold text-slate-900" value="${esc(grp.brandName)}" />
-                          <button type="button" data-save-company="${esc(grp.brandKey)}" class="btn btn-sm btn-primary text-xs px-2.5">Save</button>
-                          <button type="button" data-cancel-edit-company="${esc(grp.brandKey)}" class="btn btn-sm btn-ghost text-xs px-2">✕</button>
-                        </div>
-                      ` : `
-                        <div class="flex items-center gap-2">
-                          <span class="w-9 h-9 rounded-lg bg-indigo-50 border border-indigo-100 text-indigo-700 font-extrabold text-xs flex items-center justify-center">
-                            ${esc(grp.brandName.slice(0, 4).toUpperCase())}
-                          </span>
-                          <div>
-                            <h4 class="font-bold text-slate-900 text-base leading-tight">${esc(grp.brandName)}</h4>
-                            <span class="text-xs text-slate-500">${realItems.length} ${realItems.length === 1 ? 'Refinery' : 'Refineries'}</span>
-                          </div>
-                        </div>
-                      `}
-                      <span class="px-2 py-0.5 rounded-full text-[11px] font-semibold ${isCompanyActive ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-slate-200 text-slate-600'}">
-                        ${isCompanyActive ? 'Active' : 'Inactive'}
-                      </span>
-                    </div>
-
-                    <div class="text-xs text-slate-500 mt-2 mb-4 line-clamp-2 min-h-[2rem]">
-                      ${citiesPreview.length
-                        ? `Locations: <span class="text-slate-700 font-medium">${citiesPreview.map(esc).join(", ")}</span>`
-                        : `<span class="italic text-slate-400">No refinery locations added yet</span>`}
-                    </div>
-                  </div>
-
-                  <div class="pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
-                    <button type="button" data-open-company="${esc(grp.brandKey)}" class="btn btn-sm btn-primary flex-1 justify-center">
-                      Manage Refineries (${realItems.length}) →
-                    </button>
-                    ${canEdit && !isEditing ? `
-                      <button type="button" data-edit-company="${esc(grp.brandKey)}" class="btn btn-sm btn-ghost text-xs px-2.5" title="Edit Company Name">Edit</button>
-                      <button type="button" data-toggle-company="${esc(grp.brandKey)}" class="btn btn-sm btn-ghost text-xs px-2.5 ${isCompanyActive ? 'text-amber-700' : 'text-emerald-700'}">
-                        ${isCompanyActive ? 'Deactivate' : 'Activate'}
-                      </button>
-                    ` : ""}
-                  </div>
-                </div>
-              `;
-            }).join("")}
-          </div>
-        `}
-      </div>
-    `;
-  }
-
-  // =========================================================================
-  // LEVEL 2: REFINERY MANAGEMENT (FOR SELECTED COMPANY)
-  // =========================================================================
-  else if (selectedCompany && !selectedRefineryItem) {
-    stepBodyHtml = `
-      <div class="bg-white border border-slate-200 rounded-xl p-5 shadow-sm">
-        <div class="flex flex-wrap items-center justify-between gap-3 mb-4 pb-3 border-b border-slate-100">
-          <div class="flex items-center gap-3">
-            <button type="button" data-nav-step="companies" class="btn btn-sm btn-ghost text-xs">← Back to Companies</button>
-            <div>
-              <h3 class="text-base font-bold text-slate-900">${esc(selectedCompany.brandName)} — Refineries</h3>
-              <p class="text-xs text-slate-500 mt-0.5">Select any refinery below to manage its available products and prices.</p>
-            </div>
-          </div>
-          ${canEdit ? `
-            <button type="button" id="btn-show-add-refinery" class="btn btn-sm btn-primary">＋ Add Refinery</button>
-          ` : ""}
-        </div>
-
-        ${rm.showAddRefinery && canEdit ? `
-          <div class="bg-indigo-50/70 border border-indigo-200 rounded-xl p-4 mb-5">
-            <div class="font-bold text-xs text-indigo-950 uppercase tracking-wider mb-3">Add Refinery under ${esc(selectedCompany.brandName)}</div>
-            <div class="grid grid-cols-1 sm:grid-cols-4 gap-3">
-              <div>
-                <label class="label text-xs">Refinery Name *</label>
-                <input id="new-ref-name" class="input input-sm bg-white" placeholder="e.g. ${esc(selectedCompany.brandName)} Kochi" />
-              </div>
-              <div>
-                <label class="label text-xs">City *</label>
-                <input id="new-ref-city" class="input input-sm bg-white" placeholder="e.g. Kochi, Mumbai, Bina" />
-              </div>
-              <div>
-                <label class="label text-xs">State *</label>
-                <input id="new-ref-state" class="input input-sm bg-white" placeholder="e.g. Kerala, Maharashtra" />
-              </div>
-              <div>
-                <label class="label text-xs">Status</label>
-                <select id="new-ref-active" class="input input-sm bg-white">
-                  <option value="true" selected>Active</option>
-                  <option value="false">Inactive</option>
-                </select>
-              </div>
-            </div>
-            <div class="flex items-center gap-2 mt-3">
-              <button type="button" id="btn-save-new-refinery" class="btn btn-sm btn-primary">Save Refinery</button>
-              <button type="button" id="btn-cancel-new-refinery" class="btn btn-sm btn-ghost">Cancel</button>
-            </div>
-          </div>
-        ` : ""}
-
-        ${realRefineries.length === 0 ? `
-          <div class="text-center py-10 text-slate-400 text-sm">
-            No refineries added for <b>${esc(selectedCompany.brandName)}</b> yet. Click <b>+ Add Refinery</b> above to create one.
-          </div>
-        ` : `
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-            ${realRefineries.map(({ s }) => {
-              const city = (s.loading || (s.locations && s.locations[0]) || "").trim() || s.name || "Location";
-              const state = (s.state || inferStateForCity(city)).trim();
-              const refTitle = (s.refineryName || `${selectedCompany.brandName} (${city})`).trim();
-              const isRefActive = s.active !== false;
-              const isEditingRef = rm.editingRefineryId === s.id && canEdit;
-              const assignedPids = getRefineryProducts(s).filter(pid => P[pid] && (P[pid].name || "").trim());
-              const availCount = assignedPids.filter(pid => isProdAvailableAtRefinery(s, pid)).length;
-
-              return `
-                <div class="border ${isRefActive ? 'border-slate-200 bg-white' : 'border-slate-200 bg-slate-50 opacity-80'} rounded-xl p-4 shadow-sm hover:border-indigo-300 transition flex flex-col justify-between">
-                  ${isEditingRef ? `
-                    <div class="space-y-3">
-                      <div class="text-xs font-bold text-indigo-900 uppercase">Edit Refinery Details</div>
-                      <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                        <div>
-                          <label class="label text-[11px]">Refinery Name</label>
-                          <input id="edit-ref-name-${esc(s.id)}" class="input input-sm" value="${esc(refTitle)}" />
-                        </div>
-                        <div>
-                          <label class="label text-[11px]">City</label>
-                          <input id="edit-ref-city-${esc(s.id)}" class="input input-sm" value="${esc(city)}" />
-                        </div>
-                        <div>
-                          <label class="label text-[11px]">State</label>
-                          <input id="edit-ref-state-${esc(s.id)}" class="input input-sm" value="${esc(state)}" />
-                        </div>
-                        <div>
-                          <label class="label text-[11px]">Status</label>
-                          <select id="edit-ref-active-${esc(s.id)}" class="input input-sm">
-                            <option value="true" ${isRefActive ? "selected" : ""}>Active</option>
-                            <option value="false" ${!isRefActive ? "selected" : ""}>Inactive</option>
-                          </select>
-                        </div>
-                      </div>
-                      <div class="flex items-center gap-2 pt-2">
-                        <button type="button" data-save-refinery="${esc(s.id)}" class="btn btn-sm btn-primary text-xs">Save Changes</button>
-                        <button type="button" data-cancel-edit-refinery="${esc(s.id)}" class="btn btn-sm btn-ghost text-xs">Cancel</button>
-                      </div>
-                    </div>
-                  ` : `
-                    <div>
-                      <div class="flex items-start justify-between gap-2">
-                        <div>
-                          <div class="text-base font-bold text-slate-900">
-                            ${esc(city)}${state ? ` <span class="text-slate-400 font-normal">—</span> <span class="text-slate-600 font-medium">${esc(state)}</span>` : ""}
-                          </div>
-                          <div class="text-xs text-slate-500 mt-0.5">${esc(refTitle)}</div>
-                        </div>
-                        <span class="px-2.5 py-0.5 rounded-full text-[11px] font-semibold ${isRefActive ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-slate-200 text-slate-600'}">
-                          ${isRefActive ? 'Active' : 'Inactive'}
-                        </span>
-                      </div>
-
-                      <div class="mt-3 pt-2.5 border-t border-slate-100">
-                        <div class="text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1.5">
-                          Assigned Products (${availCount} Available)
-                        </div>
-                        ${assignedPids.length === 0 ? `
-                          <span class="text-xs italic text-slate-400">No products assigned yet</span>
-                        ` : `
-                          <div class="flex flex-wrap gap-1.5">
-                            ${assignedPids.map(pid => {
-                              const avail = isProdAvailableAtRefinery(s, pid);
-                              const prRow = lc?.prices?.find(p => p.sourceId === s.id && p.productId === pid);
-                              const hasPrice = prRow && prRow.basic != null && prRow.basic !== "";
-                              return `
-                                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium border ${avail ? 'bg-emerald-50/70 text-emerald-800 border-emerald-200' : 'bg-slate-100 text-slate-500 border-slate-200 line-through'}">
-                                  <span class="w-1.5 h-1.5 rounded-full ${avail ? 'bg-emerald-500' : 'bg-slate-400'}"></span>
-                                  ${esc(P[pid].name)}
-                                  ${hasPrice ? `<span class="text-[10px] font-mono text-indigo-700 ml-0.5">₹${Number(prRow.basic).toLocaleString('en-IN')}</span>` : ""}
-                                </span>
-                              `;
-                            }).join("")}
-                          </div>
-                        `}
-                      </div>
-                    </div>
-
-                    <div class="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
-                      <button type="button" data-open-refinery="${esc(s.id)}" class="btn btn-sm btn-primary flex-1 justify-center">
-                        Manage Products & Prices (${assignedPids.length}) →
-                      </button>
-                      ${canEdit ? `
-                        <button type="button" data-edit-refinery="${esc(s.id)}" class="btn btn-sm btn-ghost text-xs px-2.5">Edit</button>
-                        <button type="button" data-toggle-refinery="${esc(s.id)}" class="btn btn-sm btn-ghost text-xs px-2.5 ${isRefActive ? 'text-amber-700' : 'text-emerald-700'}">
-                          ${isRefActive ? 'Deactivate' : 'Activate'}
-                        </button>
-                      ` : ""}
-                    </div>
-                  `}
-                </div>
-              `;
-            }).join("")}
-          </div>
-        `}
-      </div>
-    `;
-  }
-
-  // =========================================================================
-  // LEVEL 3: PRODUCT ASSIGNMENT & LOCATION PRICING (FOR SELECTED REFINERY)
-  // =========================================================================
-  else if (selectedCompany && selectedRefineryItem) {
-    const s = selectedRefineryItem.s;
-    const city = (s.loading || (s.locations && s.locations[0]) || "").trim() || s.name || "Location";
-    const state = (s.state || inferStateForCity(city)).trim();
-    const assignedPids = getRefineryProducts(s).filter(pid => P[pid] && (P[pid].name || "").trim());
-    const unassignedProds = namedProds.filter(p => !assignedPids.includes(p.id));
-    const searchQ = norm(rm.productSearch || "");
-    const filteredUnassigned = searchQ
-      ? unassignedProds.filter(p => norm(p.name).includes(searchQ) || norm(p.cat || "").includes(searchQ))
-      : unassignedProds;
-
-    stepBodyHtml = `
-      <div class="bg-white border border-slate-200 rounded-xl p-5 shadow-sm">
-        <div class="flex flex-wrap items-center justify-between gap-3 mb-4 pb-3 border-b border-slate-100">
-          <div class="flex items-center gap-3">
-            <button type="button" data-nav-step="refineries" class="btn btn-sm btn-ghost text-xs">← Back to ${esc(selectedCompany.brandName)} Refineries</button>
-            <div>
-              <div class="flex items-center gap-2">
-                <h3 class="text-base font-bold text-slate-900">
-                  ${esc(selectedCompany.brandName)} — ${esc(city)}${state ? ` (${esc(state)})` : ""}
-                </h3>
-                <span class="px-2 py-0.5 rounded-full text-[11px] font-semibold ${s.active !== false ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-slate-200 text-slate-600'}">
-                  ${s.active !== false ? 'Active' : 'Inactive'}
-                </span>
-              </div>
-              <p class="text-xs text-slate-500 mt-0.5">
-                Products and basic prices listed below apply <b>only</b> to <b>${esc(selectedCompany.brandName)} — ${esc(city)}</b>. Other refineries are not affected.
-              </p>
-            </div>
-          </div>
-          ${canEdit ? `
-            <button type="button" id="btn-show-add-product" class="btn btn-sm btn-primary">＋ Add Product</button>
-          ` : ""}
-        </div>
-
-        ${rm.showAddProduct && canEdit ? `
-          <div class="bg-indigo-50/70 border border-indigo-200 rounded-xl p-4 mb-5">
-            <div class="flex items-center justify-between mb-2">
-              <div class="font-bold text-xs text-indigo-950 uppercase tracking-wider">
-                Assign Product to ${esc(selectedCompany.brandName)} — ${esc(city)}
-              </div>
-              <button type="button" id="btn-cancel-add-product" class="text-xs text-slate-500 hover:text-slate-800">✕ Close</button>
-            </div>
-            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
-              <div>
-                <label class="label text-xs">1. Search Central Product Catalogue</label>
-                <input id="ref-prod-search-input" class="input input-sm bg-white" placeholder="Type to filter (e.g. MTO, FO, LDO, LSFO)..." value="${esc(rm.productSearch || "")}" />
-              </div>
-              <div>
-                <label class="label text-xs">2. Select Product (${filteredUnassigned.length} available to add)</label>
-                <select id="ref-prod-select" class="input input-sm bg-white">
-                  ${filteredUnassigned.length === 0
-                    ? `<option value="">— No matching unassigned products —</option>`
-                    : filteredUnassigned.map(p => `<option value="${esc(p.id)}">${esc(p.name)} (${esc(p.unit || "MT")})</option>`).join("")}
-                </select>
-              </div>
-              <div class="flex items-center gap-2">
-                <button type="button" id="btn-confirm-add-product" class="btn btn-sm btn-primary flex-1 justify-center" ${filteredUnassigned.length === 0 ? "disabled" : ""}>
-                  ＋ Assign to ${esc(city)}
-                </button>
-              </div>
-            </div>
-            <div class="mt-3 pt-2.5 border-t border-indigo-100 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-600">
-              <span>Need a new product that isn't in the catalogue yet?</span>
-              <div class="flex items-center gap-2">
-                <input id="quick-new-prod-name" class="input input-sm bg-white w-44" placeholder="New product name (e.g. LSFO)" />
-                <select id="quick-new-prod-unit" class="input input-sm bg-white w-20">
-                  <option value="MT">MT</option>
-                  <option value="KL">KL</option>
-                </select>
-                <button type="button" id="btn-quick-create-assign-prod" class="btn btn-sm btn-ghost bg-white border border-slate-300 text-xs">
-                  Create & Assign
-                </button>
-              </div>
-            </div>
-          </div>
-        ` : ""}
-
-        ${assignedPids.length === 0 ? `
-          <div class="text-center py-10 text-slate-400 text-sm border border-dashed border-slate-200 rounded-xl">
-            No products assigned to <b>${esc(selectedCompany.brandName)} — ${esc(city)}</b> yet.<br/>
-            Click <b>+ Add Product</b> above to assign products to this refinery.
-          </div>
-        ` : `
-          <div class="space-y-2.5">
-            ${assignedPids.map(pid => {
-              const prod = P[pid];
-              const isAvail = isProdAvailableAtRefinery(s, pid);
-              const prRow = lc?.prices?.find(p => p.sourceId === s.id && p.productId === pid) || { basic: "", maxDiscount: 0 };
-              return `
-                <div class="flex flex-wrap items-center justify-between gap-3 p-3.5 rounded-xl border ${isAvail ? 'bg-white border-slate-200' : 'bg-slate-50 border-slate-200 opacity-75'} shadow-sm">
-                  <div class="flex items-center gap-3 min-w-[180px]">
-                    <span class="w-2.5 h-2.5 rounded-full ${isAvail ? 'bg-emerald-500' : 'bg-slate-400'}"></span>
-                    <div>
-                      <div class="font-bold text-slate-900 text-sm">
-                        ${esc(prod.name)}
-                        <span class="text-xs font-normal text-slate-500 ml-1">(${esc(prod.unit || "MT")})</span>
-                      </div>
-                      <div class="text-xs text-slate-500">
-                        ${esc(selectedCompany.brandName)} — ${esc(city)}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div class="flex flex-wrap items-center gap-3">
-                    <div class="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1">
-                      <span class="text-[11px] font-semibold text-slate-500">Basic ₹/${esc(prod.unit || "MT")}:</span>
-                      <input type="number" step="1" data-ref-basic-pid="${esc(pid)}" value="${prRow.basic ?? ""}" placeholder="Enter rate" class="input input-sm w-28 font-mono text-right bg-white" ${!canEdit ? "disabled" : ""} />
-                    </div>
-                    <div class="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1">
-                      <span class="text-[11px] font-semibold text-slate-500">Discount ₹:</span>
-                      <input type="number" step="1" data-ref-disc-pid="${esc(pid)}" value="${prRow.maxDiscount ?? 0}" placeholder="0" class="input input-sm w-20 font-mono text-right bg-white" ${!canEdit ? "disabled" : ""} />
-                    </div>
-                  </div>
-
-                  <div class="flex items-center gap-2">
-                    <span class="px-2.5 py-1 rounded-full text-xs font-semibold ${isAvail ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-amber-50 text-amber-800 border border-amber-200'}">
-                      ${isAvail ? 'Available' : 'Unavailable'}
-                    </span>
-                    ${canEdit ? `
-                      <button type="button" data-toggle-prod-avail="${esc(pid)}" class="btn btn-sm btn-ghost text-xs">
-                        Set ${isAvail ? 'Unavailable' : 'Available'}
-                      </button>
-                      <button type="button" data-remove-ref-prod="${esc(pid)}" class="btn btn-sm btn-ghost text-rose-600 hover:bg-rose-50 text-xs">
-                        Remove
-                      </button>
-                    ` : ""}
-                  </div>
-                </div>
-              `;
-            }).join("")}
-          </div>
-        `}
-      </div>
-    `;
-  }
-
-  const targetEl = $("#master-body") || $("#master-refineries");
-if (targetEl) {
-  targetEl.innerHTML = `
-    <div class="p-4 sm:p-6">
-      <div class="flex flex-wrap items-center justify-between gap-2 mb-4">
-        <div>
-          <h2 class="text-lg font-bold text-slate-900">Refineries, Locations & Product Availability</h2>
-          <p class="text-xs text-slate-500">Simple 3-step management: <b>Company → Refinery (City & State) → Products & Prices at that Refinery</b></p>
-        </div>
-      </div>
-      ${breadcrumbHtml}
-      ${catalogDrawerHtml}
-      ${stepBodyHtml}
-    </div>
-  `;
-  }
-
-  // =========================================================================
-  // EVENT LISTENERS
-  // =========================================================================
-  $$("[data-nav-step]").forEach(btn => {
-    btn.addEventListener("click", () => {
-      const step = btn.getAttribute("data-nav-step");
-      if (step === "companies") {
-        rm.companyKey = null;
-        rm.refineryId = null;
-        rm.showAddRefinery = false;
-        rm.showAddProduct = false;
-      } else if (step === "refineries") {
-        rm.refineryId = null;
-        rm.showAddProduct = false;
-      }
-      viewRefineries();
+  // 1. Refinery Brand Name input listener — mutates exact source indices in-place so typing NEVER loses characters!
+  document.querySelectorAll("[data-brand-indices]").forEach(inp => inp.addEventListener("input", e => {
+    if (!S.canWrite) return;
+    const indices = (inp.getAttribute("data-brand-indices") || "").split(",").filter(Boolean).map(Number);
+    const newBrand = e.target.value;
+    const firstWord = newBrand.trim().split(/\s+/)[0] || "";
+    indices.forEach(idx => {
+      const s = S.catalog.sources[idx];
+      if (!s) return;
+      s.brandName = newBrand;
+      s.company = firstWord;
+      s.name = formatSupplyPointDisplayName(newBrand, s.loading);
     });
-  });
+    saveC(500);
+  }));
 
-  $("#btn-toggle-catalog-drawer")?.addEventListener("click", () => {
-    rm.showCatalogDrawer = !rm.showCatalogDrawer;
-    viewRefineries();
+  // 2. Specific Location input listener (updates loading & display name for that specific supply point)
+  document.querySelectorAll("[data-sp-loc]").forEach(inp => inp.addEventListener("input", e => {
+    if (!S.canWrite) return;
+    const si = +inp.getAttribute("data-sp-loc");
+    const row = S.catalog.sources[si];
+    if (!row) return;
+    const loc = e.target.value.trim();
+    row.loading = loc;
+    row.locations = loc ? [loc] : [];
+    const brand = getSourceBrandName(row);
+    row.name = formatSupplyPointDisplayName(brand, loc);
+    if (row.id.startsWith("s_new_") && brand && loc) {
+      row.id = sourceIdFor(`${brand}-${loc}`);
+    }
+    saveC(500);
+  }));
+
+  // 3. Active checkbox per location
+  document.querySelectorAll("[data-sp-active]").forEach(chk => chk.addEventListener("change", e => {
+    if (!S.canWrite) return;
+    const row = S.catalog.sources[+chk.getAttribute("data-sp-active")];
+    if (row) { row.active = e.target.checked; saveC(300); }
+  }));
+
+  // 4. "+ Add Location under Brand" button & Enter key
+  document.querySelectorAll("[data-add-brand-loc-btn]").forEach(btn => btn.onclick = () => {
+    const gi = btn.getAttribute("data-add-brand-loc-btn");
+    const bindices = btn.getAttribute("data-bindices");
+    const inp = document.querySelector(`input[data-add-brand-loc-in="${gi}"]`);
+    if (inp) addLocationToBrandGroup(bindices, inp.value);
   });
-  $("#btn-close-catalog-drawer")?.addEventListener("click", () => {
-    rm.showCatalogDrawer = false;
-    viewRefineries();
-  });
-  $("#btn-cat-add-prod")?.addEventListener("click", () => {
-    const name = ($("#cat-new-prod-name")?.value || "").trim();
-    const unit = $("#cat-new-prod-unit")?.value || "MT";
-    const cat = ($("#cat-new-prod-cat")?.value || "Industrial Fuel").trim();
-    if (!name) return toast("Please enter a product name.");
-    const exists = (S.catalog.products || []).find(p => norm(p.name) === norm(name));
-    if (exists) return toast(`${exists.name} is already in the central product catalogue.`);
-    const id = "p_" + norm(name).replace(/[^a-z0-9]+/g, "_") + "_" + uid().slice(0, 4);
-    S.catalog.products.push({ id, name, unit, cat, density: 0.9, active: true });
+  document.querySelectorAll("[data-add-brand-loc-in]").forEach(inp => inp.addEventListener("keydown", e => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      addLocationToBrandGroup(inp.getAttribute("data-bindices"), inp.value);
+    }
+  }));
+
+  // 5. Remove product pill from a specific location
+  document.querySelectorAll("[data-sprod]").forEach(btn => btn.onclick = () => {
+    if (!S.canWrite) return;
+    const [siStr, pid] = btn.getAttribute("data-sprod").split("|");
+    const row = S.catalog.sources[+siStr];
+    if (!row) return;
+    const sold = getRefineryProducts(row);
+    const idx = sold.indexOf(pid);
+    if (idx >= 0) sold.splice(idx, 1);
+    row.products = sold;
     saveC(0);
     viewRefineries();
-    toast(`Added ${name} (${unit}) to central catalogue.`);
   });
 
-  // Step 1 Listeners
-  $("#btn-show-add-company")?.addEventListener("click", () => {
-    rm.showAddCompany = true;
-    viewRefineries();
-    $("#new-company-name")?.focus();
-  });
-  $("#btn-cancel-new-company")?.addEventListener("click", () => {
-    rm.showAddCompany = false;
-    viewRefineries();
-  });
-  $("#btn-save-new-company")?.addEventListener("click", () => {
-    const compName = ($("#new-company-name")?.value || "").trim();
-    const city = ($("#new-company-city")?.value || "").trim();
-    const stateInput = ($("#new-company-state")?.value || "").trim();
-    if (!compName) return toast("Please enter a company name (e.g. BPCL, IOCL).");
-    const gKey = norm(compName);
-    const existingGrp = brandGroups.find(g => g.brandKey === gKey);
-    if (existingGrp && !city) {
-      rm.showAddCompany = false;
-      rm.companyKey = existingGrp.brandKey;
-      viewRefineries();
-      return toast(`${existingGrp.brandName} already exists — opened its refineries.`);
-    }
-    const state = inferStateForCity(city, stateInput);
-    const newSource = {
-      id: "s_" + uid(),
-      company: compName,
-      brandName: compName,
-      name: city ? `${compName} (${city})` : compName,
-      refineryName: city ? `${compName} ${city}` : compName,
-      loading: city || "",
-      locations: city ? [city] : [],
-      state: state || "",
-      active: true,
-      products: [],
-      productStatus: {},
-      _companyPlaceholder: !city
-    };
-    S.catalog.sources.push(newSource);
-    saveC(0);
-    rm.showAddCompany = false;
-    rm.companyKey = norm(compName);
-    rm.refineryId = null;
-    viewRefineries();
-    toast(`Added company ${compName}.`);
-  });
-
-  $$("[data-open-company]").forEach(btn => {
-    btn.addEventListener("click", () => {
-      rm.companyKey = btn.getAttribute("data-open-company");
-      rm.refineryId = null;
-      rm.showAddRefinery = false;
-      rm.showAddProduct = false;
-      viewRefineries();
-    });
-  });
-
-  $$("[data-edit-company]").forEach(btn => {
-    btn.addEventListener("click", () => {
-      rm.editingCompanyKey = btn.getAttribute("data-edit-company");
-      viewRefineries();
-    });
-  });
-  $$("[data-cancel-edit-company]").forEach(btn => {
-    btn.addEventListener("click", () => {
-      rm.editingCompanyKey = null;
-      viewRefineries();
-    });
-  });
-  $$("[data-save-company]").forEach(btn => {
-    btn.addEventListener("click", () => {
-      const gKey = btn.getAttribute("data-save-company");
-      const grp = brandGroups.find(g => g.brandKey === gKey);
-      const inp = document.getElementById(`edit-company-input-${gKey}`);
-      const newBrand = (inp?.value || "").trim();
-      if (!grp || !newBrand) return toast("Company name cannot be empty.");
-      grp.items.forEach(({ s }) => {
-        const loc = (s.loading || (s.locations && s.locations[0]) || "").trim();
-        s.company = newBrand;
-        s.brandName = newBrand;
-        s.name = loc ? `${newBrand} (${loc})` : newBrand;
-      });
-      rm.editingCompanyKey = null;
-      saveC(0);
-      viewRefineries();
-      toast(`Updated company name to ${newBrand}.`);
-    });
-  });
-
-  $$("[data-toggle-company]").forEach(btn => {
-    btn.addEventListener("click", () => {
-      const gKey = btn.getAttribute("data-toggle-company");
-      const grp = brandGroups.find(g => g.brandKey === gKey);
-      if (!grp) return;
-      const anyActive = grp.items.some(it => it.s.active !== false);
-      const nextState = !anyActive;
-      grp.items.forEach(it => { it.s.active = nextState; });
-      saveC(0);
-      viewRefineries();
-      toast(`${grp.brandName} marked as ${nextState ? "Active" : "Inactive"}.`);
-    });
-  });
-
-  // Step 2 Listeners (Refineries under Selected Company)
-  $("#btn-show-add-refinery")?.addEventListener("click", () => {
-    rm.showAddRefinery = true;
-    viewRefineries();
-    $("#new-ref-city")?.focus();
-  });
-  $("#btn-cancel-new-refinery")?.addEventListener("click", () => {
-    rm.showAddRefinery = false;
-    viewRefineries();
-  });
-  $("#new-ref-city")?.addEventListener("input", e => {
-    const cityVal = e.target.value || "";
-    const stateInp = $("#new-ref-state");
-    const nameInp = $("#new-ref-name");
-    if (stateInp && !stateInp.value.trim()) {
-      const guessed = inferStateForCity(cityVal);
-      if (guessed) stateInp.value = guessed;
-    }
-    if (nameInp && !nameInp.dataset.userTyped && selectedCompany) {
-      nameInp.value = cityVal.trim() ? `${selectedCompany.brandName} (${cityVal.trim()})` : "";
-    }
-  });
-  $("#new-ref-name")?.addEventListener("input", e => {
-    e.target.dataset.userTyped = e.target.value.trim() ? "1" : "";
-  });
-
-  $("#btn-save-new-refinery")?.addEventListener("click", () => {
-    if (!selectedCompany) return;
-    const city = ($("#new-ref-city")?.value || "").trim();
-    const stateInput = ($("#new-ref-state")?.value || "").trim();
-    const refNameInput = ($("#new-ref-name")?.value || "").trim();
-    const isActive = ($("#new-ref-active")?.value || "true") === "true";
-    if (!city) return toast("Please enter the refinery City.");
-    const state = inferStateForCity(city, stateInput);
-    const duplicate = realRefineries.find(it =>
-      norm(it.s.loading || it.s.name) === norm(city)
-    );
-    if (duplicate) return toast(`${selectedCompany.brandName} — ${city} already exists.`);
-
-    const placeholderIdx = S.catalog.sources.findIndex(
-      x => x._companyPlaceholder && norm(getSourceBrandName(x) || x.company) === selectedCompany.brandKey
-    );
-    const newRefObj = {
-      id: "s_" + uid(),
-      company: selectedCompany.brandName,
-      brandName: selectedCompany.brandName,
-      name: `${selectedCompany.brandName} (${city})`,
-      refineryName: refNameInput || `${selectedCompany.brandName} (${city})`,
-      loading: city,
-      locations: [city],
-      state: state || "",
-      active: isActive,
-      products: [],
-      productStatus: {}
-    };
-    if (placeholderIdx >= 0) {
-      newRefObj.id = S.catalog.sources[placeholderIdx].id || newRefObj.id;
-      S.catalog.sources[placeholderIdx] = newRefObj;
+  // 6. Select existing product from dropdown for a specific location
+  document.querySelectorAll("[data-pickprod-sel]").forEach(sel => sel.onchange = () => {
+    if (!S.canWrite || !sel.value) return;
+    const si = +sel.getAttribute("data-pickprod-sel");
+    const row = S.catalog.sources[si];
+    if (!row) return;
+    if (sel.value === "__ALL__") {
+      row.products = namedProds.map(p => p.id);
+      syncRefineryProductsToLatestCycle(row.id, row.products);
+    } else if (sel.value === "__CLEAR__") {
+      row.products = [];
     } else {
-      S.catalog.sources.push(newRefObj);
-    }
-    saveC(0);
-    rm.showAddRefinery = false;
-    viewRefineries();
-    toast(`Added refinery ${selectedCompany.brandName} — ${city}${state ? " (" + state + ")" : ""}.`);
-  });
-
-  $$("[data-open-refinery]").forEach(btn => {
-    btn.addEventListener("click", () => {
-      rm.refineryId = btn.getAttribute("data-open-refinery");
-      rm.showAddProduct = false;
-      rm.productSearch = "";
-      viewRefineries();
-    });
-  });
-
-  $$("[data-edit-refinery]").forEach(btn => {
-    btn.addEventListener("click", () => {
-      rm.editingRefineryId = btn.getAttribute("data-edit-refinery");
-      viewRefineries();
-    });
-  });
-  $$("[data-cancel-edit-refinery]").forEach(btn => {
-    btn.addEventListener("click", () => {
-      rm.editingRefineryId = null;
-      viewRefineries();
-    });
-  });
-  $$("[data-save-refinery]").forEach(btn => {
-    btn.addEventListener("click", () => {
-      const refId = btn.getAttribute("data-save-refinery");
-      const s = (S.catalog.sources || []).find(x => x.id === refId);
-      if (!s) return;
-      const rName = (document.getElementById(`edit-ref-name-${refId}`)?.value || "").trim();
-      const rCity = (document.getElementById(`edit-ref-city-${refId}`)?.value || "").trim();
-      const rState = (document.getElementById(`edit-ref-state-${refId}`)?.value || "").trim();
-      const rActive = (document.getElementById(`edit-ref-active-${refId}`)?.value || "true") === "true";
-      if (!rCity) return toast("City is required.");
-      const brand = getSourceBrandName(s) || s.company || selectedCompany?.brandName || "Refinery";
-      s.loading = rCity;
-      s.locations = [rCity];
-      s.state = inferStateForCity(rCity, rState);
-      s.refineryName = rName || `${brand} (${rCity})`;
-      s.name = `${brand} (${rCity})`;
-      s.active = rActive;
-      rm.editingRefineryId = null;
-      saveC(0);
-      viewRefineries();
-      toast(`Updated ${s.name}.`);
-    });
-  });
-
-  $$("[data-toggle-refinery]").forEach(btn => {
-    btn.addEventListener("click", () => {
-      const refId = btn.getAttribute("data-toggle-refinery");
-      const s = (S.catalog.sources || []).find(x => x.id === refId);
-      if (!s) return;
-      s.active = s.active === false ? true : false;
-      saveC(0);
-      viewRefineries();
-      toast(`${s.name} marked as ${s.active ? "Active" : "Inactive"}.`);
-    });
-  });
-
-  // Step 3 Listeners (Products & Prices for Selected Refinery)
-  $("#btn-show-add-product")?.addEventListener("click", () => {
-    rm.showAddProduct = true;
-    rm.productSearch = "";
-    viewRefineries();
-    $("#ref-prod-search-input")?.focus();
-  });
-  $("#btn-cancel-add-product")?.addEventListener("click", () => {
-    rm.showAddProduct = false;
-    rm.productSearch = "";
-    viewRefineries();
-  });
-  $("#ref-prod-search-input")?.addEventListener("input", e => {
-    rm.productSearch = e.target.value || "";
-    const pos = e.target.selectionStart || rm.productSearch.length;
-    viewRefineries();
-    const inp = $("#ref-prod-search-input");
-    if (inp) {
-      inp.focus();
-      try { inp.setSelectionRange(pos, pos); } catch (_) {}
-    }
-  });
-
-  $("#btn-confirm-add-product")?.addEventListener("click", () => {
-    if (!selectedRefineryItem) return;
-    const pid = $("#ref-prod-select")?.value;
-    if (!pid) return toast("Please select a product from the dropdown.");
-    const s = selectedRefineryItem.s;
-    const current = getRefineryProducts(s);
-    if (!current.includes(pid)) {
-      current.push(pid);
-      s.products = current;
-    }
-    s.productStatus = s.productStatus || {};
-    s.productStatus[pid] = true;
-    syncRefineryProductsToLatestCycle(s.id, [pid]);
-    saveC(0);
-    viewRefineries();
-    toast(`Assigned ${P[pid]?.name || pid} to ${s.name}.`);
-  });
-
-  $("#btn-quick-create-assign-prod")?.addEventListener("click", () => {
-    if (!selectedRefineryItem) return;
-    const name = ($("#quick-new-prod-name")?.value || "").trim();
-    const unit = $("#quick-new-prod-unit")?.value || "MT";
-    if (!name) return toast("Enter a product name first.");
-    let prod = (S.catalog.products || []).find(p => norm(p.name) === norm(name));
-    if (!prod) {
-      const id = "p_" + norm(name).replace(/[^a-z0-9]+/g, "_") + "_" + uid().slice(0, 4);
-      prod = { id, name, unit, cat: "Industrial Fuel", density: 0.9, active: true };
-      S.catalog.products.push(prod);
-    }
-    const s = selectedRefineryItem.s;
-    const current = getRefineryProducts(s);
-    if (!current.includes(prod.id)) {
-      current.push(prod.id);
-      s.products = current;
-    }
-    s.productStatus = s.productStatus || {};
-    s.productStatus[prod.id] = true;
-    syncRefineryProductsToLatestCycle(s.id, [prod.id]);
-    saveC(0);
-    viewRefineries();
-    toast(`Created & assigned ${prod.name} to ${s.name}.`);
-  });
-
-  // Inline Basic Price & Max Discount inputs for this specific refinery
-  $$("[data-ref-basic-pid]").forEach(inp => {
-    inp.addEventListener("change", () => {
-      if (!selectedRefineryItem || !lc) return;
-      const pid = inp.getAttribute("data-ref-basic-pid");
-      const s = selectedRefineryItem.s;
-      let row = lc.prices.find(p => p.sourceId === s.id && p.productId === pid);
-      if (!row) {
-        row = { sourceId: s.id, productId: pid, basic: null, maxDiscount: 0 };
-        lc.prices.push(row);
+      const sold = getRefineryProducts(row);
+      if (!sold.includes(sel.value)) {
+        sold.push(sel.value);
+        syncRefineryProductsToLatestCycle(row.id, [sel.value]);
       }
-      const val = inp.value.trim();
-      row.basic = val === "" ? null : Number(val);
-      saveDoc("cycles/" + lc.id, lc, 250);
-      toast(`Saved ${P[pid]?.name || pid} basic rate at ${s.name}.`);
-    });
+      row.products = sold;
+    }
+    saveC(0);
+    viewRefineries();
   });
 
-  $$("[data-ref-disc-pid]").forEach(inp => {
-    inp.addEventListener("change", () => {
-      if (!selectedRefineryItem || !lc) return;
-      const pid = inp.getAttribute("data-ref-disc-pid");
-      const s = selectedRefineryItem.s;
-      let row = lc.prices.find(p => p.sourceId === s.id && p.productId === pid);
-      if (!row) {
-        row = { sourceId: s.id, productId: pid, basic: null, maxDiscount: 0 };
-        lc.prices.push(row);
+  // 7. Inline "+ Add product" for a specific location
+  document.querySelectorAll("[data-addprod-btn]").forEach(btn => btn.onclick = () => {
+    const si = +btn.getAttribute("data-addprod-btn");
+    const inp = document.querySelector(`input[data-addprod-in="${si}"]`);
+    if (inp) addInlineProductToSupplyPoint(si, inp.value);
+  });
+  document.querySelectorAll("[data-addprod-in]").forEach(inp => inp.addEventListener("keydown", e => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      addInlineProductToSupplyPoint(+inp.getAttribute("data-addprod-in"), inp.value);
+    }
+  }));
+
+  // 8. Delete single location vs delete entire brand group
+  document.querySelectorAll("[data-sdel]").forEach(b => b.onclick = () => {
+    if (!S.canWrite) return;
+    if (!b.dataset.armed) { b.dataset.armed = 1; b.textContent = "Del?"; return; }
+    S.catalog.sources.splice(+b.dataset.sdel, 1);
+    saveC(0);
+    viewRefineries();
+  });
+  document.querySelectorAll("[data-bdel]").forEach(b => b.onclick = () => {
+    if (!S.canWrite) return;
+    flushRefineriesDomToCatalog();
+    if (!b.dataset.armed) { b.dataset.armed = 1; b.textContent = "Del All?"; return; }
+    const delSet = new Set((b.getAttribute("data-bdel") || "").split(",").filter(Boolean).map(Number));
+    S.catalog.sources = (S.catalog.sources || []).filter((_, idx) => !delSet.has(idx));
+    saveC(0);
+    viewRefineries();
+  });
+
+  // 9. Products table listeners
+  document.querySelectorAll("[data-p]").forEach(inp => inp.addEventListener(inp.tagName === "SELECT" ? "change" : "input", e => {
+    if (!S.canWrite) return;
+    const idx = +inp.dataset.p;
+    const row = S.catalog.products[idx];
+    if (!row) return;
+    const field = inp.dataset.f;
+    row[field] = e.target.value;
+    if (field === "cls") {
+      row._userTypedCls = true;
+    }
+    if (field === "name") {
+      if (!row._userTypedCls) {
+        row.cls = inferProductType(e.target.value, "");
+        const clsInp = document.querySelector(`input[data-p="${idx}"][data-f="cls"]`);
+        if (clsInp && document.activeElement !== clsInp) clsInp.value = row.cls;
       }
-      row.maxDiscount = Number(inp.value) || 0;
-      saveDoc("cycles/" + lc.id, lc, 250);
-      toast(`Saved ${P[pid]?.name || pid} discount at ${s.name}.`);
-    });
+      const cleanName = e.target.value.trim();
+      if (cleanName) {
+        row.aliases = [cleanName.toUpperCase()];
+        if (row._autoCode) {
+          const newId = productIdFor(cleanName, "");
+          const oldId = row.id;
+          row.id = newId;
+          (S.catalog.sources || []).forEach(s => {
+            if (Array.isArray(s.products)) {
+              const pi = s.products.indexOf(oldId);
+              if (pi >= 0) s.products[pi] = newId;
+            }
+          });
+        }
+      }
+    }
+    saveC(500);
+  }));
+
+  document.querySelectorAll("[data-pdel]").forEach(b => b.onclick = () => {
+    if (!S.canWrite) return;
+    if (!b.dataset.armed) { b.dataset.armed = 1; b.textContent = "Del?"; return; }
+    S.catalog.products.splice(+b.dataset.pdel, 1);
+    saveC(0);
+    viewRefineries();
   });
 
-  $$("[data-toggle-prod-avail]").forEach(btn => {
-    btn.addEventListener("click", () => {
-      if (!selectedRefineryItem) return;
-      const pid = btn.getAttribute("data-toggle-prod-avail");
-      const s = selectedRefineryItem.s;
-      s.productStatus = s.productStatus || {};
-      const next = !isProdAvailableAtRefinery(s, pid);
-      s.productStatus[pid] = next;
-      saveC(0);
-      viewRefineries();
-      toast(`${P[pid]?.name || pid} marked as ${next ? "Available" : "Unavailable"} at ${s.name}.`);
-    });
-  });
+  const das = $("#del-all-sources");
+  if (das) das.onclick = () => {
+    if (!S.canWrite) return;
+    if (!das.dataset.armed) { das.dataset.armed = "1"; das.textContent = "⚠️ Confirm Delete All Refineries?"; return; }
+    S.catalog.sources = [];
+    saveC(0);
+    viewRefineries();
+    toast("🗑️ Deleted all refineries!");
+  };
+  const dap = $("#del-all-products");
+  if (dap) dap.onclick = () => {
+    if (!S.canWrite) return;
+    if (!dap.dataset.armed) { dap.dataset.armed = "1"; dap.textContent = "⚠️ Confirm Delete All Products?"; return; }
+    S.catalog.products = [];
+    (S.catalog.sources || []).forEach(s => { s.products = []; });
+    saveC(0);
+    viewRefineries();
+    toast("🗑️ Deleted all products!");
+  };
+  const usrRef = $("#up-step-refineries");
+  if (usrRef) usrRef.onchange = e => { if (e.target.files?.[0]) uploadMaster(e.target.files[0], "refineries"); e.target.value = ""; };
+  const usrProd = $("#up-step-products");
+  if (usrProd) usrProd.onchange = e => { if (e.target.files?.[0]) uploadMaster(e.target.files[0], "products"); e.target.value = ""; };
 
-  $$("[data-remove-ref-prod]").forEach(btn => {
-    btn.addEventListener("click", () => {
-      if (!selectedRefineryItem) return;
-      const pid = btn.getAttribute("data-remove-ref-prod");
-      const s = selectedRefineryItem.s;
-      s.products = getRefineryProducts(s).filter(id => id !== pid);
-      if (s.productStatus) delete s.productStatus[pid];
-      saveC(0);
-      viewRefineries();
-      toast(`Removed ${P[pid]?.name || pid} from ${s.name}.`);
-    });
-  });
+  $("#adds").onclick = () => {
+    if (!S.canWrite) return;
+    flushRefineriesDomToCatalog();
+    const nid = "s_new_" + uid();
+    S.catalog.sources.push({ id: nid, _groupId: "grp_new_" + nid, brandName: "", company: "", name: "", loading: "", locations: [], creditDays: 0, active: true, products: [], aliases: [] });
+    saveC(0);
+    viewRefineries();
+    const allBrandInps = document.querySelectorAll("[data-brand-indices]");
+    allBrandInps[allBrandInps.length - 1]?.focus();
+  };
+
+  $("#addp").onclick = () => {
+    if (!S.canWrite) return;
+    flushRefineriesDomToCatalog();
+    const tempId = "P_" + uid().toUpperCase().slice(0, 5);
+    S.catalog.products.push({ id: tempId, name: "", unit: "MT", cls: "White liquid", aliases: [], _autoCode: true });
+    saveC(0);
+    viewRefineries();
+    const lastInp = document.querySelector(`input[data-p="${S.catalog.products.length - 1}"][data-f="name"]`);
+    lastInp?.focus();
+  };
 }
 
 /* ================= EXCEL MASTER: DOWNLOAD & UPLOAD (.XLSX) ================= */
@@ -7632,10 +7212,10 @@ function viewSaved() {
       const L = q.lines || [{ product: q.productName, location: q.location, rate: q.price, unit: q.unit, source: q.sourceName, qty: q.qty }];
       return `<tr><td>${new Date(q.createdAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "2-digit" })}</td>
       <td>${q.number ? `<b>${esc(q.number)}</b>` : '<span class="pill flat">quick quote</span>'}</td><td><b>${esc(q.customer || q.cust?.name || "—")}</b></td>
-      <td>${L.map(l => `${esc(l.product)} <span class="tiny">· ${esc(l.location)}${l.qty ? ` · ${nf(l.qty, 2)} ${l.unit}` : ""}</span>`).join("<br>")}</td>
-      <td class="n">${L.map(l => `${inr(l.rate)}<span class="tiny">/${l.unit}</span>`).join("<br>")}</td>
+      <td>${L.map(l => `${esc(l.product)} <span class="tiny">· ${esc(l.location)}${l.qty ? ` · ${nf(l.qty, 2)} ${esc(l.unit)}` : ""}</span>`).join("<br>")}</td>
+      <td class="n">${L.map(l => `${inr(l.rate)}<span class="tiny">/${esc(l.unit)}</span>`).join("<br>")}</td>
       <td class="tiny">${L.map(l => esc(l.source || "")).join("<br>")}</td><td class="tiny">${esc(S.names[q.by] || q.by || "Desk")}</td>
-      <td class="n" style="white-space:nowrap">${q.type === "quotation" ? `<button class="btn small primary" data-pdf="${q.id}">⬇ PDF</button> ` : ""}<button class="btn small" data-re="${q.id}">🎯 Re-price</button> <button class="btn small danger" data-qdel="${q.id}" ${S.canWrite ? "" : "disabled"} aria-label="Delete">✕</button></td></tr>`;
+      <td class="n" style="white-space:nowrap">${q.type === "quotation" ? `<button class="btn small primary" data-pdf="${esc(q.id)}">⬇ PDF</button> ` : ""}<button class="btn small" data-re="${esc(q.id)}">🎯 Re-price</button> <button class="btn small danger" data-qdel="${esc(q.id)}" ${S.canWrite ? "" : "disabled"} aria-label="Delete">✕</button></td></tr>`;
     }).join("")}
     </tbody></table></div>` : `<div class="panel empty"><strong>${Q.length ? "No quotes match your search" : "No saved quotes yet"}</strong>Get a price, add it to quotation basket, and choose “Save &amp; Download PDF”.</div>`}
   ` : `
@@ -7666,7 +7246,9 @@ function viewSaved() {
   $("#sf").addEventListener("input", e => { f.text = e.target.value; viewSaved(); const s = $("#sf"); s.focus(); s.setSelectionRange(s.value.length, s.value.length); });
   document.querySelectorAll("[data-pdf]").forEach(b => b.onclick = () => downloadQuotation(Q.find(x => x.id === b.dataset.pdf)));
   document.querySelectorAll("[data-re]").forEach(b => b.onclick = () => {
-    const q = Q.find(x => x.id === b.dataset.re); const l = (q.lines || [])[0];
+    const q = Q.find(x => x.id === b.dataset.re);
+    if (!q) { toast("This quote is no longer in the list (it may have been deleted on another device)."); return; }
+    const l = (q.lines || [])[0];
     Object.assign(UI.q, { loc: l ? l.location : q.location, product: l ? l.productId : q.productId, qty: (l ? l.qty : q.qty) || "", days: l ? l.credit : q.creditDays, margin: l ? l.margin ?? "" : q.margin, customer: q.customer || "", cycleId: "", manual: {}, discEdit: {}, routeSel: {}, sel: null });
     if (q.lines) { UI.qdoc = { lines: [], cust: { ...(q.cust || { name: q.customer }) }, ref: q.ref || "" }; }
     location.hash = "#quote";
@@ -7861,7 +7443,7 @@ function viewUsersAdmin() {
               <td class="text-center"><input type="checkbox" data-u="${i}" data-uf="active" ${u.active !== false ? "checked" : ""} ${(u.email || "").toLowerCase() === "dmegepl@gmail.com" || !isAdmin ? "disabled" : ""}></td>
               <td class="n" style="white-space:nowrap">
                 <button class="btn small" type="button" data-copy-invite="${i}" title="Copy login link & credentials">📋 Copy Invite</button>
-                <button class="btn small" type="button" data-use-acc="${u.id}">Switch To</button>
+                <button class="btn small" type="button" data-use-acc="${esc(u.id)}">Switch To</button>
                 ${(u.email || "").toLowerCase() !== "dmegepl@gmail.com" ? `<button class="btn small danger" type="button" data-udel="${i}" ${dis}>✕</button>` : ""}
               </td>
             </tr>
@@ -8003,7 +7585,7 @@ function viewUsersAdmin() {
     if (inp.type === "checkbox") u[f] = inp.checked;
     else u[f] = inp.value;
     if (u.role === "admin") { u.canEditMaster = true; u.canQuote = true; }
-    u.status = "approved";
+    if (u.status !== "rejected") u.status = "approved"; // editing a field must not turn a rejected account into an approved one
     u.updatedAtMs = Date.now();
     markLocalMutation();
     saveLocal("users", S.users);
@@ -8081,7 +7663,7 @@ function viewCloudSync() {
   </div>`;
 
   $("#btn-cloud-pull")?.addEventListener("click", () => pullFromNeon(true, true));
-  $("#btn-cloud-push")?.addEventListener("click", () => pushAllToNeon(true));
+  $("#btn-cloud-push")?.addEventListener("click", confirmAndPushAll);
   $("#btn-save-api-url")?.addEventListener("click", () => {
     const val = ($("#input-custom-api-url")?.value || "").trim().replace(/\/+$/, "");
     try { localStorage.setItem("refinecalc_api_base_url", val); } catch (e) {}
@@ -8090,6 +7672,10 @@ function viewCloudSync() {
   });
   $("#btn-reset-all-defaults")?.addEventListener("click", async () => {
     if (!S.canWrite) return;
+    if (prompt("This resets the catalog, routes, transporters, settings, price cycles and ALL SAVED QUOTES to the factory defaults, on every device.\n\nType RESET to continue.") !== "RESET") {
+      toast("Reset cancelled. Nothing was changed.");
+      return;
+    }
     S.catalog = JSON.parse(JSON.stringify(DEFAULT_CATALOG));
     S.routes = JSON.parse(JSON.stringify(DEFAULT_ROUTES));
     S.transporters = JSON.parse(JSON.stringify(DEFAULT_TRANSPORTERS));
@@ -8216,7 +7802,7 @@ async function boot() {
 
   // Sidebar Cloud Sync Buttons
   $("#btn-sidebar-pull")?.addEventListener("click", () => pullFromNeon(true, true));
-  $("#btn-sidebar-push")?.addEventListener("click", () => pushAllToNeon(true));
+  $("#btn-sidebar-push")?.addEventListener("click", confirmAndPushAll);
 
   // Effortless Sidebar Role Switcher Wiring (1-Click Switch Between Admin, User with Edit Access, and User Quote-Only)
   function switchRoleMode(mode) {
@@ -8317,7 +7903,7 @@ async function boot() {
       toast(`🔑 Password reset successful! Signed in as ${res.user.name}.`);
     } else if (msgEl) {
       msgEl.hidden = false;
-      msgEl.textContent = "✅ Password Reset Request Sent! Ask your Admin to click 'Approve New Password' in User & Admin Options (or enter Master Recovery Key GEPL2026 for instant reset).";
+      msgEl.textContent = "✅ Password Reset Request Sent! Ask your Admin to click 'Approve New Password' in User & Admin Options.";
       msgEl.className = "p-3 rounded-xl text-xs font-bold bg-emerald-50 border border-emerald-300 text-emerald-900";
     }
   });

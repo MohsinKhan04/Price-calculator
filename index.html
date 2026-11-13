@@ -4156,22 +4156,62 @@ function niceStep(raw) { const p = Math.pow(10, Math.floor(Math.log10(raw))); co
 function viewCycles() {
   if (UI.editor) { viewEditor(); return; }
   const cyc = cyclesAsc().reverse();
+  const lc0 = cyc[0] || null;
+  const P0 = prodMap(), SM0 = srcMap();
+  const curRows = lc0 ? (lc0.prices || [])
+    .filter(x => num(x.basic) > 0 && SM0[x.sourceId] && P0[x.productId])
+    .map(x => ({ s: SM0[x.sourceId], p: P0[x.productId], basic: num(x.basic), disc: num(x.maxDiscount) || 0 })) : [];
+  curRows.sort((x, y) => String(x.p.name).localeCompare(String(y.p.name)) || String(x.s.name).localeCompare(String(y.s.name)));
+  const curGroups = [];
+  curRows.forEach(r => {
+    let g = curGroups[curGroups.length - 1];
+    if (!g || g.p.id !== r.p.id) { g = { p: r.p, items: [] }; curGroups.push(g); }
+    g.items.push(r);
+  });
+  const ro = S.canWrite ? "" : "opacity:.5;pointer-events:none;";
   V().innerHTML = `
-   <div class="actions" style="justify-content:space-between;margin-bottom:12px"><div><h3>Refinery rate revisions</h3><p class="tiny" style="margin:2px 0 0">Refineries revise rates every 15 days. Each revision is kept, so price history and comparisons stay available.</p></div>
-   <div class="actions">
-     ${S.currentUser?.role === "admin" && cyc.length ? `<button class="btn danger" id="del-all-cycles" type="button">🗑️ Delete All Cycles (${cyc.length})</button>` : ""}
-     <label class="btn ${S.canWrite ? "" : "opacity-50 pointer-events-none"}" for="xl">📄 Upload Step 4: 15-Day Rates (.xlsx)</label><input type="file" id="xl" accept=".xlsx,.xls,.csv" hidden ${S.canWrite ? "" : "disabled"}>
-     <button class="btn primary" id="newc" type="button" ${S.canWrite ? "" : "disabled"}>＋ Enter new revision</button>
-   </div></div>
+   <div class="panel pad" style="margin-bottom:14px;border:2px solid var(--accent)">
+     <h3 style="margin:0 0 4px">Update refinery rates</h3>
+     <p class="tiny" style="margin:0 0 12px">${lc0 ? `Current prices are effective <b>${fmtDate(lc0.effectiveDate)}</b> (${curRows.length} prices). Next revision is due around <b>${fmtDate(nextRevision(lc0.effectiveDate))}</b>.` : "No prices saved yet. Upload your first price list below."}</p>
+     <label for="xl" id="rates-drop" style="${ro}display:flex;flex-direction:column;align-items:center;gap:6px;padding:26px 16px;border:2px dashed var(--accent);border-radius:14px;cursor:pointer;text-align:center">
+       <span style="font-size:30px">📄</span>
+       <b style="font-size:15px">Click here to upload the refinery price list (Excel)</b>
+       <span class="tiny">or drag &amp; drop the file here. The sheet needs: Supply location, Product and Basic price.</span>
+     </label><input type="file" id="xl" accept=".xlsx,.xls,.csv" hidden ${S.canWrite ? "" : "disabled"}>
+     <div class="actions" style="margin-top:12px;justify-content:center">
+       <span class="tiny">No Excel file?</span>
+       <button class="btn small" id="newc" type="button" ${S.canWrite ? "" : "disabled"}>✍ Type the prices manually</button>
+     </div>
+     <div class="tiny" style="margin-top:10px;text-align:center"><b>How it works:</b> ① Upload the file &nbsp;→&nbsp; ② Check the prices shown below &nbsp;→&nbsp; ③ Click “Save these rates”</div>
+   </div>
    <div id="imp"></div>
-   <div class="tw"><table><thead><tr><th>Effective from</th><th class="n">Products priced</th><th class="n">Price changes vs previous</th><th>Note</th><th></th></tr></thead><tbody>
-   ${cyc.map((c, i) => {
-     const prev = cyc[i + 1]; const pi = priceIndex(prev);
-     const ch = prev ? c.prices.filter(p => { const o = num(pi[p.sourceId + "|" + p.productId]?.basic); return num(p.basic) > 0 && o > 0 && Math.abs(num(p.basic) - o) >= .5; }) : [];
-     const up = ch.filter(p => num(p.basic) > num(pi[p.sourceId + "|" + p.productId].basic)).length;
-     return `<tr><td><b>${fmtDate(c.effectiveDate)}</b>${i === 0 ? ' <span class="pill info">current</span>' : ""}</td><td class="n">${c.prices.filter(p => num(p.basic) > 0).length}</td><td class="n">${prev ? `<span class="d-up">${up} up</span> · <span class="d-down">${ch.length - up} down</span>` : "—"}</td><td class="tiny">${esc(c.note || "")}${c.by && S.names[c.by] ? ` · by ${esc(S.names[c.by])}` : ""}</td><td class="n"><button class="btn small" data-edit="${c.id}">${S.canWrite ? "Edit" : "View"}</button> <button class="btn small danger" data-del="${c.id}" ${S.canWrite ? "" : "disabled"}>Delete</button></td></tr>`;
-   }).join("") || `<tr><td colspan="5" class="empty">No cycles yet.</td></tr>`}
-   </tbody></table></div><p class="hint mt-2">Importing reads blocks headed “PRICE REVISED EFF. ON dd-mm-yyyy” with Supply location, Product, Basic price and Max discount columns, or standard Master .xlsx sheets.</p>`;
+
+   ${curGroups.length ? `
+   <div class="panel pad" style="margin-bottom:14px">
+     <div class="sechead"><h3>Current prices · effective ${fmtDate(lc0.effectiveDate)}</h3><span class="tiny">${curRows.length} prices · basic price before GST</span></div>
+     <div class="tw" style="max-height:440px;overflow:auto"><table>
+       <thead><tr><th>Refinery</th><th class="n">Basic (₹)</th><th class="n">Max discount (₹)</th></tr></thead>
+       <tbody>${curGroups.map(g => `
+         <tr><td colspan="3" style="background:rgba(100,116,139,.10);padding:8px 12px;border-top:2px solid rgba(100,116,139,.25)"><b>${esc(g.p.name)}</b> <span class="tiny" style="margin-left:6px">${esc(g.p.unit || "")} · ${g.items.length} refinery price${g.items.length === 1 ? "" : "s"}</span></td></tr>
+         ${g.items.map(r => `<tr><td style="padding-left:26px">${esc(r.s.name)}</td><td class="n"><b>${inr(r.basic)}</b></td><td class="n">${r.disc ? inr(r.disc) : "—"}</td></tr>`).join("")}`).join("")}
+       </tbody></table></div>
+   </div>` : ""}
+
+   <details class="panel pad" style="margin-bottom:14px">
+     <summary style="cursor:pointer;font-weight:700;font-size:13px">Revision history (${cyc.length}) — edit or delete an older revision</summary>
+     <div style="margin-top:12px">
+       ${S.currentUser?.role === "admin" && cyc.length ? `<div class="actions" style="margin-bottom:10px"><button class="btn small danger" id="del-all-cycles" type="button">🗑️ Delete All Revisions (${cyc.length})</button></div>` : ""}
+       <p class="tiny" style="margin:0 0 8px">Refineries revise rates every 15 days. Each revision is kept, so price history and comparisons stay available.</p>
+       <div class="tw"><table><thead><tr><th>Effective from</th><th class="n">Products priced</th><th class="n">Price changes vs previous</th><th>Note</th><th></th></tr></thead><tbody>
+       ${cyc.map((c, i) => {
+         const prev = cyc[i + 1]; const pi = priceIndex(prev);
+         const ch = prev ? c.prices.filter(p => { const o = num(pi[p.sourceId + "|" + p.productId]?.basic); return num(p.basic) > 0 && o > 0 && Math.abs(num(p.basic) - o) >= .5; }) : [];
+         const up = ch.filter(p => num(p.basic) > num(pi[p.sourceId + "|" + p.productId].basic)).length;
+         return `<tr><td><b>${fmtDate(c.effectiveDate)}</b>${i === 0 ? ' <span class="pill info">current</span>' : ""}</td><td class="n">${c.prices.filter(p => num(p.basic) > 0).length}</td><td class="n">${prev ? `<span class="d-up">${up} up</span> · <span class="d-down">${ch.length - up} down</span>` : "—"}</td><td class="tiny">${esc(c.note || "")}${c.by && S.names[c.by] ? ` · by ${esc(S.names[c.by])}` : ""}</td><td class="n"><button class="btn small" data-edit="${c.id}">${S.canWrite ? "Edit" : "View"}</button> <button class="btn small danger" data-del="${c.id}" ${S.canWrite ? "" : "disabled"}>Delete</button></td></tr>`;
+       }).join("") || `<tr><td colspan="5" class="empty">No cycles yet.</td></tr>`}
+       </tbody></table></div>
+     </div>
+   </details>`;
   const buildCycleEditorRows = (basePrices, oldIndex) => {
     const rows = [];
     const seenLine = new Map();
@@ -4225,7 +4265,13 @@ function viewCycles() {
     toast("🗑️ Deleted all 15-day rate cycles!");
   };
   $("#xl").onchange = e => { if (e.target.files?.[0]) uploadMaster(e.target.files[0], "rates"); e.target.value = ""; };
-  if (UI.importBlocks) renderImport();
+  const dz = $("#rates-drop");
+  if (dz && S.canWrite) {
+    ["dragenter", "dragover"].forEach(ev => dz.addEventListener(ev, e => { e.preventDefault(); dz.style.background = "rgba(79,70,229,.08)"; }));
+    ["dragleave", "drop"].forEach(ev => dz.addEventListener(ev, e => { e.preventDefault(); dz.style.background = ""; }));
+    dz.addEventListener("drop", e => { const f = e.dataTransfer?.files?.[0]; if (f) uploadMaster(f, "rates"); });
+  }
+  renderImport();
 }
 
 function matchSource(name) { const k = key(name); return (S.catalog.sources || []).find(s => key(s.id) === k || key(s.name) === k || (s.aliases || []).map(key).includes(k)); }
@@ -5400,16 +5446,22 @@ function masterBar() {
       </div>
     </div>` : "";
 
-  return `<div class="mhead">
-    <div class="sechead" style="align-items:flex-end"><div><div class="flex items-center gap-2 mb-1"><button type="button" id="m-back-home" class="btn small">🏠 Back to Calculator</button><h2 style="margin:0">Master File</h2></div><p class="sub" style="margin:0">Feed your master data step-by-step (Products → Refineries → Transporters &amp; Routes → 15-Day Rates) or edit any table below.</p></div>
-      ${S.currentUser?.role === "admin" ? `<div class="actions">
+  const isAdminUser = S.currentUser?.role === "admin";
+  const adminAdvanced = isAdminUser ? `
+    <details style="margin-top:10px">
+      <summary style="cursor:pointer;font-weight:700;font-size:12.5px;color:var(--muted,#64748b)">⚙ Advanced tools (admin) — first-time setup, download master, delete all</summary>
+      <div class="actions" style="margin-top:10px">
         <button class="btn danger" id="btn-wipe-all-master" type="button" title="Delete all Refineries, Products, Transporters, Routes & Rate Cycles at once">🗑️ Delete All Master Data</button>
         <button class="btn" id="mdl" type="button">⬇ Download master (.xlsx)</button>
         <label class="btn lime" for="mup">⬆ Smart Upload (.xlsx)</label><input type="file" id="mup" accept=".xlsx,.xls,.csv" hidden>
-      </div>` : ""}</div>
-    ${stepFeederBar}
+      </div>
+      ${stepFeederBar}
+    </details>` : "";
+  return `<div class="mhead">
+    <div class="sechead" style="align-items:flex-end"><div><div class="flex items-center gap-2 mb-1"><button type="button" id="m-back-home" class="btn small">🏠 Back to Calculator</button><h2 style="margin:0">Master File</h2></div><p class="sub" style="margin:0">Keep your prices and setup up to date. <b>Only updating refinery prices?</b> Stay on <b>Refinery rates</b> and upload your price list.</p></div></div>
     <nav class="mtabs">${MTABS.map(([k, l, s]) => `<a href="#${k}" aria-current="${UI.tab === k ? "page" : "false"}"><b>${l}</b><span>${esc(meta[k] || s)}</span></a>`).join("")}</nav>
-    ${addBar()}<div id="mupload"></div></div>`;
+    ${adminAdvanced}
+    ${UI.tab === "master-rates" ? '<div id="madd"></div>' : addBar()}<div id="mupload"></div></div>`;
 }
 function bindMasterBar() {
   const bh = $("#m-back-home"); if (bh) bh.onclick = () => navigateToTab("quote");
@@ -5444,7 +5496,7 @@ function bindMasterBar() {
     render();
     toast("🗑️ Wiped all Refineries, Products, Transporters, Routes & Rate Cycles! Ready for fresh step-by-step upload.");
   };
-  if (UI.masterPreview) renderMasterPreview();
+  if (UI.masterPreview && UI.tab !== "master-rates") renderMasterPreview();
   bindAddBar();
 }
 
@@ -6184,6 +6236,7 @@ function viewRefineries(passedHost) {
 
     host.innerHTML = `
       <div class="card p-5">
+        <div class="mb-4 px-3.5 py-2.5 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-900">💡 <b>Only updating refinery prices?</b> You don't need this page. <a href="#master-rates" style="font-weight:800;text-decoration:underline">Go to Refinery rates →</a></div>
         ${topToolbarHtml}
         ${breadcrumbHtml}
         ${catalogDrawerHtml}
@@ -7239,10 +7292,45 @@ async function uploadMaster(file, forcedStepMode = null) {
   toast(`🧠 Smart ML analyzed "${file.name}" (${sheetsAnalysis.length} sheet${sheetsAnalysis.length === 1 ? "" : "s"} detected)`);
 }
 
+function renderSimpleRatesPreview(box, pv) {
+  const asc = cyclesAsc();
+  const cards = pv.sheets.map((sh, si) => {
+    const ex = sh.extracted;
+    const date = ex.date || sh.defaultDate || todayISO();
+    const base = [...asc].reverse().find(c => c.effectiveDate < date) || null;
+    const pi = priceIndex(base);
+    let newCount = 0;
+    const lines = ex.rateRows.map(rr => {
+      let s = null, p = null, old = null;
+      try { s = matchSource(rr.refName); p = matchProduct(rr.prodName); if (s && p) old = num(pi[s.id + "|" + p.id]?.basic); } catch (_) {}
+      if (!s || !p) newCount++;
+      return `<tr><td><b>${esc(rr.refName)}</b>${!s ? ' <span class="pill warn">new</span>' : ""}</td><td>${esc(rr.prodName)}${!p ? ' <span class="pill warn">new</span>' : ""}</td><td class="n"><b>${inr(rr.basic)}</b></td><td class="n">${old == null ? '<span class="tiny">—</span>' : chgPill(rr.basic - old)}</td></tr>`;
+    }).join("");
+    return `<div class="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-2">
+      <label class="actions text-xs font-bold"><input type="checkbox" data-sh-on="${si}" ${sh.on ? "checked" : ""}><span>Prices effective <b>${fmtDate(date)}</b> · ${ex.rateRows.length} prices${newCount ? ` · <span class="pill warn">${newCount} new refinery / product will be added</span>` : ""}</span></label>
+      <div class="tw" style="max-height:340px;overflow:auto"><table><thead><tr><th>Refinery</th><th>Product</th><th class="n">New basic</th><th class="n">vs previous</th></tr></thead><tbody>${lines}</tbody></table></div>
+    </div>`;
+  }).join("");
+  box.innerHTML = `<div class="panel pad stack" style="gap:12px;margin-bottom:14px;border:2px solid var(--accent)">
+    <div class="sechead"><div><h3>Check these prices</h3><p class="tiny" style="margin:2px 0 0">From <b>${esc(pv.file)}</b>. If they look right, click “Save these rates”. Nothing is saved until you click.</p></div><button class="btn small" id="mpx" type="button">Cancel</button></div>
+    <div class="stack" style="gap:10px">${cards}</div>
+    <div class="actions" style="justify-content:space-between">
+      <button class="btn primary" id="mpa" type="button" ${S.canWrite ? "" : "disabled"}>✅ Save these rates</button>
+      <button class="btn small" id="mp-adv" type="button">Show advanced options</button>
+    </div>
+  </div>`;
+  $("#mpx").onclick = () => { UI.masterPreview = null; box.innerHTML = ""; };
+  $("#mpa").onclick = applyMaster;
+  $("#mp-adv").onclick = () => { pv.showAdvanced = true; renderMasterPreview(); };
+  box.querySelectorAll("[data-sh-on]").forEach(c => c.onchange = () => { pv.sheets[+c.dataset.shOn].on = c.checked; });
+}
+
 function renderMasterPreview() {
   const pv = UI.masterPreview;
-  const box = $("#mupload") || $("#imp");
+  const box = $("#imp") || $("#mupload");
   if (!box || !pv) return;
+  const allRates = (pv.sheets || []).length > 0 && pv.sheets.every(sh => !sh.isCreditKV && sh.extracted?.kind === "rates");
+  if (allRates && !pv.showAdvanced) { renderSimpleRatesPreview(box, pv); return; }
 
   const fieldOptionsHtml = currentField => Object.entries(ML_FIELD_DEFS).map(([k, def]) =>
     `<option value="${k}" ${k === currentField ? "selected" : ""}>${k === "ignore" ? "🚫 Ignore (Extra Data)" : "✓ " + def.label}</option>`
@@ -7295,7 +7383,7 @@ function renderMasterPreview() {
         <h3 class="flex items-center gap-2"><span>🧠</span><span>Smart ML Excel Header Mapper · ${esc(pv.file)}</span></h3>
         <p class="tiny" style="margin:2px 0 0">Matched headers are mapped to system fields automatically and extra columns are ignored. If you change any dropdown below, the ML engine learns and remembers that header name for future uploads.</p>
       </div>
-      <button class="btn small" id="mpx" type="button">Cancel</button>
+      <div class="actions">${allRates ? '<button class="btn small" id="mp-simple" type="button">← Simple view</button>' : ""}<button class="btn small" id="mpx" type="button">Cancel</button></div>
     </div>
     <div class="stack" style="gap:10px">${sheetCards}</div>
     ${(pv.sheets || []).some(s => s.extracted?.kind === "transport") && (S.transporters?.list || []).length ? `
@@ -7316,6 +7404,7 @@ function renderMasterPreview() {
   </div>`;
 
   $("#mpx").onclick = () => { UI.masterPreview = null; box.innerHTML = ""; };
+  const msimple = $("#mp-simple"); if (msimple) msimple.onclick = () => { pv.showAdvanced = false; renderMasterPreview(); };
   const rc = $("#mp-replace-cycles");
   if (rc) rc.onchange = () => pv.replaceCycles = rc.checked;
   const dtr = $("#mp-default-transporter");

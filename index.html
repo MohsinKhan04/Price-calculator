@@ -1292,6 +1292,17 @@ function mergeUsersLists(localList, remoteList) {
   return out;
 }
 
+// Before signing in we try to fetch the newest user list, but never wait more than 4 seconds for a sleeping server
+async function syncBeforeSignIn() {
+  await Promise.race([pullFromNeon(false, true), new Promise(r => setTimeout(r, 4000))]);
+}
+function setFormBusy(form, busy, label) {
+  const btn = form && form.querySelector ? form.querySelector('button[type="submit"]') : null;
+  if (!btn) return;
+  if (busy) { if (!btn.dataset.label) btn.dataset.label = btn.textContent; btn.textContent = label || "Please wait…"; btn.disabled = true; }
+  else { if (btn.dataset.label) { btn.textContent = btn.dataset.label; delete btn.dataset.label; } btn.disabled = false; }
+}
+
 async function pullFromNeon(notify = false, force = false) {
   if (!force && inflight > 0) return false;
   try {
@@ -1914,10 +1925,9 @@ function applyUserSession(userObj, isRolePreviewSwitch = false) {
     return;
   }
   S.currentUser = userObj;
-  saveLocal("current_user_id", userObj.id);
-  saveLocal("authenticated_user_id", userObj.id);
-
   if (!isRolePreviewSwitch) {
+    saveLocal("current_user_id", userObj.id);
+    saveLocal("authenticated_user_id", userObj.id);
     S.isAuthenticatedAdmin = userObj.role === "admin";
     saveLocal("is_authenticated_admin", S.isAuthenticatedAdmin);
   }
@@ -2766,6 +2776,8 @@ function header() {
 function V() { return document.getElementById(UI.tab.startsWith("master") ? "mview" : "view"); }
 
 function render() {
+  // remove any stray panel an older build appended outside the page (it stayed on screen after navigating away)
+  document.getElementById("master-subview-auto")?.remove();
   header();
   updateSidebarStats();
   const v = $("#view");
@@ -5683,6 +5695,7 @@ function addInlineProductToSupplyPoint(sourceIndex, rawProdName) {
 function viewRefineries(passedHost) {
   let host =
     (passedHost && passedHost.nodeType === 1 ? passedHost : null) ||
+    document.getElementById("mview") ||
     $("#master-subview") ||
     $("#master-body") ||
     $("#master-content") ||
@@ -6644,7 +6657,7 @@ function viewRefineries(passedHost) {
     });
   } catch (err) {
     console.error("viewRefineries error:", err);
-    host.innerHTML = `<div class="p-4 bg-rose-50 border border-rose-200 rounded-xl text-rose-700 text-xs font-mono">Error rendering Refineries view: ${String(err && err.message || err)}</div>`;
+    host.innerHTML = `<div class="p-4 bg-rose-50 border border-rose-200 rounded-xl text-rose-700 text-xs font-mono">Error rendering Refineries view: ${esc(String(err && err.message || err))}</div>`;
   }
 }
 
@@ -8734,25 +8747,21 @@ async function boot() {
   function switchRoleMode(mode) {
     if (!S.isAuthenticatedAdmin) { toast("Admin authentication required to switch roles."); return; }
     S.users = S.users || DEFAULT_USERS;
+    const clone = o => JSON.parse(JSON.stringify(o));
+    const realId = loadLocal("authenticated_user_id", null);
+    const realAdmin = S.users.find(u => u.id === realId && u.role === "admin") || S.users.find(u => u.role === "admin" && u.active !== false) || S.users[0];
+    const sample = S.users.find(u => u.role === "user") || { id: "u-sales", username: "sales", email: "sales@goverdhanenergy.com", name: "Sales User", role: "user", active: true };
     if (mode === "admin") {
-      let adm = S.users.find(u => u.role === "admin") || S.users[0];
-      adm.role = "admin"; adm.canEditMaster = true; adm.canQuote = true;
-      applyUserSession(adm, true);
+      applyUserSession(realAdmin, true);
       toast("👑 Switched to Admin Mode (Full System & Master Access)");
     } else if (mode === "user-edit") {
-      let usr = S.users.find(u => u.role === "user") || { id: "u-sales", username: "sales", email: "sales@goverdhanenergy.com", name: "Sales User (Editor)", role: "user", active: true };
-      usr.role = "user";
-      usr.canEditMaster = true;
-      usr.canQuote = true;
+      const usr = clone(sample); usr.role = "user"; usr.canEditMaster = true; usr.canQuote = true;
       applyUserSession(usr, true);
-      toast("✏️ Switched to User Dashboard (Can Edit Master Files · Admin SQL/Users Hidden)");
+      toast("✏️ Previewing User with Master Edit access (Admin SQL/Users hidden). Saved accounts are not changed.");
     } else {
-      let usr = S.users.find(u => u.role === "user") || { id: "u-sales", username: "sales", email: "sales@goverdhanenergy.com", name: "Sales User", role: "user", active: true };
-      usr.role = "user";
-      usr.canEditMaster = false;
-      usr.canQuote = true;
+      const usr = clone(sample); usr.role = "user"; usr.canEditMaster = false; usr.canQuote = true;
       applyUserSession(usr, true);
-      toast("👤 Switched to User Dashboard (Quote & PDF Only · Master Read-Only)");
+      toast("👤 Previewing User (Quote & PDF only · Master read-only). Saved accounts are not changed.");
     }
   }
 
@@ -8812,8 +8821,10 @@ async function boot() {
     const newPw = $("#gate-forgot-newpass")?.value || "";
     const pinVal = ($("#gate-forgot-pin")?.value || "").trim();
     const msgEl = $("#gate-forgot-msg");
-    await pullFromNeon(false, true);
+    const frm = e.currentTarget; setFormBusy(frm, true, "Checking…");
+    await syncBeforeSignIn();
     const res = await handleForgotPasswordSubmission(idVal, newPw, pinVal);
+    setFormBusy(frm, false);
     if (!res.ok) {
       if (msgEl) {
         msgEl.hidden = false;
@@ -8840,8 +8851,10 @@ async function boot() {
     const idVal = ($("#gate-login-email")?.value || "").trim();
     const pwVal = $("#gate-login-password")?.value || "";
     const msgEl = $("#gate-signin-msg");
-    await pullFromNeon(false, true);
+    const frm = e.currentTarget; setFormBusy(frm, true, "Signing in…");
+    await syncBeforeSignIn();
     const res = authenticateUserWithPassword(idVal, pwVal);
+    setFormBusy(frm, false);
     if (!res.ok) {
       if (msgEl) {
         msgEl.hidden = false;
@@ -8864,8 +8877,10 @@ async function boot() {
     const pw = $("#gate-signup-password")?.value || "";
     const nt = ($("#gate-signup-note")?.value || "").trim();
     const msgEl = $("#gate-signup-msg");
-    await pullFromNeon(false, true);
+    const frm = e.currentTarget; setFormBusy(frm, true, "Sending request…");
+    await syncBeforeSignIn();
     const res = await submitAccessRequestSignUp(nm, em, pw, nt);
+    setFormBusy(frm, false);
     if (msgEl) {
       msgEl.hidden = false;
       if (res.ok) {
@@ -8885,8 +8900,11 @@ async function boot() {
     const gm = ($("#login-gmail-address")?.value || "").trim();
     const pw = $("#login-gmail-password")?.value || "";
     const errEl = $("#modal-login-error");
-    await pullFromNeon(false, true);
+    const frm = e.currentTarget; setFormBusy(frm, true, "Signing in…");
+    if (errEl) errEl.hidden = true;
+    await syncBeforeSignIn();
     const res = authenticateUserWithPassword(gm, pw);
+    setFormBusy(frm, false);
     if (!res.ok) {
       if (errEl) { errEl.hidden = false; errEl.textContent = res.error; }
       return;

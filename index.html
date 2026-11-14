@@ -860,11 +860,7 @@ const DEFAULT_CYCLES = [
   }
 ];
 
-const DEFAULT_USERS = [
-  { id: "u-mohsin", username: "dmegepl", email: "dmegepl@gmail.com", password: "admin123", name: "Mohsin Khan", role: "admin", canEditMaster: true, canQuote: true, active: true, status: "approved" },
-  { id: "u-admin", username: "admin", email: "admin@gmail.com", password: "admin123", name: "Admin (Goverdhan Desk)", role: "admin", canEditMaster: true, canQuote: true, active: true, status: "approved" },
-  { id: "u-sales", username: "sales", email: "sales@goverdhanenergy.com", password: "sales123", name: "Sales Executive", role: "user", canEditMaster: false, canQuote: true, active: true, status: "approved" }
-];
+const DEFAULT_USERS = [];
 
 const DEFAULT_QUOTES = [
   {
@@ -1015,7 +1011,8 @@ function revisionsSince(iso) { let n = 0, c = iso; const t = todayISO(); while (
 
 /* ================= HYBRID NEON POSTGRESQL + LOCALSTORAGE STORE ADAPTER ================= */
 const LS_PREFIX = "goverdhan_desk_";
-const CLOUD_KEYS = ["catalog", "routes", "transporters", "settings", "template", "cycles", "quotes", "quoteSeq", "users", "authSettings", "brand_settings", "workspaceState", "quoteLogs", "mlMappings"];
+try { localStorage.removeItem(LS_PREFIX + "users"); } catch (e) {}
+const CLOUD_KEYS = ["catalog", "routes", "transporters", "settings", "template", "cycles", "quotes", "quoteSeq", "authSettings", "brand_settings", "workspaceState", "quoteLogs", "mlMappings"];
 
 let inflight = 0;
 let cloudConnected = false;
@@ -1742,23 +1739,35 @@ function findMatchingUserAccount(identifier) {
   );
 }
 
-function authenticateUserWithPassword(identifier, password) {
-  const u = findMatchingUserAccount(identifier);
-  if (!u) {
-    return { ok: false, status: "not_found", error: "No account found for this Gmail/username. Click 'Request Access (Sign Up)' to request approval from Admin." };
+async function authenticateUserWithPassword(identifier, password) {
+  const idClean = String(identifier || "").trim().toLowerCase();
+  const pwClean = String(password || "");
+  if (!idClean || !pwClean) {
+    return { ok: false, status: "invalid", error: "Please enter both your Gmail/username and password." };
   }
-  if (u.status === "pending") {
-    return { ok: false, status: "pending", error: "⏳ Your account request is Pending Admin Approval. You can sign in as soon as the Admin approves your request." };
+  try {
+    const response = await apiRequest("/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: idClean, password: pwClean })
+    });
+    const data = await response.json().catch(() => ({}));
+    if (response.ok && data.success && data.user) {
+      return { ok: true, status: "approved", user: data.user };
+    }
+    const isPending = response.status === 403 && /pending|awaiting/i.test(data.error || "");
+    return {
+      ok: false,
+      status: isPending ? "pending" : "invalid",
+      error: data.error || "Invalid Gmail/username or password."
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      status: "error",
+      error: "Cannot reach authentication server. Please check your connection and try again."
+    };
   }
-  if (u.status === "rejected" || u.active === false) {
-    return { ok: false, status: "disabled", error: "🚫 Your account access has been disabled or revoked by the Admin." };
-  }
-  const isDmegepl = (String(u.username || "").toLowerCase() === "dmegepl" || String(u.email || "").toLowerCase() === "dmegepl@gmail.com");
-  const pwMatch = String(u.password || "") === String(password || "") || (isDmegepl && (password === "admin123" || password === "7256@Mk"));
-  if (!pwMatch) {
-    return { ok: false, status: "wrong_password", error: "❌ Incorrect password. Click 'Forgot Password?' to reset it." };
-  }
-  return { ok: true, user: u };
 }
 
 async function submitAccessRequestSignUp(fullName, email, password, note = "") {
@@ -8852,8 +8861,7 @@ async function boot() {
     const pwVal = $("#gate-login-password")?.value || "";
     const msgEl = $("#gate-signin-msg");
     const frm = e.currentTarget; setFormBusy(frm, true, "Signing in…");
-    await syncBeforeSignIn();
-    const res = authenticateUserWithPassword(idVal, pwVal);
+    const res = await authenticateUserWithPassword(idVal, pwVal);
     setFormBusy(frm, false);
     if (!res.ok) {
       if (msgEl) {
@@ -8902,8 +8910,7 @@ async function boot() {
     const errEl = $("#modal-login-error");
     const frm = e.currentTarget; setFormBusy(frm, true, "Signing in…");
     if (errEl) errEl.hidden = true;
-    await syncBeforeSignIn();
-    const res = authenticateUserWithPassword(gm, pw);
+    const res = await authenticateUserWithPassword(gm, pw);
     setFormBusy(frm, false);
     if (!res.ok) {
       if (errEl) { errEl.hidden = false; errEl.textContent = res.error; }

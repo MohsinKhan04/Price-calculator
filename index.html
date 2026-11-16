@@ -48,6 +48,11 @@
     .card-interactive:hover { transform: translateY(-2px); box-shadow: 0 10px 22px -6px rgba(79, 70, 229, 0.16); }
 
     /* Dark mode overrides for Tailwind classes */
+    @media (min-width: 768px) {
+      #app-sidebar { position: sticky !important; top: 0 !important; bottom: auto !important; height: calc(100vh - var(--hdr-h, 0px)); height: calc(100dvh - var(--hdr-h, 0px)); align-self: flex-start; }
+    }
+    #app-sidebar { padding-bottom: 0 !important; }
+    #sidebar-account-card { position: sticky; bottom: 0; margin-top: auto !important; margin-left: -1rem; margin-right: -1rem; flex-shrink: 0; z-index: 2; }
     body.dark-mode #app-sidebar { background-color: #0f172a !important; border-color: #1e293b !important; color: #f1f5f9 !important; }
     body.dark-mode .surface-card, body.dark-mode .bg-white { background-color: #1e293b !important; border-color: #334155 !important; color: #f8fafc !important; }
     body.dark-mode .bg-slate-50, body.dark-mode .bg-slate-50\/70, body.dark-mode .bg-slate-50\/80 { background-color: #0f172a !important; border-color: #334155 !important; color: #e2e8f0 !important; }
@@ -290,58 +295,6 @@
         </button>
       </div>
 
-      <!-- Dedicated Role Switcher Card (Effortless 1-Click Switch Between User & Admin like Image 2) -->
-      <div class="p-3 rounded-2xl bg-emerald-50/70 border border-emerald-200/90 space-y-2.5 shadow-2xs">
-        <div class="flex items-center gap-2.5">
-          <div class="w-10 h-10 rounded-full bg-white border-2 border-emerald-300 flex items-center justify-center text-slate-700 font-extrabold text-base shrink-0 shadow-2xs">
-            👤
-          </div>
-          <div class="min-w-0 flex-1">
-            <div id="sidebar-switch-name" class="text-xs font-extrabold text-slate-900 truncate">Admin Desk</div>
-            <div id="sidebar-switch-email" class="text-[10px] text-slate-500 font-mono truncate">admin@goverdhanenergy.com</div>
-            <span id="sidebar-switch-role-pill" class="inline-block mt-0.5 px-2 py-0.5 rounded-full text-[9px] font-extrabold uppercase bg-emerald-700 text-white">Admin</span>
-          </div>
-        </div>
-
-        <div id="sidebar-admin-role-switcher-controls" class="space-y-2">
-        <!-- Circular Action Pill Bar with "Switch Roles" Tooltip & Toggle Switch (Visible ONLY to Authenticated Admin) -->
-        <div class="p-1.5 rounded-full bg-white/90 border border-emerald-200 flex items-center justify-between gap-2 shadow-2xs">
-          <!-- Green Circular Switch Roles Button with Dark Tooltip on Hover -->
-          <div class="relative group flex items-center gap-2">
-            <button id="btn-effortless-role-switch" type="button" class="w-9 h-9 rounded-full bg-gradient-to-b from-lime-600 to-emerald-700 hover:from-lime-500 hover:to-emerald-600 text-white flex items-center justify-center shadow-md transition-transform active:scale-95 cursor-pointer" aria-label="Switch Roles">
-              <span class="text-base font-black leading-none">⇄</span>
-            </button>
-            <!-- Floating Dark Tooltip "Switch Roles" -->
-            <div class="pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity absolute -top-9 left-0 z-50 bg-slate-900 text-white text-[11px] font-bold px-2.5 py-1 rounded-lg shadow-lg whitespace-nowrap">
-              Switch Roles
-              <span class="absolute -bottom-1 left-3.5 w-2 h-2 bg-slate-900 rotate-45"></span>
-            </div>
-            <div class="leading-tight">
-              <div class="text-[10px] font-extrabold text-slate-800">Switch Roles</div>
-              <div id="sidebar-switch-mode-sub" class="text-[9px] text-emerald-700 font-bold">Admin ⇄ User</div>
-            </div>
-          </div>
-
-          <!-- Effortless Toggle Switch (Admin vs User Mode) -->
-          <button id="btn-role-toggle-pill" type="button" class="w-12 h-6 rounded-full bg-emerald-700 p-0.5 flex items-center transition-colors cursor-pointer shrink-0" title="Toggle between Admin and User dashboard">
-            <span id="role-toggle-knob" class="w-5 h-5 rounded-full bg-white shadow-sm transition-transform translate-x-6"></span>
-          </button>
-        </div>
-
-        <!-- Sub-Selector for Admin to Preview User (Edit) vs User (Quote) -->
-        <div class="grid grid-cols-3 gap-1 pt-0.5">
-          <button type="button" data-fast-role="admin" class="fast-role-btn py-1 px-1.5 rounded-lg text-[10px] font-extrabold bg-emerald-700 text-white text-center transition-colors">👑 Admin</button>
-          <button type="button" data-fast-role="user-edit" class="fast-role-btn py-1 px-1.5 rounded-lg text-[10px] font-bold bg-white text-slate-700 border border-slate-200 text-center transition-colors" title="User Dashboard with Master File Edit Access (Hides SQL/Render/Add User)">✏️ User (Edit)</button>
-          <button type="button" data-fast-role="user-quote" class="fast-role-btn py-1 px-1.5 rounded-lg text-[10px] font-bold bg-white text-slate-700 border border-slate-200 text-center transition-colors" title="User Dashboard with Quote-Only Access (Master File Read-Only)">👤 User (Quote)</button>
-        </div>
-        </div>
-
-        <!-- Sign Out Button -->
-        <button id="btn-sidebar-signout" type="button" class="w-full py-1.5 px-2.5 rounded-xl bg-white hover:bg-rose-50 text-slate-600 hover:text-rose-700 border border-slate-200 text-[11px] font-bold flex items-center justify-center gap-1.5 transition-colors">
-          <span>🚪</span><span>Sign Out</span>
-        </button>
-      </div>
-
       <!-- 1. Primary Home / Quote & Analysis Tabs -->
       <div class="space-y-1.5">
         <div class="px-2.5 text-[10px] font-extrabold uppercase tracking-wider text-slate-400">Home &amp; Quote Desk</div>
@@ -457,6 +410,32 @@
         <button id="btn-open-brand-modal" type="button" class="w-full py-2 px-3 rounded-xl border border-slate-200 hover:border-indigo-400 text-xs font-semibold text-slate-700 flex items-center justify-center gap-2 transition-colors">
           <span>🖼️</span><span>Customize Logo &amp; Brand</span>
         </button>
+      </div>
+
+      <!-- Account card: slim, pinned to the bottom of the sidebar (name, role badge, sign-out, admin "View as" selector) -->
+      <div id="sidebar-account-card" class="px-4 pt-3 pb-4 bg-white border-t border-slate-200 space-y-2">
+        <div class="flex items-center gap-2">
+          <div class="w-8 h-8 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center text-sm shrink-0" aria-hidden="true">👤</div>
+          <div class="min-w-0 flex-1 leading-tight">
+            <div class="flex items-center gap-1.5">
+              <div id="sidebar-switch-name" class="text-xs font-extrabold text-slate-900 truncate">Admin Desk</div>
+              <span id="sidebar-switch-role-pill" class="shrink-0 px-1.5 py-px rounded-full text-[8px] font-extrabold uppercase bg-emerald-700 text-white">Admin</span>
+            </div>
+            <div id="sidebar-switch-email" class="text-[10px] text-slate-500 font-mono truncate">admin@goverdhanenergy.com</div>
+          </div>
+          <button id="btn-sidebar-signout" type="button" class="shrink-0 w-8 h-8 rounded-lg bg-white hover:bg-rose-50 text-slate-600 hover:text-rose-700 border border-slate-200 text-sm flex items-center justify-center transition-colors" title="Sign out" aria-label="Sign out">🚪</button>
+        </div>
+        <!-- Only an authenticated Admin sees this: preview the app as Admin / a User who can edit / a Quote-only User -->
+        <div id="sidebar-admin-role-switcher-controls">
+          <div class="flex items-center gap-2">
+            <span class="text-[9px] font-extrabold uppercase tracking-wider text-slate-400 shrink-0">View as</span>
+            <div class="grid grid-cols-3 gap-0.5 p-0.5 flex-1 rounded-lg bg-slate-100 border border-slate-200">
+              <button type="button" data-fast-role="admin" class="fast-role-btn py-1 rounded-md text-[10px] font-extrabold bg-emerald-700 text-white text-center transition-colors" title="Admin: full system and Master File access">Admin</button>
+              <button type="button" data-fast-role="user-edit" class="fast-role-btn py-1 rounded-md text-[10px] font-bold text-slate-600 text-center transition-colors" title="User who can edit the Master File (hides Users / Sync / Render)">Edit</button>
+              <button type="button" data-fast-role="user-quote" class="fast-role-btn py-1 rounded-md text-[10px] font-bold text-slate-600 text-center transition-colors" title="User who can only quote (Master File read-only)">Quote</button>
+            </div>
+          </div>
+        </div>
       </div>
     </aside>
 
@@ -1985,8 +1964,8 @@ function applyUserSession(userObj, isRolePreviewSwitch = false) {
   const swEmail = $("#sidebar-switch-email"); if (swEmail) swEmail.textContent = userObj.email || (userObj.username ? userObj.username + "@goverdhanenergy.com" : "");
   const swPill = $("#sidebar-switch-role-pill");
   if (swPill) {
-    swPill.textContent = isAdmin ? "👑 Admin" : S.canWrite ? "✏️ User (Can Edit)" : "👤 User (Quote Only)";
-    swPill.className = "inline-block mt-0.5 px-2 py-0.5 rounded-full text-[9px] font-extrabold uppercase " +
+    swPill.textContent = isAdmin ? "Admin" : S.canWrite ? "Editor" : "Quote only";
+    swPill.className = "shrink-0 px-1.5 py-px rounded-full text-[8px] font-extrabold uppercase " +
       (isAdmin ? "bg-emerald-700 text-white" : S.canWrite ? "bg-indigo-600 text-white" : "bg-slate-600 text-white");
   }
 
@@ -2006,8 +1985,8 @@ function applyUserSession(userObj, isRolePreviewSwitch = false) {
   document.querySelectorAll("[data-fast-role]").forEach(b => {
     const on = b.getAttribute("data-fast-role") === activeFastMode;
     b.className = on
-      ? "fast-role-btn py-1 px-1.5 rounded-lg text-[10px] font-extrabold bg-emerald-700 text-white text-center transition-colors shadow-2xs"
-      : "fast-role-btn py-1 px-1.5 rounded-lg text-[10px] font-bold bg-white text-slate-700 border border-slate-200 hover:border-emerald-400 text-center transition-colors";
+      ? "fast-role-btn py-1 rounded-md text-[10px] font-extrabold bg-emerald-700 text-white text-center transition-colors shadow-sm"
+      : "fast-role-btn py-1 rounded-md text-[10px] font-bold text-slate-600 hover:bg-white hover:text-slate-900 text-center transition-colors";
   });
 
   // Strictly hide Admin-only sections from ALL non-admins (even Users with canEditMaster!)
@@ -9020,6 +8999,22 @@ async function boot() {
     if (document.visibilityState === "visible") pullFromNeon(false, false);
   }, 2500);
 }
+
+// Keep the desktop sidebar exactly as tall as the visible part of the screen, so the account card stays on the bottom edge
+(function fitSidebarToScreen() {
+  const apply = () => {
+    const a = document.getElementById("app-sidebar");
+    const h = document.querySelector("body > header");
+    if (!a) return;
+    const top = h ? Math.max(0, Math.round(h.getBoundingClientRect().bottom)) : 0;
+    a.style.setProperty("--hdr-h", top + "px");
+  };
+  window.addEventListener("scroll", apply, { passive: true });
+  window.addEventListener("resize", apply);
+  const h = document.querySelector("body > header");
+  if (h && window.ResizeObserver) new ResizeObserver(apply).observe(h);
+  apply();
+})();
 
 boot();
 </script>

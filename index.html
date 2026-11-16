@@ -151,6 +151,15 @@
     .rcost { text-align: right; }
     .rcost .big { font-family: 'JetBrains Mono', monospace; font-weight: 800; font-size: 20px; color: var(--accent); }
     @media (max-width: 560px) { .rcard { grid-template-columns: auto minmax(0, 1fr); } .rcost { grid-column: 2; text-align: left; } }
+    /* compact ranked list: shorter rows so the quotation is not pushed far down the page */
+    .ranks { gap: 6px; }
+    .rcard { padding: 8px 12px; gap: 10px; border-left-width: 4px; }
+    .rcard:hover { transform: none; }
+    .rank { width: 26px; height: 26px; font-size: 12px; }
+    .rname { font-size: 13.5px; }
+    .rparts { font-size: 11.5px; margin-top: 2px; }
+    .rcost .big { font-size: 17px; }
+    #qres { scroll-margin-top: 12px; }
     .sechead { display: flex; justify-content: space-between; gap: 8px 16px; flex-wrap: wrap; align-items: baseline; }
     .mtabs { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; margin-top: 14px; }
     @media (max-width: 1100px) { .mtabs { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
@@ -3614,9 +3623,10 @@ function viewQuote() {
       q.sel = q.specificSource === "ALL" ? null : q.specificSource;
     }
     saveWorkspaceState(200);
+    UI.showAllRefs = false;
     renderQuoteResults();
     toast("⚡ Landed price & quotation calculated!");
-    $("#qres")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    $("#qres")?.scrollIntoView({ behavior: "smooth", block: "start" });
   });
   $("#btn-reset-calc")?.addEventListener("click", () => {
     q.loc = "";
@@ -3864,19 +3874,25 @@ function renderQuoteResults() {
       })()}
     </div>` : `<div class="banner"><span><b>No transport rate to ${esc(q.loc)} yet.</b> Type a transporter's rate against a refinery below to price it, or add this location with its transport rates.</span><button class="btn small lime" type="button" id="addloc">＋ Add ${esc(q.loc)} as a location</button></div>`;
 
-  const cards = R.priced.map((r, i) => `
+  // Keep the list short: top 3 + the refinery being inspected; "Show all" reveals the rest
+  const REF_LIMIT = 3;
+  const showAllRefs = !!UI.showAllRefs || R.priced.length <= REF_LIMIT + 1;
+  const shown = R.priced.map((r, i) => ({ r, i })).filter(({ r, i }) => showAllRefs || i < REF_LIMIT || r === sel);
+  const hiddenRefs = R.priced.length - shown.length;
+  const cards = shown.map(({ r, i }) => `
     <button type="button" class="rcard ${i === 0 ? "first" : ""} ${r === sel ? "sel" : ""}" data-sel="${esc(r.s.id)}" style="--co:${coVar(r.s.company)}" aria-pressed="${r === sel}">
       <span class="rank">${i + 1}</span>
       <span style="min-width:0">
         <span class="rname"><span class="co">${esc(r.s.company)}</span>${esc(r.s.name)}${i === 0 ? ' <span class="pill best">Suitable</span>' : ""}${q.specificSource === r.s.id ? ' <span class="pill warn">📌 Customer Choice</span>' : ""}${r.freightSrc === "estimated" ? ' <span class="pill warn">transport estimated</span>' : ""}${r.freightSrc === "manual" ? ' <span class="pill info">your transport rate</span>' : ""}</span>
         <span class="rparts"><span>Price <b>${inr(r.basic)}</b> ${chgPill(r.chg)}</span><span>Discount <b>${r.disc ? "−" + nf(r.disc) : "0"}</b></span><span>Transport <b>+${nf(r.freight)}</b></span><span>Credit <b>+${nf(r.credit)}</b></span></span>
-        <span class="tiny" style="display:block;margin-top:2px">🚚 ${transportLine(r)}${r.veh ? ` · ${esc(r.veh.category)} (${r.trucks ? r.trucks + " truck(s)" : r.veh.capacity + " " + unit})` : ""}</span>
-        <span class="gapbar" style="display:block"><i style="width:${i === 0 ? 100 : r.vsBest < 0.5 ? 0 : Math.max(4, r.vsBest / maxGap * 100)}%;background:${i === 0 ? "#10b981" : "var(--io)"}"></i></span>
+        ${r === sel ? `<span class="tiny" style="display:block;margin-top:2px">🚚 ${transportLine(r)}${r.veh ? ` · ${esc(r.veh.category)} (${r.trucks ? r.trucks + " truck(s)" : r.veh.capacity + " " + unit})` : ""}</span>` : ""}
         <span class="tiny">${i === 0 ? "Lowest landed cost" : r.vsBest < 0.5 ? "Same landed cost as the suitable refinery" : `${inr(r.vsBest)} per ${unit} costlier`}</span>
       </span>
       <span class="rcost"><span class="lbl" style="display:block">Price to quote</span><span class="big">${inr(r.sell)}</span><span class="tiny" style="display:block">landed ${inr(r.landed)}</span></span>
     </button>`).join("");
 
+  const refToggle = R.priced.length > REF_LIMIT + 1
+    ? `<button type="button" id="btn-toggle-all-refs" class="btn small" style="justify-self:start">${showAllRefs ? "▴ Show top " + REF_LIMIT + " only" : "▾ Show all " + R.priced.length + " refineries (+" + hiddenRefs + " more)"}</button>` : "";
   const unrouted = R.unrouted.map(r => `
     <tr>
       <td><span class="co" style="--co:${coVar(r.s.company)}">${esc(r.s.company)}</span><span class="src">${esc(r.s.name)}</span><div class="tiny">loads at ${esc(r.s.loading)}</div></td>
@@ -3888,14 +3904,18 @@ function renderQuoteResults() {
   const np = R.noprice.length ? `<p class="tiny" style="margin:0">Listed for this product but without a rate in this revision: ${R.noprice.map(x => esc(x.s.name) + (x.p.note ? ` (${esc(x.p.note)})` : "")).join(", ")}.</p>` : "";
 
   box.innerHTML = `${hero}
-   ${R.priced.length ? `<section class="stack" style="gap:10px"><div class="sechead"><h3>All refineries for ${esc(R.pr?.name)} delivered to ${esc(q.loc)}</h3><span class="tiny">cheapest first · refinery rates of ${fmtDate(R.cyc?.effectiveDate)} · tap any refinery to inspect working &amp; build quotation</span></div>
-   <div class="ranks">${cards}</div></section>` : ""}
+   ${R.priced.length ? `<section class="stack" style="gap:10px"><div class="sechead"><h3>All refineries for ${esc(R.pr?.name)} delivered to ${esc(q.loc)}</h3><span class="tiny">cheapest first · showing ${shown.length} of ${R.priced.length} · tap a refinery to build its quotation</span></div>
+   <div class="ranks">${cards}</div>${refToggle}</section>` : ""}
    ${sel ? breakdown(sel, R) : ""}
-   ${R.unrouted.length ? `<section class="stack" style="gap:8px"><h3>Also sells ${esc(R.pr?.name)}, but no transport rate to ${esc(q.loc)}</h3><p class="tiny" style="margin:0">Got a rate from a transporter? Type it here and the refinery joins the comparison immediately.</p>
-   <div class="tw" data-live><table><thead><tr><th>Refinery</th><th class="n">Net Price</th><th>Status</th><th class="n">Enter Transport Rate</th></tr></thead><tbody>${unrouted}</tbody></table></div></section>` : ""}
+   ${R.unrouted.length ? `<details id="unrouted-det" class="panel pad stack" style="gap:8px" ${UI.unroutedOpen || !R.priced.length ? "open" : ""}><summary style="cursor:pointer;font-weight:700;font-size:14px">Also sells ${esc(R.pr?.name)}, but no transport rate to ${esc(q.loc)} <span class="pill warn">${R.unrouted.length}</span> <span class="tiny" style="font-weight:400">· click to add a rate</span></summary><p class="tiny" style="margin:8px 0">Got a rate from a transporter? Type it here and the refinery joins the comparison immediately.</p>
+   <div class="tw" data-live><table><thead><tr><th>Refinery</th><th class="n">Net Price</th><th>Status</th><th class="n">Enter Transport Rate</th></tr></thead><tbody>${unrouted}</tbody></table></div></details>` : ""}
    ${np}`;
 
   box.querySelectorAll("[data-sel]").forEach(el => el.onclick = () => { q.sel = el.dataset.sel; saveWorkspaceState(200); renderQuoteResults(); });
+  const tgAll = box.querySelector("#btn-toggle-all-refs");
+  if (tgAll) tgAll.onclick = () => { const y = window.scrollY; UI.showAllRefs = !UI.showAllRefs; renderQuoteResults(); window.scrollTo(0, y); };
+  const unDet = box.querySelector("#unrouted-det");
+  if (unDet) unDet.addEventListener("toggle", () => { UI.unroutedOpen = unDet.open; });
   if (B) {
     const bInp = box.querySelector("#hero-bargain-input");
     if (bInp) bInp.addEventListener("change", e => {

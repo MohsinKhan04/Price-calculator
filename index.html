@@ -198,6 +198,29 @@
     .fx { display: inline-grid; background: var(--fx, var(--sunk)); color: var(--fxi, var(--ink)); border-radius: 8px; padding: 5px 10px; font-weight: 600; font-size: 13px; line-height: 1.25; }
     .fx small { font-size: 10.5px; font-weight: 500; opacity: .85; }
     .fx.total { background: var(--accent); color: var(--on-accent); }
+
+    /* ===== Customer Master, Quotation History & email (added) ===== */
+    #toast { z-index: 70; }
+    .crm-overlay { position: fixed; inset: 0; z-index: 60; background: rgba(15,23,42,.55); display: flex; align-items: flex-start; justify-content: center; padding: 3vh 12px; overflow-y: auto; }
+    .crm-modal { background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-radius: 16px; width: min(1100px, 100%); box-shadow: 0 24px 60px rgba(0,0,0,.35); display: flex; flex-direction: column; max-height: 94vh; }
+    .crm-modal.narrow { width: min(560px, 100%); }
+    .crm-mh { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 14px 18px; border-bottom: 1px solid var(--line); }
+    .crm-mh h3 { font-size: 16px; }
+    .crm-mb { padding: 16px 18px; overflow-y: auto; display: block; flex: 1 1 auto; min-height: 0; }
+    .crm-mb > * + * { margin-top: 14px; }
+    .crm-mf { padding: 12px 18px; border-top: 1px solid var(--line); display: flex; gap: 8px; flex-wrap: wrap; align-items: center; justify-content: flex-end; }
+    .crm-split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); gap: 16px; align-items: start; }
+    @media (max-width: 860px) { .crm-split { grid-template-columns: minmax(0, 1fr); } .crm-overlay { padding: 0; } .crm-modal { border-radius: 0; max-height: 100vh; min-height: 100vh; } }
+    .crm-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; }
+    .crm-stat { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 12px 14px; display: grid; gap: 2px; align-content: start; }
+    .crm-stat b { font-family: 'JetBrains Mono', monospace; font-size: 22px; font-weight: 800; color: var(--accent); }
+    .crm-tl { display: grid; gap: 12px; }
+    .crm-card { background: var(--surface); border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: var(--r); padding: 14px; display: grid; gap: 8px; }
+    .crm-card-h { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; align-items: start; }
+    /* let wide tables scroll inside their own box instead of stretching the page on a phone */
+    .crm-page, .crm-page > *, .crm-tl > *, .crm-card > *, .crm-mb > *, .crm-split > * { min-width: 0; }
+    .crm-page { max-width: 100%; }
+    .crm-prev { width: 100%; height: 460px; border: 1px solid var(--line); border-radius: 10px; background: #fff; }
     .fade { animation: fadeAnim .22s ease; }
     @keyframes fadeAnim { from { opacity: .45; transform: translateY(2px); } to { opacity: 1; transform: translateY(0); } }
   </style>
@@ -271,6 +294,12 @@
       <button type="button" data-nav-pill="master-rates" class="mobile-nav-pill shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 text-slate-300 flex items-center gap-1.5">
         <span>📋</span><span>Master File</span>
       </button>
+      <button type="button" data-nav-pill="customers" class="mobile-nav-pill shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 text-slate-300 flex items-center gap-1.5">
+        <span>👥</span><span>Customers</span>
+      </button>
+      <button type="button" data-nav-pill="quote-history" class="mobile-nav-pill shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 text-slate-300 flex items-center gap-1.5">
+        <span>🗂️</span><span>Quote History</span>
+      </button>
       <button type="button" data-nav-pill="trends" class="mobile-nav-pill shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 text-slate-300 flex items-center gap-1.5">
         <span>📈</span><span>Trends</span>
       </button>
@@ -322,6 +351,23 @@
         <a href="#saved" data-nav="saved" class="sidebar-link w-full px-3 py-2 rounded-xl text-xs font-semibold transition-all text-slate-700 hover:bg-slate-100 flex items-center justify-between">
           <span class="flex items-center gap-2.5"><span class="text-base">🔖</span><span>Saved Quotes Log</span></span>
           <span id="stat-saved-count" class="text-[10px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full font-mono">2</span>
+        </a>
+      </div>
+
+      <!-- 1b. Customers & email quotations (added) -->
+      <div class="space-y-1.5 pt-2 border-t border-slate-200">
+        <div class="px-2.5 text-[10px] font-extrabold uppercase tracking-wider text-slate-400">Customers &amp; Quotations</div>
+        <a href="#customers" data-nav="customers" class="sidebar-link w-full px-3 py-2 rounded-xl text-xs font-semibold transition-all text-slate-700 hover:bg-slate-100 flex items-center justify-between">
+          <span class="flex items-center gap-2.5"><span class="text-base">👥</span><span>Customer Master</span></span>
+        </a>
+        <a href="#quote" data-nav="quote-create" class="sidebar-link w-full px-3 py-2 rounded-xl text-xs font-semibold transition-all text-slate-700 hover:bg-slate-100 flex items-center justify-between">
+          <span class="flex items-center gap-2.5"><span class="text-base">✉️</span><span>Create &amp; Email Quotation</span></span>
+        </a>
+        <a href="#quote-history" data-nav="quote-history" class="sidebar-link w-full px-3 py-2 rounded-xl text-xs font-semibold transition-all text-slate-700 hover:bg-slate-100 flex items-center justify-between">
+          <span class="flex items-center gap-2.5"><span class="text-base">🗂️</span><span>Quotation History</span></span>
+        </a>
+        <a href="#rate-history" data-nav="rate-history" class="sidebar-link w-full px-3 py-2 rounded-xl text-xs font-semibold transition-all text-slate-700 hover:bg-slate-100 flex items-center justify-between">
+          <span class="flex items-center gap-2.5"><span class="text-base">📊</span><span>Rate History / Analysis</span></span>
         </a>
       </div>
 
@@ -379,6 +425,10 @@
         <a href="#cloud-sync" data-nav="cloud-sync" class="sidebar-link w-full px-3 py-2 rounded-xl text-xs font-semibold transition-all text-slate-700 hover:bg-slate-100 flex items-center justify-between">
           <span class="flex items-center gap-2.5"><span class="text-base">⚡</span><span>Neon / Render Sync</span></span>
           <span class="text-[10px] text-emerald-600 font-bold">SQL</span>
+        </a>
+        <a href="#activity-logs" data-nav="activity-logs" class="sidebar-link w-full px-3 py-2 rounded-xl text-xs font-semibold transition-all text-slate-700 hover:bg-slate-100 flex items-center justify-between">
+          <span class="flex items-center gap-2.5"><span class="text-base">🧾</span><span>Activity Logs</span></span>
+          <span class="text-[10px] text-slate-500 font-bold">Audit</span>
         </a>
       </div>
 
@@ -2569,7 +2619,7 @@ function computeQuote(q) {
 }
 
 /* ================= ROUTER & SIDEBAR STATS ================= */
-const TABS = ["quote", "map", "master-rates", "master-transport", "master-credit", "master-transporters", "master-refineries", "master-template", "trends", "saved", "admin-users", "cloud-sync"];
+const TABS = ["quote", "map", "master-rates", "master-transport", "master-credit", "master-transporters", "master-refineries", "master-template", "trends", "saved", "admin-users", "cloud-sync", "customers", "quote-history", "rate-history", "activity-logs"];
 const LEGACY = { cycles: "master-rates", routes: "master-transport", transporters: "master-transporters", setup: "master-credit", master: "master-rates" };
 
 function updateSidebarStats() {
@@ -2738,11 +2788,12 @@ function route() {
   let h = location.hash.slice(1);
   if (LEGACY[h]) h = LEGACY[h];
   const isAdmin = S.currentUser?.role === "admin";
-  if (!isAdmin && (h === "cloud-sync" || h === "admin-users")) {
+  if (!isAdmin && (h === "cloud-sync" || h === "admin-users" || h === "activity-logs")) {
     h = "quote";
     if (location.hash !== "#quote") history.replaceState(null, "", "#quote");
   }
   UI.tab = TABS.includes(h) ? h : "quote";
+  if (UI.tab !== "customers") CRM.profileId = null;
   closeMobileSidebar();
   document.querySelectorAll(".sidebar-link").forEach(a => {
     const nav = a.getAttribute("data-nav");
@@ -2795,7 +2846,11 @@ function render() {
     trends: viewTrends,
     saved: viewSaved,
     "admin-users": viewUsersAdmin,
-    "cloud-sync": viewCloudSync
+    "cloud-sync": viewCloudSync,
+    customers: viewCustomers,
+    "quote-history": viewQuoteHistory,
+    "rate-history": viewRateHistory,
+    "activity-logs": viewActivityLogs
   })[UI.tab]?.();
 }
 
@@ -3655,6 +3710,7 @@ function viewQuote() {
   bind("#q-days", "days");
   bind("#q-margin", "margin");
   bind("#q-cyc", "cycleId");
+  crmEnhanceQuoteForm();
 
   $("#q-prod-select")?.addEventListener("change", e => { q.product = e.target.value; reset(); saveWorkspaceState(200); viewQuote(); });
   $("#q-spec-ref")?.addEventListener("change", e => {
@@ -3904,6 +3960,7 @@ function renderQuoteResults() {
   const np = R.noprice.length ? `<p class="tiny" style="margin:0">Listed for this product but without a rate in this revision: ${R.noprice.map(x => esc(x.s.name) + (x.p.note ? ` (${esc(x.p.note)})` : "")).join(", ")}.</p>` : "";
 
   box.innerHTML = `${hero}
+${R.priced.length ? crmBestPanel(R) : ""}
    ${R.priced.length ? `<section class="stack" style="gap:10px"><div class="sechead"><h3>All refineries for ${esc(R.pr?.name)} delivered to ${esc(q.loc)}</h3><span class="tiny">cheapest first · showing ${shown.length} of ${R.priced.length} · tap a refinery to build its quotation</span></div>
    <div class="ranks">${cards}</div>${refToggle}</section>` : ""}
    ${sel ? breakdown(sel, R) : ""}
@@ -4007,6 +4064,7 @@ function renderQuoteResults() {
   const sq = box.querySelector("#savequickquote");
   if (sq) sq.onclick = () => saveQuote(sel, R);
   if (sel) bindQuotationPanel(box, sel, R);
+  crmBindBestPanel(box, R);
   const sm = box.querySelector("#savemanual");
   if (sm) sm.onclick = async () => {
     if (!S.canWrite) { toast("Sign in as Admin to save transport rates to the Master file."); return; }
@@ -9035,6 +9093,612 @@ async function boot() {
   if (h && window.ResizeObserver) new ResizeObserver(apply).observe(h);
   apply();
 })();
+
+/* ================= CUSTOMERS, QUOTATION HISTORY, EMAIL, RATE ANALYSIS & ACTIVITY LOG (added module) =================
+   Everything here talks to /api/crm/* (see crm.js on the server). It does not read or change any price, route or
+   calculation: it only reads the result of computeQuote() and the existing lineFrom() / buildQuotationPdf() helpers. */
+const CRM = {
+  cfg: null, customers: null, custStatus: "active", custQ: "", profileId: null, profile: null,
+  hist: { f: {}, data: null, opts: null }, rate: { customerId: "", product: "", location: "", includeUnsent: false, from: "", to: "", data: null },
+  act: { f: {}, rows: [], total: 0 }, lastR: null, loadingCust: false
+};
+const CRM_TYPES_FALLBACK = ["Industrial / End User", "Dealer", "Distributor", "Trader", "Contractor", "Government / PSU", "Other"];
+const CRM_STATES = ["Andhra Pradesh", "Assam", "Bihar", "Chhattisgarh", "Delhi", "Goa", "Gujarat", "Haryana", "Himachal Pradesh", "Jammu & Kashmir", "Jharkhand", "Karnataka", "Kerala", "Madhya Pradesh", "Maharashtra", "Odisha", "Punjab", "Rajasthan", "Tamil Nadu", "Telangana", "Uttar Pradesh", "Uttarakhand", "West Bengal"];
+const CRM_ACT = { "customer.created": "Customer created", "customer.updated": "Customer updated", "customer.archived": "Customer archived", "customer.restored": "Customer restored", "quotation.generated": "Quotation generated", "quotation.modified": "Quotation modified", "quotation.emailed": "Quotation emailed", "quotation.email_failed": "Email failed", "quotation.resent": "Quotation resent", "quotation.revised": "Quotation revised" };
+const CRM_STATUS = { draft: ["flat", "Draft"], sent: ["best", "Sent"], failed: ["up", "Failed"], revised: ["info", "Revised"] };
+const CRM_FIELD_LABEL = { name: "Name", contactPerson: "Contact person", mobile: "Mobile", email: "Email", billingAddress: "Billing address", city: "City", state: "State", gstNo: "GST no.", customerType: "Type", notes: "Notes", remarks: "Remarks", subject: "Subject", message: "Message" };
+
+/* ---------- small helpers ---------- */
+const crmUid = () => (window.crypto && crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2, 12));
+const crmActor = () => ({ id: S.currentUser?.id || "", name: S.currentUser?.name || S.currentUser?.email || "" });
+const crmFmtDT = iso => { if (!iso) return "—"; const d = new Date(iso); return isNaN(d) ? "—" : d.toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }); };
+const crmDay = ymd => (ymd ? fmtDate(ymd) : "—");
+const crmPill = s => { const [c, l] = CRM_STATUS[s] || ["flat", s]; return `<span class="pill ${c}">${esc(l)}</span>`; };
+const crmMailPill = s => ({ sent: `<span class="pill best" title="Accepted by the email service">Sent</span>`, failed: `<span class="pill up">Failed</span>`, unconfirmed: `<span class="pill warn" title="Not known whether it was delivered">Unconfirmed</span>`, sending: `<span class="pill warn">Sending…</span>` }[s] || `<span class="pill flat">${esc(s)}</span>`);
+const crmOk = v => /^[^\s@,;<>()]+@[^\s@,;<>()]+\.[^\s@,;<>()]{2,}$/.test(String(v || ""));
+const crmCustById = id => (CRM.customers || []).find(c => c.id === id) || null;
+const crmSupplierLine = i => `${esc(i.supplierName)} <b>${inr(i.rate, 2)}</b>`;
+function crmBytesToB64(u8) { let s = ""; const CH = 0x8000; for (let i = 0; i < u8.length; i += CH) s += String.fromCharCode.apply(null, u8.subarray(i, i + CH)); return btoa(s); }
+function crmDelta(v, pct) { if (v === null || v === undefined) return `<span class="tiny">—</span>`; if (v === 0) return `<span class="tiny">no change</span>`; return `<span class="${v > 0 ? "d-up" : "d-down"}">${v > 0 ? "▲" : "▼"} ${inr(Math.abs(v), 2)}${pct !== null && pct !== undefined ? ` (${v > 0 ? "+" : "−"}${Math.abs(pct)}%)` : ""}</span>`; }
+
+async function crmApi(method, path, body) {
+  const base = getApiBase();
+  const ctrl = new AbortController(); const timer = setTimeout(() => ctrl.abort(), 45000);
+  try {
+    const r = await fetch((base || "") + "/api/crm" + path, { method, cache: "no-store", headers: { "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined, signal: ctrl.signal });
+    let j = {}; try { j = await r.json(); } catch (e) {}
+    if (!r.ok && !j.error) j.error = "The server answered with error " + r.status + ".";
+    return { ...j, status: r.status, ok: r.ok && j.ok !== false };
+  } catch (e) {
+    return { status: 0, ok: false, error: e.name === "AbortError" ? "The server took too long to answer." : "Could not reach the server. Check your internet connection." };
+  } finally { clearTimeout(timer); }
+}
+async function crmLoadConfig(force) {
+  if (CRM.cfg && !force) return CRM.cfg;
+  const r = await crmApi("GET", "/config");
+  CRM.cfg = r.ok ? r : { ok: false, emailEnabled: false, emailBlockedReason: r.error || "Server not reachable.", customerTypes: CRM_TYPES_FALLBACK };
+  return CRM.cfg;
+}
+async function crmLoadCustomers(force) {
+  if (CRM.customers && !force) return CRM.customers;
+  const r = await crmApi("GET", "/customers?status=all&limit=2000");
+  if (!r.ok) throw new Error(r.error || "Could not load customers.");
+  CRM.customers = r.customers; return CRM.customers;
+}
+function crmMatch(c, term) {
+  const t = String(term || "").trim().toLowerCase(); if (!t) return true;
+  const digits = t.replace(/\D/g, "");
+  return [c.name, c.contactPerson, c.email, c.city, c.state, c.gstNo, c.id].some(v => String(v || "").toLowerCase().includes(t)) || (digits.length >= 3 && String(c.mobile || "").replace(/\D/g, "").includes(digits));
+}
+const crmErrorPanel = (msg, retryId) => `<div class="panel empty"><strong>This section could not load</strong>${esc(msg)}<div style="margin-top:12px"><button type="button" class="btn" id="${retryId}">Try again</button></div></div>`;
+const crmLoading = t => `<div class="panel empty"><strong>${esc(t || "Loading…")}</strong><span class="tiny">One moment</span></div>`;
+
+function crmModal({ title, body, footer = "", narrow = false, onClose }) {
+  const ov = document.createElement("div"); ov.className = "crm-overlay"; ov.setAttribute("role", "dialog"); ov.setAttribute("aria-modal", "true");
+  ov.innerHTML = `<div class="crm-modal ${narrow ? "narrow" : ""}"><div class="crm-mh"><h3>${title}</h3><button type="button" class="btn small" data-x aria-label="Close">✕ Close</button></div><div class="crm-mb">${body}</div>${footer ? `<div class="crm-mf">${footer}</div>` : ""}</div>`;
+  document.body.appendChild(ov); document.body.style.overflow = "hidden";
+  const api = {
+    el: ov, busy: false, q: s => ov.querySelector(s), qa: s => ov.querySelectorAll(s),
+    close() { if (api.busy) return; ov.remove(); document.body.style.overflow = ""; document.removeEventListener("keydown", onKey); if (onClose) onClose(); }
+  };
+  const onKey = e => { if (e.key === "Escape") api.close(); };
+  document.addEventListener("keydown", onKey);
+  ov.querySelector("[data-x]").onclick = api.close;
+  return api;
+}
+function crmRefreshView() { if (["customers", "quote-history", "rate-history", "activity-logs"].includes(UI.tab)) render(); }
+
+/* =================== CUSTOMER MASTER =================== */
+async function viewCustomers() {
+  if (CRM.profileId) return viewCustomerProfile();
+  const v = V(); v.innerHTML = crmLoading("Loading customers…");
+  try { await Promise.all([crmLoadConfig(), crmLoadCustomers(true)]); }
+  catch (e) { v.innerHTML = crmErrorPanel(e.message, "crm-retry"); $("#crm-retry").onclick = () => viewCustomers(); return; }
+  if (UI.tab !== "customers") return;
+  v.innerHTML = `<div class="stack crm-page" style="gap:14px">
+    <div class="sechead" style="display:flex;justify-content:space-between;align-items:end;gap:12px;flex-wrap:wrap"><div><h2>Customer Master</h2><p class="sub" style="margin:0">Every customer you quote. Open a customer to see all quotations, rates offered and emails sent.</p></div>
+      <button type="button" class="btn primary" id="crm-new-cust" ${S.canQuote ? "" : "disabled"}>＋ New customer</button></div>
+    <div class="toolbar" style="margin:0"><div class="field" style="max-width:340px;flex:2 1 220px"><label class="lbl" for="crm-cq">Search</label><input type="search" id="crm-cq" value="${esc(CRM.custQ)}" placeholder="Name, company, mobile, email, city or GST" autocomplete="off"></div>
+      <div class="field" style="max-width:170px"><label class="lbl" for="crm-cs">Show</label><select id="crm-cs"><option value="active" ${CRM.custStatus === "active" ? "selected" : ""}>Active customers</option><option value="archived" ${CRM.custStatus === "archived" ? "selected" : ""}>Archived</option><option value="all" ${CRM.custStatus === "all" ? "selected" : ""}>All</option></select></div>
+      <span class="tiny" id="crm-ccount" style="align-self:center"></span></div>
+    <div id="crm-cust-body"></div></div>`;
+  $("#crm-new-cust").onclick = () => crmOpenCustomerForm(null, c => { CRM.profileId = null; crmLoadCustomers(true).then(() => { toast("Customer " + c.name + " saved"); render(); }); });
+  $("#crm-cq").oninput = e => { CRM.custQ = e.target.value; crmPaintCustomers(); };
+  $("#crm-cs").onchange = e => { CRM.custStatus = e.target.value; crmPaintCustomers(); };
+  crmPaintCustomers();
+}
+function crmPaintCustomers() {
+  const box = $("#crm-cust-body"); if (!box) return;
+  const list = CRM.customers.filter(c => (CRM.custStatus === "all" || c.status === CRM.custStatus) && crmMatch(c, CRM.custQ));
+  $("#crm-ccount").textContent = `${list.length} of ${CRM.customers.length} customers`;
+  if (!list.length) { box.innerHTML = `<div class="panel empty"><strong>${CRM.customers.length ? "No customer matches" : "No customers yet"}</strong>${CRM.customers.length ? "Try a different search." : "Click “New customer” to add the first one."}</div>`; return; }
+  box.innerHTML = `<div class="tw"><table><thead><tr><th>Customer</th><th>Contact</th><th>Email</th><th>City / State</th><th>Type</th><th class="n">Quotations</th><th>Last quoted</th><th></th></tr></thead><tbody>${list.map(c => `
+    <tr data-open="${esc(c.id)}" style="cursor:pointer"><td><b>${esc(c.name)}</b>${c.status === "archived" ? ' <span class="pill flat">Archived</span>' : ""}<div class="tiny">${esc(c.id)}${c.gstNo ? " · GST " + esc(c.gstNo) : ""}</div></td>
+    <td>${esc(c.contactPerson) || '<span class="tiny">—</span>'}<div class="tiny">${esc(c.mobile)}</div></td>
+    <td>${c.email ? esc(c.email) : '<span class="pill warn">no email</span>'}</td>
+    <td>${esc([c.city, c.state].filter(Boolean).join(", ")) || "—"}</td><td>${esc(c.customerType) || "—"}</td>
+    <td class="n">${c.quotationCount} <span class="tiny">(${c.sentCount} sent)</span></td><td class="tiny">${c.lastQuotedAt ? crmFmtDT(c.lastQuotedAt) : "—"}</td>
+    <td class="n"><button type="button" class="btn small" data-open="${esc(c.id)}">Open</button></td></tr>`).join("")}</tbody></table></div>`;
+  box.querySelectorAll("[data-open]").forEach(el => el.onclick = e => { e.stopPropagation(); CRM.profileId = el.dataset.open; CRM.profile = null; viewCustomers(); });
+}
+
+function crmCustomerFormHtml(c) {
+  const T = (CRM.cfg && CRM.cfg.customerTypes) || CRM_TYPES_FALLBACK; c = c || {};
+  const f = (id, label, val, extra = "") => `<div class="field"><label class="lbl" for="cf-${id}">${label}</label><input type="text" id="cf-${id}" value="${esc(val || "")}" ${extra}></div>`;
+  return `<form id="crm-cform" class="stack" style="gap:12px" autocomplete="off">
+    ${f("name", "Customer / Company name *", c.name, 'required maxlength="160"')}
+    <div class="row2">${f("contactPerson", "Contact person", c.contactPerson, 'maxlength="120"')}${f("mobile", "Mobile number", c.mobile, 'maxlength="30" inputmode="tel"')}</div>
+    <div class="row2">${f("email", "Email address (quotations are sent here)", c.email, 'maxlength="160" inputmode="email"')}${f("gstNo", "GST number (optional)", c.gstNo, 'maxlength="15" placeholder="e.g. 24ABCDE1234F1Z5" style="text-transform:uppercase"')}</div>
+    <div class="field"><label class="lbl" for="cf-billingAddress">Billing address</label><textarea id="cf-billingAddress" rows="2" maxlength="600">${esc(c.billingAddress || "")}</textarea></div>
+    <div class="row2">${f("city", "City", c.city, 'maxlength="80"')}<div class="field"><label class="lbl" for="cf-state">State</label><input type="text" id="cf-state" list="crm-states" value="${esc(c.state || "")}" maxlength="80"><datalist id="crm-states">${CRM_STATES.map(s => `<option value="${esc(s)}">`).join("")}</datalist></div></div>
+    <div class="field"><label class="lbl" for="cf-customerType">Customer type</label><select id="cf-customerType"><option value="">— choose —</option>${T.map(t => `<option ${c.customerType === t ? "selected" : ""}>${esc(t)}</option>`).join("")}</select></div>
+    <div class="field"><label class="lbl" for="cf-notes">Additional notes</label><textarea id="cf-notes" rows="2" maxlength="2000">${esc(c.notes || "")}</textarea></div>
+    <div id="crm-cform-msg"></div></form>`;
+}
+// existing = null to create. onSaved(customer) is called after a successful save.
+async function crmOpenCustomerForm(existing, onSaved) {
+  await crmLoadConfig();
+  const m = crmModal({ title: existing ? `Edit customer · ${esc(existing.id)}` : "New customer", narrow: true, body: crmCustomerFormHtml(existing),
+    footer: `<button type="button" class="btn" data-cancel>Cancel</button><button type="button" class="btn primary" id="crm-cform-save">${existing ? "Save changes" : "Save customer"}</button>` });
+  const msg = m.q("#crm-cform-msg"); const val = id => (m.q("#cf-" + id)?.value || "").trim();
+  const read = () => ({ name: val("name"), contactPerson: val("contactPerson"), mobile: val("mobile"), email: val("email"), gstNo: val("gstNo").toUpperCase(), billingAddress: val("billingAddress"), city: val("city"), state: val("state"), customerType: val("customerType"), notes: val("notes") });
+  m.q("[data-cancel]").onclick = m.close; m.q("#cf-name").focus();
+  let busy = false;
+  const save = async (force) => {
+    if (busy) return; const data = read();
+    if (data.name.length < 2) { msg.innerHTML = `<p class="d-up">Enter the customer or company name.</p>`; return; }
+    busy = true; m.busy = true; m.q("#crm-cform-save").disabled = true; msg.innerHTML = `<p class="tiny">Saving…</p>`;
+    const r = existing
+      ? await crmApi("PATCH", "/customers/" + existing.id, { changes: data, version: existing.version, force: !!force, actor: crmActor() })
+      : await crmApi("POST", "/customers", { customer: data, force: !!force, actor: crmActor() });
+    busy = false; m.busy = false; m.q("#crm-cform-save").disabled = false;
+    if (r.ok) { m.close(); if (onSaved) onSaved(r.customer); return; }
+    if (r.code === "possible_duplicate" || r.code === "duplicate_gst") {
+      const dl = (r.duplicates || []).map(d => `<div class="topt" style="cursor:default"><span><b>${esc(d.name)}</b> <span class="tiny">${esc(d.id)} · ${esc([d.city, d.state].filter(Boolean).join(", "))}${d.email ? " · " + esc(d.email) : ""}${d.gstNo ? " · GST " + esc(d.gstNo) : ""}</span><span class="tiny" style="display:block">Matches on: ${esc((d.matchedOn || []).join(", "))}</span></span><button type="button" class="btn small" data-use="${esc(d.id)}">${onSaved && !existing ? "Use this customer" : "Open"}</button></div>`).join("");
+      msg.innerHTML = `<div class="banner" style="margin:0;display:grid;gap:8px"><div><b>${r.code === "duplicate_gst" ? "This GST number already exists." : "This looks like a customer you already have."}</b> ${esc(r.error)}</div>${dl}${r.canForce ? `<div class="actions"><button type="button" class="btn" id="crm-force">Save as a new customer anyway</button></div>` : ""}</div>`;
+      msg.querySelectorAll("[data-use]").forEach(b => b.onclick = () => { const d = (r.duplicates || []).find(x => x.id === b.dataset.use); m.close(); if (onSaved && !existing) onSaved(d, true); else { CRM.profileId = d.id; CRM.profile = null; location.hash = "#customers"; render(); } });
+      const fb = msg.querySelector("#crm-force"); if (fb) fb.onclick = () => save(true);
+    } else if (r.code === "version_conflict") {
+      msg.innerHTML = `<p class="d-up">${esc(r.error)}</p>`;
+    } else msg.innerHTML = `<p class="d-up">${esc(r.error || "Could not save.")}</p>`;
+  };
+  m.q("#crm-cform-save").onclick = () => save(false);
+  m.q("#crm-cform").onsubmit = e => { e.preventDefault(); save(false); };
+}
+// Pick a customer (search list) or create one on the spot. onPick(customer)
+async function crmOpenCustomerPicker(onPick) {
+  try { await Promise.all([crmLoadConfig(), crmLoadCustomers(true)]); } catch (e) { toast(e.message); return; }
+  const m = crmModal({ title: "Choose customer", narrow: true, body: `<div class="field"><label class="lbl" for="crm-pq">Search the Customer Master</label><input type="search" id="crm-pq" placeholder="Name, mobile, email, city…" autocomplete="off"></div><div id="crm-plist" class="stack" style="gap:6px;max-height:48vh;overflow:auto"></div>`,
+    footer: `<button type="button" class="btn" data-cancel>Cancel</button><button type="button" class="btn primary" id="crm-pnew" ${S.canQuote ? "" : "disabled"}>＋ New customer</button>` });
+  const paint = () => {
+    const list = CRM.customers.filter(c => c.status === "active" && crmMatch(c, m.q("#crm-pq").value)).slice(0, 60);
+    m.q("#crm-plist").innerHTML = list.length ? list.map(c => `<button type="button" class="topt" data-pick="${esc(c.id)}"><span><b>${esc(c.name)}</b><span class="tiny" style="display:block">${esc([c.contactPerson, c.city, c.email].filter(Boolean).join(" · ")) || esc(c.id)}</span></span>${c.email ? "" : '<span class="pill warn">no email</span>'}</button>`).join("") : `<p class="tiny" style="margin:6px 0">No match. Use “New customer” to add it.</p>`;
+    m.qa("[data-pick]").forEach(b => b.onclick = () => { const c = crmCustById(b.dataset.pick); m.close(); onPick(c); });
+  };
+  m.q("[data-cancel]").onclick = m.close; m.q("#crm-pq").oninput = paint; m.q("#crm-pq").focus(); paint();
+  m.q("#crm-pnew").onclick = () => { m.close(); crmOpenCustomerForm(null, async (c, existed) => { await crmLoadCustomers(true); onPick(crmCustById(c.id) || c); }); };
+}
+
+/* ---------- customer profile + timeline ---------- */
+async function viewCustomerProfile() {
+  const v = V(), id = CRM.profileId; v.innerHTML = crmLoading("Loading customer…");
+  const [cr, fr] = await Promise.all([crmApi("GET", "/customers/" + encodeURIComponent(id)), crmApi("GET", "/filters?customerId=" + encodeURIComponent(id)), crmLoadConfig()]);
+  if (UI.tab !== "customers" || CRM.profileId !== id) return;
+  if (!cr.ok) { v.innerHTML = crmErrorPanel(cr.error || "Customer not found.", "crm-retry"); $("#crm-retry").onclick = () => { CRM.profileId = null; viewCustomers(); }; return; }
+  const c = cr.customer; const keep = CRM.profile && CRM.profile.id === id ? CRM.profile.f : {};
+  CRM.profile = { id, customer: c, filters: fr, f: keep };
+  const F = CRM.profile.f; const opt = (arr, cur) => `<option value="">All</option>${(arr || []).map(x => `<option ${x === cur ? "selected" : ""}>${esc(x)}</option>`).join("")}`;
+  v.innerHTML = `<div class="stack crm-page" style="gap:14px">
+    <div class="actions"><button type="button" class="btn" id="crm-back">← All customers</button></div>
+    <section class="panel pad stack" style="gap:12px"><div class="sechead" style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:start">
+      <div><h2 style="margin:0">${esc(c.name)} ${c.status === "archived" ? '<span class="pill flat">Archived</span>' : ""}</h2><div class="tiny">${esc(c.id)}${c.customerType ? " · " + esc(c.customerType) : ""} · added ${crmFmtDT(c.createdAt)}${c.createdByName ? " by " + esc(c.createdByName) : ""}</div></div>
+      <div class="actions"><button type="button" class="btn" id="crm-edit" ${S.canQuote ? "" : "disabled"}>✎ Edit</button>
+        <button type="button" class="btn" id="crm-rates">📈 Rate history</button>
+        <button type="button" class="btn lime" id="crm-quote" ${S.canQuote && c.status === "active" ? "" : "disabled"}>⚡ Quote this customer</button>
+        <button type="button" class="btn danger" id="crm-arch" ${S.canQuote ? "" : "disabled"}>${c.status === "active" ? "Archive" : "Restore"}</button></div></div>
+      <div class="row2" style="grid-template-columns:repeat(auto-fit,minmax(220px,1fr))">
+        <div><span class="lbl">Contact person</span><div>${esc(c.contactPerson) || "—"}</div></div><div><span class="lbl">Mobile</span><div>${esc(c.mobile) || "—"}</div></div>
+        <div><span class="lbl">Email</span><div>${c.email ? esc(c.email) : '<span class="pill warn">no email — add one to send quotations</span>'}</div></div><div><span class="lbl">GST number</span><div>${esc(c.gstNo) || "—"}</div></div>
+        <div><span class="lbl">City / State</span><div>${esc([c.city, c.state].filter(Boolean).join(", ")) || "—"}</div></div><div><span class="lbl">Quotations</span><div><b>${c.quotationCount}</b> made · <b>${c.sentCount}</b> sent</div></div>
+        <div style="grid-column:1/-1"><span class="lbl">Billing address</span><div style="white-space:pre-wrap">${esc(c.billingAddress) || "—"}</div></div>
+        ${c.notes ? `<div style="grid-column:1/-1"><span class="lbl">Notes</span><div style="white-space:pre-wrap">${esc(c.notes)}</div></div>` : ""}</div></section>
+    <section class="stack" style="gap:10px"><div class="sechead"><h3>Quotation timeline</h3><span class="tiny" id="crm-tl-count"></span></div>
+      <div class="toolbar" style="margin:0"><div class="field"><label class="lbl" for="tf-from">From</label><input type="date" id="tf-from" value="${esc(F.from || "")}"></div><div class="field"><label class="lbl" for="tf-to">To</label><input type="date" id="tf-to" value="${esc(F.to || "")}"></div>
+        <div class="field"><label class="lbl" for="tf-product">Product</label><select id="tf-product">${opt(fr.products, F.product)}</select></div><div class="field"><label class="lbl" for="tf-supplier">Supplier / Refinery</label><select id="tf-supplier">${opt(fr.suppliers, F.supplier)}</select></div>
+        <div class="field"><label class="lbl" for="tf-employee">Employee</label><select id="tf-employee">${opt(fr.employees, F.employee)}</select></div>
+        <div class="field"><label class="lbl" for="tf-status">Status</label><select id="tf-status"><option value="">All</option>${Object.keys(CRM_STATUS).map(s => `<option value="${s}" ${F.status === s ? "selected" : ""}>${CRM_STATUS[s][1]}</option>`).join("")}</select></div>
+        <button type="button" class="btn small" id="tf-clear">Clear filters</button></div>
+      <div id="crm-tl" class="crm-tl"></div></section></div>`;
+  $("#crm-back").onclick = () => { CRM.profileId = null; CRM.profile = null; viewCustomers(); };
+  $("#crm-edit").onclick = () => crmOpenCustomerForm(c, () => { crmLoadCustomers(true); toast("Customer updated"); viewCustomerProfile(); });
+  $("#crm-rates").onclick = () => { CRM.rate.customerId = id; CRM.rate.product = ""; CRM.rate.data = null; location.hash = "#rate-history"; };
+  $("#crm-quote").onclick = () => { crmUseCustomerInCalculator(crmCustById(id) || c); location.hash = "#quote"; };
+  $("#crm-arch").onclick = async () => { const r = await crmApi("POST", `/customers/${id}/${c.status === "active" ? "archive" : "restore"}`, { actor: crmActor() }); if (!r.ok) return toast(r.error); toast(c.status === "active" ? "Customer archived" : "Customer restored"); crmLoadCustomers(true); viewCustomerProfile(); };
+  const onF = () => { const g = k => ($("#tf-" + k).value || ""); CRM.profile.f = { from: g("from"), to: g("to"), product: g("product"), supplier: g("supplier"), employee: g("employee"), status: g("status") }; crmPaintTimeline(); };
+  ["from", "to", "product", "supplier", "employee", "status"].forEach(k => $("#tf-" + k).onchange = onF);
+  $("#tf-clear").onclick = () => { CRM.profile.f = {}; viewCustomerProfile(); };
+  crmPaintTimeline();
+}
+function crmQs(o) { return Object.entries(o).filter(([, v]) => v !== "" && v !== undefined && v !== null && v !== false).map(([k, v]) => k + "=" + encodeURIComponent(v)).join("&"); }
+async function crmPaintTimeline() {
+  const box = $("#crm-tl"); if (!box || !CRM.profile) return; box.innerHTML = `<p class="tiny">Loading…</p>`;
+  const id = CRM.profile.id; const r = await crmApi("GET", "/quotations?" + crmQs({ customerId: id, ...CRM.profile.f, limit: 500 }));
+  if (!$("#crm-tl") || CRM.profile?.id !== id) return;
+  if (!r.ok) { box.innerHTML = `<p class="d-up">${esc(r.error)}</p>`; return; }
+  $("#crm-tl-count").textContent = `${r.total} quotation${r.total === 1 ? "" : "s"}${r.total > r.quotations.length ? ` (showing latest ${r.quotations.length})` : ""}`;
+  box.innerHTML = r.quotations.length ? r.quotations.map(q => crmQuoteCard(q)).join("") : `<div class="panel empty"><strong>No quotations ${Object.values(CRM.profile.f).some(Boolean) ? "match these filters" : "yet"}</strong>Quotations emailed to this customer appear here.</div>`;
+  crmBindQuoteActions(box);
+}
+function crmQuoteActionsHtml(q, compact) {
+  const can = S.canQuote;
+  return `<div class="actions"><button type="button" class="btn small" data-qact="view" data-qid="${esc(q.id)}">View</button>
+    ${q.status !== "revised" ? `<button type="button" class="btn small" data-qact="send" data-qid="${esc(q.id)}" ${can ? "" : "disabled"}>${q.sentAt ? "✉ Resend" : q.status === "failed" ? "✉ Retry send" : "✉ Send"}</button>` : ""}
+    <button type="button" class="btn small" data-qact="revise" data-qid="${esc(q.id)}" ${can ? "" : "disabled"}>Revise</button>
+    <button type="button" class="btn small" data-qact="pdf" data-qid="${esc(q.id)}">PDF</button></div>`;
+}
+function crmQuoteCard(q) {
+  const le = q.lastEmail;
+  return `<article class="crm-card"><div class="crm-card-h"><div><b style="font-size:15px">${esc(q.id)}</b> ${crmPill(q.status)}${q.revisionNo ? ` <span class="pill info">Revision ${q.revisionNo}</span>` : ""}
+      <div class="tiny">Quotation date ${crmDay(q.quotationDate)} · prepared by ${esc(q.createdBy.name) || "—"} on ${crmFmtDT(q.createdAt)}</div></div>${crmQuoteActionsHtml(q)}</div>
+    <div class="tw"><table><thead><tr><th>Supplier / Refinery</th><th>Product</th><th>Delivered at</th><th class="n">Qty</th><th class="n">Rate (excl. GST)</th><th class="n">Rate (incl. GST)</th></tr></thead><tbody>${q.items.map(i => `<tr><td><b>${esc(i.supplierName)}</b></td><td>${esc(i.productName)}</td><td>${esc(i.location) || "—"}</td><td class="n">${i.quantity ? nf(i.quantity, 2) + " " + esc(i.unit) : "—"}</td><td class="n"><b>${inr(i.rate, 2)}</b> <span class="tiny">/${esc(i.unit)}</span></td><td class="n">${inr(i.rateInclGst, 2)}</td></tr>`).join("")}</tbody></table></div>
+    <div class="tiny" style="display:grid;gap:3px;margin-top:8px">
+      <span>✉ ${q.sentAt ? `Sent ${crmFmtDT(q.sentAt)} by <b>${esc(q.sentBy.name) || "—"}</b> to ${esc(q.email)}` : "Not sent yet"}${le ? ` · last email ${crmMailPill(le.status)} <span class="font-mono">${esc(le.id.slice(0, 12))}</span>${le.status !== "sent" && le.error ? " — " + esc(le.error) : ""}` : ""}</span>
+      ${q.revisionOf ? `<span>↳ Revision of <a href="#" data-qact="view" data-qid="${esc(q.revisionOf)}">${esc(q.revisionOf)}</a></span>` : ""}${q.supersededBy ? `<span>↳ Replaced by revision <a href="#" data-qact="view" data-qid="${esc(q.supersededBy)}">${esc(q.supersededBy)}</a></span>` : ""}
+      ${q.remarks ? `<span>📝 ${esc(q.remarks)}</span>` : ""}</div></article>`;
+}
+function crmBindQuoteActions(root) {
+  root.querySelectorAll("[data-qact]").forEach(b => b.onclick = e => { e.preventDefault(); crmQuoteAction(b.dataset.qact, b.dataset.qid); });
+}
+async function crmQuoteAction(act, id) {
+  if (act === "view") return crmOpenQuoteDetail(id);
+  const r = await crmApi("GET", "/quotations/" + encodeURIComponent(id)); if (!r.ok) return toast(r.error || "Could not load the quotation.");
+  const q = r.quotation;
+  if (act === "send") return crmOpenSendModal({ mode: "existing", quotation: q });
+  if (act === "revise") return crmRevise(q);
+  if (act === "pdf") return crmDownloadPdf(q);
+}
+function crmPdfDoc(q) {
+  const c = (q.context && q.context.customerSnapshot) || {};
+  const lines = q.items.map(i => i.snapshot && i.snapshot.line ? { ...i.snapshot.line } : { productId: i.productId, product: i.productName, unit: i.unit, location: i.location, qty: i.quantity, rate: i.rate, gst: i.gstPct, rateGst: i.rateInclGst, credit: i.creditDays || 0, sourceId: i.supplierId, source: i.supplierName, cycleDate: (i.snapshot && i.snapshot.cycleDate) || q.quotationDate });
+  return { number: q.id, date: q.quotationDate, ref: "", lines, cust: { name: q.customerName, attn: q.contactPerson, address: [c.billingAddress, [c.city, c.state].filter(Boolean).join(", ")].filter(Boolean).join("\n"), phone: c.mobile || "", gstin: c.gstNo || "" } };
+}
+async function crmDownloadPdf(q) { try { await downloadQuotation(crmPdfDoc(q)); } catch (e) { toast("Could not build the PDF: " + (e.message || e)); } }
+function crmRevise(q) {
+  const c = q.context || {};
+  Object.assign(UI.q, { product: c.product || UI.q.product, loc: c.loc || (q.items[0] && q.items[0].location) || UI.q.loc, qty: c.qty ?? UI.q.qty, days: c.days ?? "", margin: c.margin ?? "", disc: c.disc || "none", cycleId: "", specificSource: "ALL", sel: null, manual: {}, manualBasic: {}, discEdit: {}, routeSel: {}, customer: q.customerName, customerId: q.customerId });
+  UI.crmRevisionOf = q.id; saveWorkspaceState(200);
+  toast(`Revising ${q.id}: check the numbers, click Calculate, then email the new options.`);
+  if (location.hash === "#quote") route(); else location.hash = "#quote";
+}
+function crmUseCustomerInCalculator(c) {
+  UI.q.customer = c.name; UI.q.customerId = c.id;
+  const d = qdoc(); d.cust = { name: c.name, address: [c.billingAddress, [c.city, c.state].filter(Boolean).join(", ")].filter(Boolean).join("\n"), attn: c.contactPerson || "", phone: c.mobile || "", gstin: c.gstNo || "" };
+  saveWorkspaceState(200);
+}
+
+/* ---------- quotation detail ---------- */
+async function crmOpenQuoteDetail(id) {
+  const [r, ar] = await Promise.all([crmApi("GET", "/quotations/" + encodeURIComponent(id)), crmApi("GET", "/activity?quotationId=" + encodeURIComponent(id) + "&limit=50")]);
+  if (!r.ok) return toast(r.error || "Could not load the quotation.");
+  const q = r.quotation;
+  const snap = i => { const s = i.snapshot || {}; return s.landed !== undefined ? `<span class="tiny">basic ${inr(s.basic)} · disc ${inr(s.discount)} · freight ${inr(s.freight)} · landed ${inr(s.landed, 2)} · margin ${inr(s.margin)}</span>` : "—"; };
+  const m = crmModal({ title: `${esc(q.id)} ${crmPill(q.status)}`, body: `
+    <div class="row2" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr))"><div><span class="lbl">Customer</span><div><b>${esc(q.customerName)}</b></div></div><div><span class="lbl">Contact person</span><div>${esc(q.contactPerson) || "—"}</div></div><div><span class="lbl">Email</span><div>${esc(q.email) || "—"}</div></div>
+      <div><span class="lbl">Quotation date</span><div>${crmDay(q.quotationDate)}</div></div><div><span class="lbl">Prepared by</span><div>${esc(q.createdBy.name) || "—"} <span class="tiny">${crmFmtDT(q.createdAt)}</span></div></div><div><span class="lbl">Sent</span><div>${q.sentAt ? crmFmtDT(q.sentAt) + " by " + esc(q.sentBy.name) : "Not sent"}</div></div></div>
+    ${q.revisionOf || q.supersededBy ? `<p class="tiny" style="margin:0">${q.revisionOf ? `Revision of <a href="#" data-qact="view" data-qid="${esc(q.revisionOf)}">${esc(q.revisionOf)}</a>. ` : ""}${q.supersededBy ? `Replaced by <a href="#" data-qact="view" data-qid="${esc(q.supersededBy)}">${esc(q.supersededBy)}</a>.` : ""}</p>` : ""}
+    <div class="tw"><table><thead><tr><th>#</th><th>Supplier / Refinery</th><th>Product</th><th>Delivered at</th><th class="n">Qty</th><th class="n">Rate</th><th class="n">GST</th><th class="n">Incl. GST</th><th>Credit</th><th>Internal cost snapshot <span class="tiny">(never emailed)</span></th></tr></thead><tbody>${q.items.map(i => `<tr><td>${i.lineNo}</td><td><b>${esc(i.supplierName)}</b></td><td>${esc(i.productName)}</td><td>${esc(i.location) || "—"}</td><td class="n">${i.quantity ? nf(i.quantity, 2) + " " + esc(i.unit) : "—"}</td><td class="n"><b>${inr(i.rate, 2)}</b></td><td class="n">${nf(i.gstPct, i.gstPct % 1 ? 2 : 0)}%</td><td class="n">${inr(i.rateInclGst, 2)}</td><td>${i.creditDays ? i.creditDays + " d" : "advance"}</td><td>${snap(i)}</td></tr>`).join("")}</tbody></table></div>
+    <p class="tiny" style="margin:0">These rates and refinery names are a permanent snapshot taken when the quotation was made. They never change, even if refinery rates or the customer record are edited later.</p>
+    <div><h3 style="margin-bottom:6px">Emails</h3>${q.emails.length ? `<div class="tw"><table><thead><tr><th>Record</th><th>Type</th><th>To</th><th>Status</th><th>When</th><th>By</th><th></th></tr></thead><tbody>${q.emails.map(e => `<tr><td class="font-mono tiny">${esc(e.id.slice(0, 12))}</td><td>${e.kind === "resend" ? "Resend" : "Send"}</td><td>${esc(e.toEmail)}</td><td>${crmMailPill(e.status)}${e.error ? `<div class="tiny">${esc(e.error)}</div>` : ""}</td><td class="tiny">${crmFmtDT(e.completedAt || e.attemptedAt)}</td><td>${esc(e.sentBy.name) || "—"}</td><td><button type="button" class="btn small" data-mail="${esc(e.id)}">View copy</button></td></tr>`).join("")}</tbody></table></div>` : `<p class="tiny" style="margin:0">No email has been sent for this quotation yet.</p>`}</div>
+    <div class="field"><label class="lbl" for="crm-remarks">Remarks / internal notes <span class="tiny">(not sent to the customer)</span></label><textarea id="crm-remarks" rows="2" maxlength="2000" ${S.canQuote ? "" : "disabled"}>${esc(q.remarks)}</textarea><div class="actions"><button type="button" class="btn small" id="crm-remarks-save" ${S.canQuote ? "" : "disabled"}>Save remarks</button><span class="tiny" id="crm-remarks-msg"></span></div></div>
+    <div><h3 style="margin-bottom:6px">History of this quotation</h3>${ar.ok && ar.rows.length ? `<div class="tw"><table><tbody>${ar.rows.map(a => `<tr><td class="tiny" style="white-space:nowrap">${crmFmtDT(a.createdAt)}</td><td>${esc(CRM_ACT[a.action] || a.action)}</td><td>${esc(a.actor.name)}</td><td class="tiny">${esc(a.summary)}</td></tr>`).join("")}</tbody></table></div>` : `<p class="tiny">—</p>`}</div>`,
+    footer: `${q.status !== "revised" ? `<button type="button" class="btn" data-qact="send" data-qid="${esc(q.id)}" ${S.canQuote ? "" : "disabled"}>${q.sentAt ? "✉ Resend" : "✉ Send"}</button>` : ""}<button type="button" class="btn" data-qact="revise" data-qid="${esc(q.id)}" ${S.canQuote ? "" : "disabled"}>Revise</button><button type="button" class="btn" data-qact="pdf" data-qid="${esc(q.id)}">Download PDF</button>` });
+  m.el.querySelectorAll("[data-qact]").forEach(b => b.onclick = e => { e.preventDefault(); const a = b.dataset.qact, qid = b.dataset.qid; if (a === "view") { m.close(); crmOpenQuoteDetail(qid); } else { m.close(); crmQuoteAction(a, qid); } });
+  m.qa("[data-mail]").forEach(b => b.onclick = () => crmOpenEmailCopy(b.dataset.mail));
+  m.q("#crm-remarks-save").onclick = async () => { const rr = await crmApi("PATCH", "/quotations/" + encodeURIComponent(q.id), { remarks: m.q("#crm-remarks").value, actor: crmActor() }); m.q("#crm-remarks-msg").textContent = rr.ok ? (rr.unchanged ? "No change." : "Saved.") : (rr.error || "Could not save."); if (rr.ok && !rr.unchanged) crmRefreshView(); };
+}
+async function crmOpenEmailCopy(emailId) {
+  const r = await crmApi("GET", "/emails/" + encodeURIComponent(emailId)); if (!r.ok) return toast(r.error || "Could not load the email.");
+  const e = r.email;
+  const m = crmModal({ title: `Email ${esc(e.id.slice(0, 12))} · ${crmMailPill(e.status)}`, body: `<div class="tiny">To <b>${esc(e.toEmail)}</b> · ${crmFmtDT(e.completedAt || e.attemptedAt)} · by ${esc(e.sentBy.name) || "—"}${e.providerMessageId ? " · service id " + esc(e.providerMessageId) : ""}${e.attachmentName ? " · attachment " + esc(e.attachmentName) : ""}</div><div><b>Subject:</b> ${esc(e.subject)}</div><iframe class="crm-prev" sandbox="" title="Email copy"></iframe>`,
+    footer: `<button type="button" class="btn" id="crm-dl-mail">⬇ Download copy (.html)</button>` });
+  m.q("iframe").srcdoc = e.bodyHtml;
+  m.q("#crm-dl-mail").onclick = () => triggerBlobDownload(`Email_${e.quotationId}_${e.id.slice(0, 12)}.html`, new Blob([e.bodyHtml], { type: "text/html" }));
+}
+
+/* =================== QUOTATION HISTORY (+ dashboard) =================== */
+async function viewQuoteHistory() {
+  const v = V(); v.innerHTML = crmLoading("Loading quotation history…");
+  let sx, fr;
+  try { await Promise.all([crmLoadConfig(), crmLoadCustomers(true)]); } catch (e) { v.innerHTML = crmErrorPanel(e.message, "crm-retry"); $("#crm-retry").onclick = () => viewQuoteHistory(); return; }
+  [sx, fr] = await Promise.all([crmApi("GET", "/stats"), crmApi("GET", "/filters")]);
+  if (UI.tab !== "quote-history") return;
+  if (!sx.ok) { v.innerHTML = crmErrorPanel(sx.error || "Could not load.", "crm-retry"); $("#crm-retry").onclick = () => viewQuoteHistory(); return; }
+  CRM.hist.opts = fr; const F = CRM.hist.f;
+  const tile = (n, l, sub) => `<div class="crm-stat"><b>${n}</b><span class="lbl">${l}</span>${sub ? `<div class="tiny">${sub}</div>` : ""}</div>`;
+  const opt = (arr, cur) => `<option value="">All</option>${(arr || []).map(x => `<option ${x === cur ? "selected" : ""}>${esc(x)}</option>`).join("")}`;
+  v.innerHTML = `<div class="stack crm-page" style="gap:14px"><div><h2>Quotation History</h2><p class="sub" style="margin:0">Every quotation prepared and emailed, with the exact rates offered at that time.</p></div>
+    ${CRM.cfg.emailEnabled ? "" : `<div class="banner" style="margin:0"><span><b>Email sending is off.</b> ${esc(CRM.cfg.emailBlockedReason)}</span></div>`}
+    <div class="crm-stats">${tile(sx.totalCustomers, "Customers", sx.archivedCustomers ? sx.archivedCustomers + " archived" : "")}${tile(sx.quotationsGenerated, "Quotations generated", sx.drafts ? sx.drafts + " still draft" : "")}${tile(sx.quotationsSent, "Quotations sent")}${tile(sx.sentThisMonth, "Sent this month")}${tile(sx.failedEmails, "Failed email deliveries", sx.failedAwaitingRetry ? sx.failedAwaitingRetry + " waiting for a retry" : "")}</div>
+    <details class="panel pad" ${UI.crmDashOpen === false ? "" : "open"} id="crm-dash"><summary style="cursor:pointer;font-weight:700">Recently quoted customers &amp; recent activity</summary><div class="row2" style="margin-top:10px;align-items:start;gap:16px">
+      <div><h3 style="margin-bottom:6px">Recently quoted customers</h3>${sx.recentCustomers.length ? sx.recentCustomers.map(c => `<div class="topt" data-cust="${esc(c.id)}" style="cursor:pointer;margin-bottom:5px"><span><b>${esc(c.name)}</b><span class="tiny" style="display:block">${c.quotations} quotation${c.quotations === 1 ? "" : "s"} · last ${crmFmtDT(c.lastQuotedAt)}</span></span><span class="tiny">Open →</span></div>`).join("") : `<p class="tiny">No quotations yet.</p>`}</div>
+      <div><h3 style="margin-bottom:6px">Recent quotation activity</h3>${sx.recentActivity.length ? sx.recentActivity.map(a => `<div class="tiny" style="padding:4px 0;border-bottom:1px solid var(--line)"><b style="color:var(--ink)">${esc(CRM_ACT[a.action] || a.action)}</b> · ${esc(a.summary)}<br>${crmFmtDT(a.createdAt)} · ${esc(a.actor.name)}</div>`).join("") : `<p class="tiny">Nothing yet.</p>`}</div></div></details>
+    <div class="toolbar" style="margin:0"><div class="field"><label class="lbl" for="hf-q">Search</label><input type="search" id="hf-q" value="${esc(F.q || "")}" placeholder="Quotation no. or customer"></div>
+      <div class="field"><label class="lbl" for="hf-customerId">Customer</label><select id="hf-customerId"><option value="">All customers</option>${(CRM.customers || []).map(c => `<option value="${esc(c.id)}" ${F.customerId === c.id ? "selected" : ""}>${esc(c.name)}${c.city ? " (" + esc(c.city) + ")" : ""}</option>`).join("")}</select></div>
+      <div class="field"><label class="lbl" for="hf-product">Product</label><select id="hf-product">${opt(fr.products, F.product)}</select></div><div class="field"><label class="lbl" for="hf-supplier">Supplier / Refinery</label><select id="hf-supplier">${opt(fr.suppliers, F.supplier)}</select></div>
+      <div class="field"><label class="lbl" for="hf-employee">Employee</label><select id="hf-employee">${opt(fr.employees, F.employee)}</select></div>
+      <div class="field"><label class="lbl" for="hf-status">Status</label><select id="hf-status"><option value="">All</option>${Object.keys(CRM_STATUS).map(s => `<option value="${s}" ${F.status === s ? "selected" : ""}>${CRM_STATUS[s][1]}</option>`).join("")}</select></div>
+      <div class="field"><label class="lbl" for="hf-from">From</label><input type="date" id="hf-from" value="${esc(F.from || "")}"></div><div class="field"><label class="lbl" for="hf-to">To</label><input type="date" id="hf-to" value="${esc(F.to || "")}"></div>
+      <button type="button" class="btn small" id="hf-clear">Clear</button></div>
+    <div id="crm-hist"></div></div>`;
+  $("#crm-dash").ontoggle = e => { UI.crmDashOpen = e.target.open; };
+  document.querySelectorAll("[data-cust]").forEach(el => el.onclick = () => { CRM.profileId = el.dataset.cust; CRM.profile = null; location.hash = "#customers"; });
+  const read = () => { const g = k => ($("#hf-" + k).value || "").trim(); CRM.hist.f = { q: g("q"), customerId: g("customerId"), product: g("product"), supplier: g("supplier"), employee: g("employee"), status: g("status"), from: g("from"), to: g("to") }; crmPaintHistory(true); };
+  ["customerId", "product", "supplier", "employee", "status", "from", "to"].forEach(k => $("#hf-" + k).onchange = read);
+  let t; $("#hf-q").oninput = () => { clearTimeout(t); t = setTimeout(read, 350); };
+  $("#hf-clear").onclick = () => { CRM.hist.f = {}; viewQuoteHistory(); };
+  crmPaintHistory(true);
+}
+async function crmPaintHistory(reset) {
+  const box = $("#crm-hist"); if (!box) return;
+  if (reset) { CRM.hist.rows = []; CRM.hist.total = 0; box.innerHTML = `<p class="tiny">Loading…</p>`; }
+  const r = await crmApi("GET", "/quotations?" + crmQs({ ...CRM.hist.f, limit: 100, offset: CRM.hist.rows.length }));
+  if (!$("#crm-hist")) return;
+  if (!r.ok) { box.innerHTML = `<p class="d-up">${esc(r.error)}</p>`; return; }
+  CRM.hist.rows = CRM.hist.rows.concat(r.quotations); CRM.hist.total = r.total;
+  const rows = CRM.hist.rows;
+  if (!rows.length) { box.innerHTML = `<div class="panel empty"><strong>No quotations ${Object.values(CRM.hist.f).some(Boolean) ? "match these filters" : "yet"}</strong>Pick a customer in the calculator, then use “Email best 3 options”.</div>`; return; }
+  box.innerHTML = `<div class="tw"><table><thead><tr><th>Quotation ID</th><th>Customer</th><th>Contact person</th><th>Email</th><th>Product</th><th>Supplier / Refinery · Quoted rate</th><th>Quotation date</th><th>Sent date &amp; time</th><th>Sent by</th><th>Status</th><th>Email record</th><th>Remarks</th><th></th></tr></thead><tbody>${rows.map(q => {
+    const le = q.lastEmail; const prods = [...new Set(q.items.map(i => i.productName))];
+    return `<tr><td style="white-space:nowrap"><b>${esc(q.id)}</b>${q.revisionNo ? `<div class="tiny">Revision ${q.revisionNo} of ${esc(q.revisionOf)}</div>` : ""}${q.supersededBy ? `<div class="tiny">→ replaced by ${esc(q.supersededBy)}</div>` : ""}</td>
+      <td><a href="#" data-cust="${esc(q.customerId)}">${esc(q.customerName)}</a></td><td>${esc(q.contactPerson) || "—"}</td><td class="tiny">${esc(q.email) || "—"}</td><td>${prods.map(esc).join(", ")}</td>
+      <td>${q.items.map(i => `<div style="white-space:nowrap">${crmSupplierLine(i)} <span class="tiny">/${esc(i.unit)}${i.location ? " · " + esc(i.location) : ""}</span></div>`).join("")}</td>
+      <td style="white-space:nowrap">${crmDay(q.quotationDate)}</td><td class="tiny" style="white-space:nowrap">${q.sentAt ? crmFmtDT(q.sentAt) : "—"}</td><td>${esc(q.sentAt ? q.sentBy.name : q.createdBy.name) || "—"}${q.sentAt ? "" : '<div class="tiny">(prepared by)</div>'}</td>
+      <td>${crmPill(q.status)}</td><td class="tiny">${le ? `${crmMailPill(le.status)}<div class="font-mono">${esc(le.id.slice(0, 12))}</div>` : "—"}</td><td class="tiny" style="min-width:120px">${esc(q.remarks) || "—"}</td><td>${crmQuoteActionsHtml(q)}</td></tr>`;
+  }).join("")}</tbody></table></div><div class="actions" style="margin-top:8px"><span class="tiny">Showing ${rows.length} of ${CRM.hist.total}</span>${rows.length < CRM.hist.total ? `<button type="button" class="btn small" id="crm-more">Load more</button>` : ""}</div>`;
+  crmBindQuoteActions(box);
+  box.querySelectorAll("[data-cust]").forEach(el => el.onclick = e => { e.preventDefault(); CRM.profileId = el.dataset.cust; CRM.profile = null; location.hash = "#customers"; });
+  const mo = box.querySelector("#crm-more"); if (mo) mo.onclick = () => crmPaintHistory(false);
+}
+
+/* =================== RATE HISTORY / ANALYSIS =================== */
+const CRM_COLORS = ["#4f46e5", "#e11d48", "#059669", "#d97706", "#0891b2", "#7c3aed", "#65a30d", "#db2777"];
+function crmRateChart(series) {
+  if (series.length < 1) return "";
+  const W = 760, H = 250, L = 62, Rr = 16, T = 16, B = 44;
+  const sup = [...new Set(series.flatMap(s => s.options.map(o => o.supplierName)))];
+  const all = series.flatMap(s => s.options.map(o => o.rate)); let lo = Math.min(...all), hi = Math.max(...all); if (lo === hi) { lo -= 1; hi += 1; } const pad = (hi - lo) * 0.12; lo -= pad; hi += pad;
+  const x = i => L + (series.length === 1 ? (W - L - Rr) / 2 : (i * (W - L - Rr)) / (series.length - 1)), y = v => T + (1 - (v - lo) / (hi - lo)) * (H - T - B);
+  const ticks = Array.from({ length: 5 }, (_, i) => lo + ((hi - lo) * i) / 4);
+  const every = Math.max(1, Math.ceil(series.length / 8));
+  const lines = sup.map((name, k) => { const col = CRM_COLORS[k % CRM_COLORS.length]; const pts = series.map((s, i) => { const o = s.options.find(z => z.supplierName === name); return o ? { i, v: o.rate, s } : null; });
+    const d = pts.filter(Boolean).map((p, j) => (j ? "L" : "M") + x(p.i).toFixed(1) + " " + y(p.v).toFixed(1)).join(" ");
+    return `<path d="${d}" fill="none" stroke="${col}" stroke-width="2.2" stroke-linejoin="round" opacity=".9"/>${pts.filter(Boolean).map(p => `<circle cx="${x(p.i).toFixed(1)}" cy="${y(p.v).toFixed(1)}" r="4" fill="var(--surface)" stroke="${col}" stroke-width="2"><title>${esc(name)} · ${crmDay(p.s.date)} · ${inr(p.v, 2)} (${esc(p.s.quotationId)})</title></circle>`).join("")}`; }).join("");
+  return `<div class="panel pad" style="overflow-x:auto"><svg viewBox="0 0 ${W} ${H}" style="width:100%;min-width:560px;height:auto" role="img" aria-label="Rates offered over time">
+    ${ticks.map(t => `<line x1="${L}" x2="${W - Rr}" y1="${y(t).toFixed(1)}" y2="${y(t).toFixed(1)}" stroke="var(--line)"/><text x="${L - 8}" y="${(y(t) + 4).toFixed(1)}" text-anchor="end" font-size="11" fill="var(--muted)">${inr(t)}</text>`).join("")}
+    ${series.map((s, i) => i % every === 0 || i === series.length - 1 ? `<text x="${x(i).toFixed(1)}" y="${H - 22}" text-anchor="${series.length > 1 && i === series.length - 1 ? "end" : "middle"}" font-size="11" fill="var(--muted)">${esc(crmDay(s.date))}</text>` : "").join("")}${lines}</svg>
+    <div class="chips" style="margin-top:6px">${sup.map((n, k) => `<span class="chip" style="cursor:default"><span class="dot" style="background:${CRM_COLORS[k % CRM_COLORS.length]}"></span>${esc(n)}</span>`).join("")}</div></div>`;
+}
+async function viewRateHistory() {
+  const v = V(); v.innerHTML = crmLoading("Loading…");
+  try { await Promise.all([crmLoadConfig(), crmLoadCustomers(true)]); } catch (e) { v.innerHTML = crmErrorPanel(e.message, "crm-retry"); $("#crm-retry").onclick = () => viewRateHistory(); return; }
+  if (UI.tab !== "rate-history") return;
+  const RS = CRM.rate;
+  v.innerHTML = `<div class="stack crm-page" style="gap:14px"><div><h2>Rate History / Analysis</h2><p class="sub" style="margin:0">What rates were offered to a customer, when, by which refinery, and how they changed. For reference only — it never changes how prices are calculated.</p></div>
+    <div class="toolbar" style="margin:0"><div class="field" style="max-width:300px"><label class="lbl" for="rf-cust">Customer</label><select id="rf-cust"><option value="">— choose a customer —</option>${(CRM.customers || []).map(c => `<option value="${esc(c.id)}" ${RS.customerId === c.id ? "selected" : ""}>${esc(c.name)}${c.city ? " (" + esc(c.city) + ")" : ""}</option>`).join("")}</select></div>
+      <div class="field"><label class="lbl" for="rf-prod">Product</label><select id="rf-prod"><option value="">—</option></select></div>
+      <div class="field"><label class="lbl" for="rf-loc">Delivered at</label><select id="rf-loc"><option value="">All locations</option></select></div>
+      <div class="field"><label class="lbl" for="rf-from">From</label><input type="date" id="rf-from" value="${esc(RS.from)}"></div><div class="field"><label class="lbl" for="rf-to">To</label><input type="date" id="rf-to" value="${esc(RS.to)}"></div>
+      <label class="tiny" style="display:flex;gap:6px;align-items:center;align-self:center"><input type="checkbox" id="rf-unsent" ${RS.includeUnsent ? "checked" : ""}> include unsent drafts</label></div>
+    <div id="crm-rate"></div></div>`;
+  const load = async () => {
+    const box = $("#crm-rate"); if (!box) return;
+    if (!RS.customerId) { box.innerHTML = `<div class="panel empty"><strong>Choose a customer</strong>You will then see every product quoted to them.</div>`; return; }
+    box.innerHTML = `<p class="tiny">Loading…</p>`;
+    const r = await crmApi("GET", "/rates?" + crmQs({ customerId: RS.customerId, product: RS.product, location: RS.location, from: RS.from, to: RS.to, includeUnsent: RS.includeUnsent ? "1" : "" }));
+    if (!$("#crm-rate")) return;
+    if (!r.ok) { box.innerHTML = `<p class="d-up">${esc(r.error)}</p>`; return; }
+    const ps = $("#rf-prod"); ps.innerHTML = `<option value="">— choose a product —</option>` + r.products.map(p => `<option value="${esc(p.key)}" ${p.key === RS.product ? "selected" : ""}>${esc(p.name)} (${p.quotations})</option>`).join("");
+    if (!RS.product && r.products.length === 1) { RS.product = r.products[0].key; return load(); }
+    if (!r.products.length) { box.innerHTML = `<div class="panel empty"><strong>No quotations sent to this customer yet</strong>Rates appear here after a quotation is emailed.</div>`; return; }
+    if (!RS.product) { box.innerHTML = `<div class="panel empty"><strong>Choose a product</strong>${r.products.length} product${r.products.length === 1 ? " has" : "s have"} been quoted to this customer.</div>`; return; }
+    const locs = [...new Set(r.series.flatMap(s => s.options.map(o => o.location).filter(Boolean)))];
+    const ls = $("#rf-loc"); ls.innerHTML = `<option value="">All locations</option>` + [...new Set([...locs, RS.location].filter(Boolean))].map(l => `<option ${l === RS.location ? "selected" : ""}>${esc(l)}</option>`).join("");
+    const sm = r.summary; const u = sm ? esc(sm.unit) : "";
+    if (!sm) { box.innerHTML = `<div class="panel empty"><strong>No rates in this selection</strong>Try clearing the dates or location.</div>`; return; }
+    const tile = (n, l, sub) => `<div class="crm-stat"><b>${n}</b><span class="lbl">${l}</span><div class="tiny">${sub}</div></div>`;
+    box.innerHTML = `<div class="stack crm-page" style="gap:14px"><div class="crm-stats">
+      ${tile(inr(sm.lowest.rate, 2), "Lowest rate offered", `${esc(sm.lowest.supplierName)} · ${crmDay(sm.lowest.date)}`)}${tile(inr(sm.highest.rate, 2), "Highest rate offered", `${esc(sm.highest.supplierName)} · ${crmDay(sm.highest.date)}`)}
+      ${tile(inr(sm.latest.lowest, 2), "Most recent (best) rate", `${crmDay(sm.latest.date)} · ${esc(sm.latest.lowestSupplier)}`)}${tile(sm.quotations, "Quotations", `${sm.options} rates offered · per ${u}`)}</div>
+      ${crmRateChart(r.series)}
+      <div class="tw"><table><thead><tr><th>Date</th><th>Quotation</th><th>Delivered at</th><th>Rates offered (change since that refinery was last quoted)</th><th class="n">Lowest offered</th><th>Change in lowest</th></tr></thead><tbody>${[...r.series].reverse().map(s => `<tr><td style="white-space:nowrap">${crmDay(s.date)}<div class="tiny">${s.sentAt ? "sent " + crmFmtDT(s.sentAt) : "not sent"}</div></td><td><a href="#" data-qact="view" data-qid="${esc(s.quotationId)}">${esc(s.quotationId)}</a><div class="tiny">${esc(s.by)}</div></td><td>${esc(s.location) || "—"}</td>
+        <td>${s.options.map(o => `<div>${esc(o.supplierName)}: <b>${inr(o.rate, 2)}</b> ${o.change === null ? '<span class="tiny">first quote</span>' : crmDelta(o.change, o.changePct)}</div>`).join("")}</td><td class="n"><b>${inr(s.lowest, 2)}</b></td><td>${crmDelta(s.lowestChange, s.lowestChangePct)}</td></tr>`).join("")}</tbody></table></div></div>`;
+    crmBindQuoteActions(box);
+  };
+  const reload = () => { RS.customerId = $("#rf-cust").value; RS.from = $("#rf-from").value; RS.to = $("#rf-to").value; RS.includeUnsent = $("#rf-unsent").checked; RS.product = $("#rf-prod").value; RS.location = $("#rf-loc").value; load(); };
+  $("#rf-cust").onchange = () => { RS.product = ""; RS.location = ""; reload(); };
+  ["rf-prod", "rf-loc", "rf-from", "rf-to", "rf-unsent"].forEach(id => $("#" + id).onchange = reload);
+  load();
+}
+
+/* =================== ACTIVITY LOGS (read-only) =================== */
+async function viewActivityLogs() {
+  const v = V(); v.innerHTML = crmLoading("Loading activity…");
+  try { await Promise.all([crmLoadConfig(), crmLoadCustomers(true)]); } catch (e) { v.innerHTML = crmErrorPanel(e.message, "crm-retry"); $("#crm-retry").onclick = () => viewActivityLogs(); return; }
+  if (UI.tab !== "activity-logs") return; const F = CRM.act.f;
+  v.innerHTML = `<div class="stack crm-page" style="gap:14px"><div><h2>Activity Logs</h2><p class="sub" style="margin:0">A permanent record of who did what. Entries cannot be edited or deleted from the application.</p></div>
+    <div class="toolbar" style="margin:0"><div class="field"><label class="lbl" for="af-action">Action</label><select id="af-action"><option value="">All actions</option>${Object.keys(CRM_ACT).map(k => `<option value="${k}" ${F.action === k ? "selected" : ""}>${esc(CRM_ACT[k])}</option>`).join("")}</select></div>
+      <div class="field"><label class="lbl" for="af-actor">Employee</label><input type="search" id="af-actor" value="${esc(F.actor || "")}" placeholder="Name"></div>
+      <div class="field"><label class="lbl" for="af-customerId">Customer</label><select id="af-customerId"><option value="">All customers</option>${(CRM.customers || []).map(c => `<option value="${esc(c.id)}" ${F.customerId === c.id ? "selected" : ""}>${esc(c.name)}</option>`).join("")}</select></div>
+      <div class="field"><label class="lbl" for="af-quotationId">Quotation ID</label><input type="search" id="af-quotationId" value="${esc(F.quotationId || "")}" placeholder="QT-…"></div>
+      <div class="field"><label class="lbl" for="af-from">From</label><input type="date" id="af-from" value="${esc(F.from || "")}"></div><div class="field"><label class="lbl" for="af-to">To</label><input type="date" id="af-to" value="${esc(F.to || "")}"></div>
+      <button type="button" class="btn small" id="af-clear">Clear</button></div><div id="crm-act"></div></div>`;
+  const read = () => { const g = k => ($("#af-" + k).value || "").trim(); CRM.act.f = { action: g("action"), actor: g("actor"), customerId: g("customerId"), quotationId: g("quotationId"), from: g("from"), to: g("to") }; crmPaintActivity(true); };
+  ["action", "customerId", "from", "to"].forEach(k => $("#af-" + k).onchange = read);
+  let t; ["actor", "quotationId"].forEach(k => $("#af-" + k).oninput = () => { clearTimeout(t); t = setTimeout(read, 400); });
+  $("#af-clear").onclick = () => { CRM.act.f = {}; viewActivityLogs(); };
+  crmPaintActivity(true);
+}
+function crmDetailsHtml(a) {
+  const d = a.details || {}; const out = [];
+  if (d.changes) Object.entries(d.changes).forEach(([k, c]) => out.push(`<div><b>${esc(CRM_FIELD_LABEL[k] || k)}:</b> <span class="d-up" style="font-weight:400">${esc(c.from) || "(empty)"}</span> → <span class="d-down" style="font-weight:400">${esc(c.to) || "(empty)"}</span></div>`));
+  if (d.options) out.push(`<div><b>Options:</b> ${d.options.map(o => esc(o.supplier) + " " + inr(o.rate, 2)).join(" · ")}</div>`);
+  if (d.to) out.push(`<div><b>To:</b> ${esc(d.to)}${d.subject ? " · " + esc(d.subject) : ""}${d.status ? " · " + esc(d.status) : ""}</div>`);
+  if (d.error) out.push(`<div><b>Error:</b> ${esc(d.error)}</div>`);
+  if (d.revisionOf) out.push(`<div><b>Revises:</b> ${esc(d.revisionOf)}</div>`);
+  return out.join("") || '<span class="tiny">—</span>';
+}
+async function crmPaintActivity(reset) {
+  const box = $("#crm-act"); if (!box) return;
+  if (reset) { CRM.act.rows = []; box.innerHTML = `<p class="tiny">Loading…</p>`; }
+  const r = await crmApi("GET", "/activity?" + crmQs({ ...CRM.act.f, limit: 100, offset: CRM.act.rows.length }));
+  if (!$("#crm-act")) return; if (!r.ok) { box.innerHTML = `<p class="d-up">${esc(r.error)}</p>`; return; }
+  CRM.act.rows = CRM.act.rows.concat(r.rows); CRM.act.total = r.total;
+  if (!CRM.act.rows.length) { box.innerHTML = `<div class="panel empty"><strong>No activity found</strong>Actions appear here as soon as they happen.</div>`; return; }
+  box.innerHTML = `<div class="tw"><table><thead><tr><th>Date &amp; time</th><th>Action</th><th>Employee</th><th>Customer</th><th>Quotation</th><th>What happened</th><th>Changes / details</th></tr></thead><tbody>${CRM.act.rows.map(a => `<tr><td class="tiny" style="white-space:nowrap">${crmFmtDT(a.createdAt)}</td><td><b>${esc(CRM_ACT[a.action] || a.action)}</b></td><td>${esc(a.actor.name) || "—"}</td><td>${esc(a.customerName) || "—"}</td><td>${a.quotationId ? `<a href="#" data-qact="view" data-qid="${esc(a.quotationId)}">${esc(a.quotationId)}</a>` : "—"}</td><td class="tiny">${esc(a.summary)}</td><td class="tiny">${crmDetailsHtml(a)}</td></tr>`).join("")}</tbody></table></div><div class="actions" style="margin-top:8px"><span class="tiny">Showing ${CRM.act.rows.length} of ${CRM.act.total}</span>${CRM.act.rows.length < CRM.act.total ? `<button type="button" class="btn small" id="crm-more">Load more</button>` : ""}</div>`;
+  crmBindQuoteActions(box); const mo = box.querySelector("#crm-more"); if (mo) mo.onclick = () => crmPaintActivity(false);
+}
+
+/* =================== CALCULATOR INTEGRATION: customer picker + "Email best 3" =================== */
+function crmPaintPickRow() {
+  const row = $("#crm-pick-row"); if (!row) return;
+  const c = crmCustById(UI.q.customerId);
+  row.innerHTML = c
+    ? `<span class="pill info" title="${esc(c.name)}">👤 ${esc(c.id)}</span><span class="tiny">${c.email ? esc(c.email) : '<b class="d-up">no email on file</b>'}</span><button type="button" class="btn small" data-crm="change">Change</button><button type="button" class="btn small" data-crm="clear" aria-label="Unlink customer">✕</button>`
+    : `<button type="button" class="btn small" data-crm="pick" title="Choose a customer from the Customer Master">👤 Pick customer</button><button type="button" class="btn small" data-crm="new" ${S.canQuote ? "" : "disabled"}>＋ New</button>`;
+  const pick = () => crmOpenCustomerPicker(c2 => { crmUseCustomerInCalculator(c2); const inp = $("#q-cust"); if (inp) inp.value = c2.name; crmPaintPickRow(); renderQuoteResults(); toast("Customer: " + c2.name); });
+  row.querySelectorAll("[data-crm]").forEach(b => b.onclick = () => {
+    const k = b.dataset.crm;
+    if (k === "clear") { UI.q.customerId = ""; saveWorkspaceState(200); crmPaintPickRow(); crmRepaintBest(); }
+    else if (k === "new") crmOpenCustomerForm(null, async c2 => { await crmLoadCustomers(true); crmUseCustomerInCalculator(crmCustById(c2.id) || c2); const inp = $("#q-cust"); if (inp) inp.value = c2.name; crmPaintPickRow(); renderQuoteResults(); toast("Customer added: " + c2.name); });
+    else pick();
+  });
+}
+function crmEnhanceQuoteForm() {
+  const inp = $("#q-cust"); if (!inp || $("#crm-pick-row")) return;
+  const row = document.createElement("div"); row.id = "crm-pick-row"; row.style.cssText = "display:flex;gap:6px;align-items:center;flex-wrap:wrap";
+  inp.insertAdjacentElement("afterend", row);
+  if (!CRM.customers && !CRM.loadingCust) { CRM.loadingCust = true; crmLoadCustomers().then(() => { CRM.loadingCust = false; crmPaintPickRow(); crmRepaintBest(); }).catch(() => { CRM.loadingCust = false; }); }
+  crmPaintPickRow();
+  inp.addEventListener("input", () => { const c = crmCustById(UI.q.customerId); if (c && c.name.trim().toLowerCase() !== inp.value.trim().toLowerCase()) { UI.q.customerId = ""; saveWorkspaceState(350); } crmPaintPickRow(); crmRepaintBest(); });
+}
+function crmItemFrom(r, R, rank) {
+  const l = lineFrom(r, R);
+  return { productId: l.productId, productName: R.pr.name, unit: l.unit, supplierId: l.sourceId, supplierName: l.source, location: l.location, quantity: l.qty, rate: l.rate, gstPct: l.gst, rateInclGst: l.rateGst, creditDays: l.credit, validTill: dayBefore(nextRevision(R.cyc.effectiveDate)), rankNo: rank,
+    snapshot: { line: l, cycleId: R.cyc.id, cycleDate: R.cyc.effectiveDate, basic: r.basic, discount: r.disc, freight: r.freight, freightSource: r.freightSrc, creditCost: Math.round(r.credit * 100) / 100, landed: Math.round(r.landed * 100) / 100, margin: R.margin, sellExact: r.sell, sellGstExact: r.sellGst, rankByLanded: rank, cheapestLanded: R.cheapest ? Math.round(R.cheapest.landed * 100) / 100 : null } };
+}
+function crmBestPanel(R) {
+  CRM.lastR = R;
+  if (!R || !R.priced.length) return "";
+  const c = crmCustById(UI.q.customerId), top = R.priced.slice(0, 3), u = R.pr.unit;
+  return `<section class="panel pad stack" id="crm-best" style="gap:10px;border-color:var(--accent)"><div class="sechead"><h3>✉️ Email the best ${top.length} option${top.length === 1 ? "" : "s"} to a customer</h3><span class="tiny">same ranking as the list below · you review everything before anything is sent</span></div>
+    ${UI.crmRevisionOf ? `<div class="banner" style="margin:0"><span>Revising <b>${esc(UI.crmRevisionOf)}</b>: when you save or send, the original is marked “Revised”.</span><button type="button" class="btn small" id="crm-cancel-rev">Cancel revision</button></div>` : ""}
+    <div class="tw"><table><thead><tr><th>#</th><th>Refinery</th><th class="n">Rate (excl. GST)</th><th class="n">Rate (incl. GST)</th></tr></thead><tbody>${top.map((r, i) => `<tr><td>${i + 1}</td><td><b>${esc(r.s.name)}</b></td><td class="n">${inr(Math.round(r.sell), 2)} <span class="tiny">/${esc(u)}</span></td><td class="n">${inr(Math.round(Math.round(r.sell) * (1 + R.gst / 100) * 100) / 100, 2)}</td></tr>`).join("")}</tbody></table></div>
+    <div class="actions"><span class="tiny">${c ? `Customer: <b>${esc(c.name)}</b> · ${c.email ? esc(c.email) : '<b class="d-up">no email on file</b>'}` : "No customer chosen yet."}</span>
+      <button type="button" class="btn primary" id="crm-open-send" ${S.canQuote ? "" : "disabled"}>${c ? "✉ Review &amp; email…" : "👤 Choose customer &amp; email…"}</button></div></section>`;
+}
+function crmRepaintBest() {
+  const el = $("#crm-best"); if (!el || !CRM.lastR) return;
+  const tmp = document.createElement("div"); tmp.innerHTML = crmBestPanel(CRM.lastR); if (tmp.firstElementChild) { el.replaceWith(tmp.firstElementChild); crmBindBestPanel(document, CRM.lastR); }
+}
+function crmBindBestPanel(box, R) {
+  const open = box.querySelector("#crm-open-send"); if (!open) return;
+  const cr = box.querySelector("#crm-cancel-rev"); if (cr) cr.onclick = () => { UI.crmRevisionOf = null; crmRepaintBest(); };
+  open.onclick = async () => {
+    if (!S.canQuote) return;
+    let c = crmCustById(UI.q.customerId);
+    if (!CRM.customers) { try { await crmLoadCustomers(); } catch (e) { toast(e.message); return; } c = crmCustById(UI.q.customerId); }
+    const go = cu => { crmUseCustomerInCalculator(cu); const inp = $("#q-cust"); if (inp) inp.value = cu.name; crmPaintPickRow(); crmOpenSendModal({ mode: "new", R: computeQuote(UI.q), customer: cu }); };
+    if (c) go(c); else crmOpenCustomerPicker(go);
+  };
+}
+
+/* =================== PREVIEW + SEND (always needs the user's final confirmation) =================== */
+async function crmOpenSendModal(opts) {
+  const cfg = await crmLoadConfig(true);
+  const isNew = opts.mode === "new";
+  let cust = isNew ? opts.customer : null; let q = isNew ? null : opts.quotation;
+  if (!isNew) { const cr = await crmApi("GET", "/customers/" + encodeURIComponent(q.customerId)); if (!cr.ok) { toast(cr.error || "Customer not found."); return; } cust = cr.customer; }
+  const T = tpl(), R = isNew ? opts.R : null;
+  const st = { requestId: crmUid(), key: crmUid(), quotation: q, busy: false, armed: false, armTimer: null, done: false, showAll: false, seq: 0, prevTimer: null };
+  let cand = []; // new mode: selectable refineries
+  if (isNew) cand = R.priced.slice(0, 10).map((r, i) => ({ r, item: crmItemFrom(r, R, i + 1), on: i < 3 }));
+  const defSubject = isNew ? `Quotation {QTNO} for ${R.pr.name} - delivered at ${UI.q.loc || "your location"}` : (q.subject || `Quotation {QTNO}`);
+  const defMessage = isNew ? `Thank you for your enquiry. Please find below our best offers for ${R.pr.name}${UI.q.loc ? " delivered at " + UI.q.loc : ""}${R.qty ? " for " + nf(R.qty, 2) + " " + R.pr.unit : ""}.\n\nKindly let us know which option suits you and we will arrange the supply at the earliest.` : (q.message || "Please find our quotation below.");
+  const sel = () => (isNew ? cand.filter(x => x.on).map((x, i) => ({ ...x.item, rankNo: x.item.rankNo })) : q.items.map(i => ({ productId: i.productId, productName: i.productName, unit: i.unit, supplierId: i.supplierId, supplierName: i.supplierName, location: i.location, quantity: i.quantity, rate: i.rate, gstPct: i.gstPct, rateInclGst: i.rateInclGst, creditDays: i.creditDays, validTill: i.validTill, rankNo: i.rankNo, snapshot: {} })));
+  const linesFor = items => (isNew ? cand.filter(x => x.on).map(x => x.item.snapshot.line) : q.items.map(i => (i.snapshot && i.snapshot.line) || { credit: i.creditDays || 0, cycleDate: (i.snapshot && i.snapshot.cycleDate) || q.quotationDate, location: i.location, product: i.productName }));
+  const termsFor = () => { const doc = { lines: linesFor(), cust: { name: cust.name } }; return (T.terms || []).map(t => fillTokens(t, doc)).filter(Boolean); };
+  const validFor = () => { const l = linesFor()[0]; const cd = (l && l.cycleDate) || todayISO(); return dayBefore(nextRevision(cd)); };
+  const senderOf = () => ({ companyName: T.companyName, address: T.address, phone: T.phone, email: T.email, website: T.website, gstin: T.gstin, signName: T.signName, signTitle: T.signTitle });
+  const prior = !isNew && q.sentAt;
+  const m = crmModal({ title: isNew ? `Email quotation to ${esc(cust.name)}` : `${prior ? "Resend" : "Send"} ${esc(q.id)} to ${esc(cust.name)}`, body: `
+    <div id="sm-alert"></div>
+    <div class="row2" style="grid-template-columns:repeat(auto-fit,minmax(220px,1fr))"><div><span class="lbl">To</span><div><b>${esc(cust.contactPerson || cust.name)}</b></div><div class="${crmOk(cust.email) ? "" : "d-up"}" id="sm-to">${crmOk(cust.email) ? esc(cust.email) : "No valid email address on file — add it in the Customer Master."}</div></div>
+      <div><span class="lbl">Company</span><div>${esc(cust.name)}</div></div><div><span class="lbl">Quotation</span><div>${isNew ? "number is given when saved" : "<b>" + esc(q.id) + "</b>"} · ${crmDay(isNew ? todayISO() : q.quotationDate)}</div></div></div>
+    <div><h3 style="margin-bottom:6px">${isNew ? "Options to include" : "Options in this quotation"} <span class="tiny" id="sm-count"></span></h3><div id="sm-opts" class="stack" style="gap:6px"></div></div>
+    <div class="crm-split">
+      <div class="stack" style="gap:10px"><div class="field"><label class="lbl" for="sm-subject">Subject</label><input type="text" id="sm-subject" maxlength="300" value="${esc(defSubject)}"><span class="tiny">{QTNO} becomes the quotation number.</span></div>
+        <div class="field"><label class="lbl" for="sm-message">Message (shown above the rate table)</label><textarea id="sm-message" rows="6" maxlength="5000">${esc(defMessage)}</textarea></div>
+        <div class="field"><label class="lbl" for="sm-remarks">Internal remarks <span class="tiny">(not sent)</span></label><input type="text" id="sm-remarks" maxlength="2000" value="${esc(isNew ? "" : q.remarks)}" ${isNew ? "" : "disabled"}></div>
+        <label class="tiny" style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="sm-attach" checked> Attach the PDF quotation (letterhead) to the email</label></div>
+      <div><span class="lbl">Preview — exactly what the customer receives</span><iframe class="crm-prev" id="sm-prev" sandbox="" title="Email preview"></iframe></div></div>`,
+    footer: `<span class="tiny" id="sm-foot" style="margin-right:auto"></span>${isNew ? `<button type="button" class="btn" id="sm-draft" ${S.canQuote ? "" : "disabled"}>Save as draft</button>` : ""}<button type="button" class="btn" id="sm-pdf">📄 PDF preview</button><button type="button" class="btn" id="sm-cancel">Cancel</button><button type="button" class="btn primary" id="sm-send">✉ Send…</button>`,
+    onClose: () => { clearTimeout(st.armTimer); clearTimeout(st.prevTimer); } });
+  const el = s => m.q(s);
+  const alertBox = (html, cls) => { el("#sm-alert").innerHTML = html ? `<div class="banner" style="margin:0 0 4px 0;${cls === "ok" ? "border-color:var(--down);background:var(--down-soft)" : ""}">${html}</div>` : ""; };
+  const sendLabel = () => (st.quotation && st.quotation.status === "failed") || st.retry ? "✉ Try sending again" : prior ? "✉ Resend…" : "✉ Send…";
+  const canSend = () => S.canQuote && crmOk(cust.email) && cfg.emailEnabled && sel().length > 0 && !st.busy && !st.done;
+  const paintOpts = () => {
+    const box = el("#sm-opts");
+    if (isNew) {
+      const shown = st.showAll ? cand : cand.slice(0, 3);
+      box.innerHTML = shown.map((x, i) => `<label class="topt" style="cursor:${st.quotation ? "default" : "pointer"}"><span style="display:flex;gap:10px;align-items:center"><input type="checkbox" data-opt="${i}" ${x.on ? "checked" : ""} ${st.quotation ? "disabled" : ""} style="width:auto"><span><b>${esc(x.r.s.name)}</b> ${i === 0 ? '<span class="pill best">Lowest cost</span>' : ""}<span class="tiny" style="display:block">#${i + 1} · ${esc(x.item.location || "")} · ${x.item.creditDays ? x.item.creditDays + " days credit" : "advance"}</span></span></span><span class="n"><b>${inr(x.item.rate, 2)}</b><span class="tiny" style="display:block">incl. GST ${inr(x.item.rateInclGst, 2)}</span></span></label>`).join("") + (cand.length > 3 ? `<button type="button" class="btn small" id="sm-more" style="justify-self:start">${st.showAll ? "▴ Show best 3 only" : "▾ Show all " + cand.length + " refineries"}</button>` : "") + (st.quotation ? `<span class="tiny">Saved as ${esc(st.quotation.id)} — options are locked. To change them, close this and use Revise.</span>` : "");
+      box.querySelectorAll("[data-opt]").forEach(cb => cb.onchange = () => { cand[+cb.dataset.opt].on = cb.checked; if (!cand.some(x => x.on)) { cb.checked = true; cand[+cb.dataset.opt].on = true; toast("Keep at least one option."); } else if (cand.filter(x => x.on).length > 5) { cb.checked = false; cand[+cb.dataset.opt].on = false; toast("You can include up to 5 options."); } update(true); });
+      const mo = box.querySelector("#sm-more"); if (mo) mo.onclick = () => { st.showAll = !st.showAll; paintOpts(); };
+    } else box.innerHTML = q.items.map(i => `<div class="topt" style="cursor:default"><span><b>${esc(i.supplierName)}</b><span class="tiny" style="display:block">${esc(i.productName)} · ${esc(i.location || "")} · ${i.creditDays ? i.creditDays + " days credit" : "advance"}</span></span><span class="n"><b>${inr(i.rate, 2)}</b><span class="tiny" style="display:block">incl. GST ${inr(i.rateInclGst, 2)}</span></span></div>`).join("");
+    el("#sm-count").textContent = `(${sel().length} selected)`;
+  };
+  const paintFooter = () => {
+    const b = el("#sm-send"); b.disabled = !canSend(); b.textContent = st.armed ? "✉ Click again to CONFIRM & send now" : st.busy ? "Sending…" : sendLabel();
+    b.style.background = st.armed ? "var(--up)" : ""; b.style.borderColor = st.armed ? "var(--up)" : "";
+    const d = el("#sm-draft"); if (d) d.disabled = !S.canQuote || st.busy || st.done || !!st.quotation;
+    el("#sm-foot").textContent = !cfg.emailEnabled ? "Email sending is not set up on the server" : !crmOk(cust.email) ? "Customer has no valid email" : st.armed ? `Will send to ${cust.email}` : "";
+  };
+  const preview = () => {
+    clearTimeout(st.prevTimer);
+    st.prevTimer = setTimeout(async () => {
+      const mine = ++st.seq; const items = sel();
+      const r = await crmApi("POST", "/email-preview", { customerId: cust.id, items, subject: el("#sm-subject").value, message: el("#sm-message").value, sender: senderOf(), terms: termsFor(), validTill: validFor(), quotationDate: isNew ? todayISO() : q.quotationDate, quotationId: isNew ? "" : q.id, actor: crmActor() });
+      if (mine !== st.seq || !m.el.isConnected) return;
+      if (r.ok) el("#sm-prev").srcdoc = r.html; else el("#sm-prev").srcdoc = `<p style="font-family:sans-serif;color:#b91c1c;padding:16px">Preview not available: ${esc(r.error)}</p>`;
+    }, 350);
+  };
+  const update = (opts2) => { paintFooter(); if (opts2) { el("#sm-count").textContent = `(${sel().length} selected)`; preview(); } };
+  const disarm = () => { st.armed = false; clearTimeout(st.armTimer); paintFooter(); };
+  const ensureQuotation = async () => {
+    if (st.quotation) return st.quotation;
+    const r = await crmApi("POST", "/quotations", { requestId: st.requestId, customerId: cust.id, quotationDate: todayISO(), items: sel(), subject: el("#sm-subject").value, message: el("#sm-message").value, remarks: el("#sm-remarks").value, revisionOf: UI.crmRevisionOf || undefined, actor: crmActor(),
+      context: { product: UI.q.product, loc: UI.q.loc, qty: UI.q.qty, days: UI.q.days, margin: UI.q.margin, disc: UI.q.disc, cycleId: R.cyc.id, cycleDate: R.cyc.effectiveDate, customerTyped: UI.q.customer } });
+    if (!r.ok) throw Object.assign(new Error(r.error || "Could not save the quotation."), { r });
+    st.quotation = r.quotation; if (UI.crmRevisionOf) { UI.crmRevisionOf = null; crmRepaintBest(); } paintOpts(); return st.quotation;
+  };
+  const afterChange = () => { CRM.customers = null; crmLoadCustomers(true).catch(() => {}); crmRefreshView(); };
+  el("#sm-subject").oninput = () => { disarm(); update(true); }; el("#sm-message").oninput = () => { disarm(); update(true); };
+  el("#sm-cancel").onclick = m.close;
+  el("#sm-pdf").onclick = async () => { try { const items = isNew ? null : q; const doc = isNew ? { number: "DRAFT", date: todayISO(), ref: "", lines: linesFor(), cust: { name: cust.name, attn: cust.contactPerson, address: [cust.billingAddress, [cust.city, cust.state].filter(Boolean).join(", ")].filter(Boolean).join("\n"), phone: cust.mobile, gstin: cust.gstNo } } : crmPdfDoc(q); await downloadQuotation(doc); } catch (e) { toast("Could not build the PDF: " + (e.message || e)); } };
+  if (el("#sm-draft")) el("#sm-draft").onclick = async () => {
+    st.busy = true; m.busy = true; paintFooter();
+    try { const qq = await ensureQuotation(); m.busy = false; st.busy = false; toast("Saved as draft " + qq.id); afterChange(); m.close(); }
+    catch (e) { m.busy = false; st.busy = false; alertBox(esc(e.message)); paintFooter(); }
+  };
+  el("#sm-send").onclick = async () => {
+    if (!canSend()) return;
+    if (!st.armed) { st.armed = true; paintFooter(); st.armTimer = setTimeout(disarm, 8000); return; }
+    clearTimeout(st.armTimer); st.armed = false; st.busy = true; m.busy = true; alertBox(""); paintFooter();
+    try {
+      const qq = await ensureQuotation();
+      let attachment = null;
+      if (el("#sm-attach").checked) { const doc = crmPdfDoc(qq); attachment = { filename: `Quotation_${qq.id}.pdf`, contentBase64: crmBytesToB64(buildQuotationPdf(doc)) }; }
+      const r = await crmApi("POST", `/quotations/${encodeURIComponent(qq.id)}/send`, { idempotencyKey: st.key, subject: el("#sm-subject").value, message: el("#sm-message").value, sender: senderOf(), terms: termsFor(), validTill: validFor(), attachment, actor: crmActor() });
+      m.busy = false; st.busy = false;
+      if (r.quotation) st.quotation = r.quotation;
+      if (r.ok && r.email) { st.done = true; alertBox(`✅ <b>Sent</b> to ${esc(r.email.toEmail)} at ${crmFmtDT(r.email.completedAt)}. Saved as <b>${esc(qq.id)}</b> (email record ${esc(r.email.id.slice(0, 12))}).${r.duplicate ? " (This was already sent earlier — no second email was sent.)" : ""}`, "ok"); el("#sm-cancel").textContent = "Close"; afterChange(); }
+      else if (r.email && r.email.status === "unconfirmed") { st.key = crmUid(); st.retry = true; alertBox(`⚠️ <b>Not confirmed.</b> ${esc(r.email.error)} <br>Check your mailbox / email service before using “Try sending again”, or the customer may get it twice.`); afterChange(); }
+      else if (r.email) { st.key = crmUid(); st.retry = true; alertBox(`❌ <b>Not sent.</b> ${esc(r.email.error)}<br>The quotation ${esc(qq.id)} is saved as <b>Failed</b>. You can try again.`); afterChange(); }
+      else if (r.status === 0) alertBox(`⚠️ <b>No answer from the server.</b> ${esc(r.error)} It is safe to press send again: if the first attempt went through, a second email will <b>not</b> be sent. You can also check Quotation History.`);
+      else { alertBox(`❌ ${esc(r.error || "Could not send.")}`); }
+    } catch (e) { m.busy = false; st.busy = false; alertBox(`❌ ${esc(e.message)}`); }
+    paintFooter();
+  };
+  if (!S.canQuote) alertBox("You are signed in as view-only, so you can preview but not send.");
+  else if (!cfg.emailEnabled) alertBox(`<b>Email sending is not available yet.</b> ${esc(cfg.emailBlockedReason)} You can still save the quotation as a draft.`);
+  else if (!crmOk(cust.email)) alertBox(`<b>${esc(cust.name)} has no valid email address.</b> Add one in the Customer Master, then come back.`);
+  else if (prior) alertBox(`This quotation was already sent on ${crmFmtDT(q.sentAt)}. Sending again emails it once more to the customer's current address.`);
+  else if (q && q.lastEmail && q.lastEmail.status === "unconfirmed") alertBox(`The last attempt could not be confirmed. Check the mailbox / email service before sending again.`);
+  paintOpts(); paintFooter(); preview();
+}
+
+// Clicking "Customer Master" again always returns to the customer list (not a previously opened customer)
+document.addEventListener("click", e => { const a = e.target.closest && e.target.closest('[data-nav="customers"],[data-nav-pill="customers"]'); if (a) { CRM.profileId = null; CRM.profile = null; } }, true);
 
 boot();
 </script>

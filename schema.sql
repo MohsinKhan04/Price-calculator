@@ -79,3 +79,19 @@ INSERT INTO transporters (name, base_city, rate_per_mt_per_km, min_freight, flee
 ('Central Roadways Corp', 'Nagpur / Central India', 2.30, 3200, 'Heavy Haul Tankers', '+91 98900 33445'),
 ('Southern Bulk Movers', 'Vizag / Chennai', 2.35, 3800, 'Bulk Liquid Tankers', '+91 98480 66778')
 ON CONFLICT DO NOTHING;
+
+
+-- ========================================================
+-- CUSTOMER MASTER, QUOTATION HISTORY & EMAIL RECORDS (added in version 3)
+-- ========================================================
+-- You do NOT need to run anything for these. The server creates the tables below by itself the first time it
+-- starts with DATABASE_URL set (safe to restart; it never drops or changes existing data).
+--
+--   crm_counters         running numbers for CUS-00001 and QT-2026-00001 (one row per sequence)
+--   crm_customers        Customer Master (one row per customer, with a version number)
+--   crm_quotations       one row per quotation (QT-YYYY-NNNNN): customer, status, revision link, sent date/by
+--   crm_quotation_items  the options inside a quotation. PERMANENT: the database refuses UPDATE and DELETE
+--   crm_email_logs       every email attempt (sent / failed / unconfirmed) with the exact subject, text and HTML
+--   crm_activity_log     audit trail. PERMANENT: the database refuses UPDATE and DELETE
+--
+-- Your existing app data stays in app_kv_store exactly as before; none of the tables above touch it.

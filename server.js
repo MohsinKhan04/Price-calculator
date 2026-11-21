@@ -121,6 +121,20 @@ const pool = process.env.DATABASE_URL
   : null;
 // Neon closes idle connections; without this handler that event can crash the whole server
 if (pool) pool.on('error', err => console.error('Idle database connection error (ignored):', err.message));
+
+// Customer Master, quotation records, email sending and the activity log live in their own tables (crm_*) and their own
+// file (crm.js). They never touch app_kv_store, so the existing save/sync code above and below is unchanged.
+const crm = require('./crm').createCrm({ pool, siteProtected: !!SITE_PASSWORD });
+let crmInitTimer = null;
+function startCrm() {
+  if (!pool) return;
+  crm.init().catch(err => {
+    // a problem here must never take the rest of the app down: the quote desk keeps working, this module retries
+    console.error('Customer module setup failed, retrying in 15 seconds:', err.message);
+    clearTimeout(crmInitTimer);
+    crmInitTimer = setTimeout(startCrm, 15000);
+  });
+}
 process.on('unhandledRejection', err => console.error('Unhandled rejection (ignored):', err && err.message ? err.message : err));
 
 // While the database is still waking up (or unreachable), the API answers 503 instead of an empty store,
@@ -250,6 +264,7 @@ async function initDatabase() {
     }
     dbReady = true;
     console.log('Neon PostgreSQL hydrated and ready. Keys loaded:', Object.keys(memoryStore).length);
+    startCrm();
   } catch (err) {
     // The API answers 503 until this succeeds (see requireDb), so keep trying instead of serving an empty store
     console.error('Database initialization failed, retrying in 5 seconds:', err.message);
@@ -424,6 +439,9 @@ app.post('/api/auth/login', requireDb, async (req, res) => {
     res.status(500).json({ success: false, error: 'Server error' });
   }
 });
+
+// 5. Customer Master / Quotation history / Email / Activity log API (see crm.js)
+crm.register(app);
 
 const PORT = process.env.PORT || 3000;
 const server = app.listen(PORT, () => {

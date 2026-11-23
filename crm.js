@@ -847,8 +847,8 @@ function createCrm({ pool, siteProtected }) {
   function register(app) {
     const guard = fn => async (req, res) => {
       try {
-        if (!pool) throw new HttpError(503, 'Customer features need the Neon database. Set DATABASE_URL first.');
-        if (!ready) throw new HttpError(503, 'Customer module is still starting. Please retry in a few seconds.');
+        if (!pool) throw new HttpError(503, 'Customer features need the Neon database. Set DATABASE_URL first.', { code: 'no_database' });
+        if (!ready) throw new HttpError(503, 'Customer module is still starting. Please retry in a few seconds.', { code: 'starting' });
         await fn(req, res);
       } catch (e) {
         if (e instanceof HttpError) return res.status(e.status).json({ ok: false, error: e.message, ...e.extra });

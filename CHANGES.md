@@ -1,3 +1,14 @@
+# Version 3.1: two fixes (upload of the wrong file type, no-database message)
+
+1. **Uploading a PDF (or Word file, picture, empty file) as a price list.** The Excel importer used to read a PDF's raw bytes as if it were a table, which produced a "header mapper" with one column called `%PDF-1.5` and everything else ignored. Now every upload path (Smart Upload, sidebar *Upload .xlsx*, drag and drop on the rates box, Transport and Transporters uploads) first looks at what the file really is. A PDF, picture, Word/PowerPoint/zip file, binary junk or an empty file gets a clear message and nothing is imported. Real `.xlsx`, `.xls` and `.csv` files go to the normal reader exactly as before. Only the start of `uploadMaster` changed (one added line plus the new checking function next to it).
+   - The file chooser only lists Excel/CSV files, which is why a PDF does not show up in your Downloads folder when you click Upload. That is expected: the importer cannot read PDFs. Dragging a PDF onto the page used to bypass the chooser; now it gets the message instead of garbage.
+   - **A PDF price list still has to be converted to Excel first.** Reading PDF circulars directly would need a PDF reader built around your actual PDF layout. Send me the PDF and I can add that.
+2. **"This section could not load. Customer features need the Neon database."** This message means the server you are running has no `DATABASE_URL`. It is now a step-by-step panel (Render and VS Code versions) with an "I've done this, check again" button that works without reloading the page. The calculator, price lists and Saved Quotes work without a database, as before; only customers, quotation history and email records need it.
+
+Checked again after the changes: 133 server checks, 107 + 19 + 25 browser checks, and the same-steps comparison with your original `index.html` (120 price combinations, all 12 screens, Save Quotation, PDF) are all clean.
+
+---
+
 # Version 3: Customer Master, emailed quotations, quotation history and rate analysis
 
 New code is kept apart from the old code: one new file (`crm.js`), six new database tables (all start with `crm_`), and small additions to `server.js` and `index.html`. Nothing was removed or rewritten.

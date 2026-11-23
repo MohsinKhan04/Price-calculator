@@ -7204,9 +7204,32 @@ function extractSheetDataWithMapping(sheetRows, headerIdx, colMap, defaultDate) 
   return extracted;
 }
 
+/* Added: refuse files that are not spreadsheets (PDF, Word, pictures, zip...) with a clear message, instead of the
+   Excel reader turning their raw bytes into a nonsense "header mapper". Real .xlsx / .xls / .csv files pass straight through. */
+async function uploadFileProblem(file) {
+  const name = String(file.name || "This file"); const ext = (name.includes(".") ? name.split(".").pop() : "").toLowerCase();
+  let head;
+  try { head = new Uint8Array(await file.slice(0, 4096).arrayBuffer()); } catch (e) { return null; }   // cannot look inside: let the normal reader try
+  const how = "Open it, copy the table into Excel, save it as .xlsx (or .csv) and upload that file instead.";
+  if (!head.length) return { title: "This file is empty", msg: `“${name}” has nothing in it.` };
+  const at = i => head[i];
+  if (String.fromCharCode(...head.slice(0, 1024)).includes("%PDF-")) return { title: "This is a PDF, not an Excel file", msg: `“${name}” is a PDF. This screen reads Excel (.xlsx, .xls) or CSV files only. ${how}` };
+  if ((at(0) === 0x89 && at(1) === 0x50 && at(2) === 0x4E) || (at(0) === 0xFF && at(1) === 0xD8 && at(2) === 0xFF) || String.fromCharCode(...head.slice(0, 4)) === "GIF8") return { title: "This is a picture, not an Excel file", msg: `“${name}” is an image. This screen reads Excel (.xlsx, .xls) or CSV files only.` };
+  const isZip = at(0) === 0x50 && at(1) === 0x4B, isOle = at(0) === 0xD0 && at(1) === 0xCF && at(2) === 0x11 && at(3) === 0xE0;
+  if (isZip) return /^(docx?|pptx?|zip|rar|7z|odt|odp|epub|apk|jar)$/.test(ext) ? { title: "This is not an Excel file", msg: `“${name}” is a .${ext} file. This screen reads Excel (.xlsx, .xls) or CSV files only. ${how}` } : null;
+  if (isOle) return /^(doc|ppt|msg|pub|vsd)$/.test(ext) ? { title: "This is not an Excel file", msg: `“${name}” is a .${ext} file. This screen reads Excel (.xlsx, .xls) or CSV files only. ${how}` } : null;
+  const utf16 = (at(0) === 0xFF && at(1) === 0xFE) || (at(0) === 0xFE && at(1) === 0xFF);
+  if (!utf16 && head.includes(0)) return { title: "This does not look like an Excel or CSV file", msg: `“${name}” is not a spreadsheet (it contains binary data that is not an Excel file). Please upload an .xlsx, .xls or .csv file.` };
+  return null;
+}
+function showUploadProblem(p) {
+  const m = crmModal({ title: "⚠ " + esc(p.title), narrow: true, body: `<p style="margin:0">${esc(p.msg)}</p>`, footer: `<button type="button" class="btn primary" data-ok>OK</button>` });
+  m.q("[data-ok]").onclick = m.close;
+}
 async function uploadMaster(file, forcedStepMode = null) {
   if (!file) return;
   if (!S.canWrite) { toast("Read-only access: Sign in as Admin to upload Excel files."); return; }
+  { const bad = await uploadFileProblem(file); if (bad) { showUploadProblem(bad); return; } }
   if (!window.XLSX) { toast("Spreadsheet library didn't load. Please reload."); return; }
   let wb;
   try { wb = XLSX.read(await file.arrayBuffer(), { type: "array" }); } catch (e) { toast("Couldn't read that file: " + e.message); return; }
@@ -9128,6 +9151,7 @@ async function crmApi(method, path, body) {
     const r = await fetch((base || "") + "/api/crm" + path, { method, cache: "no-store", headers: { "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined, signal: ctrl.signal });
     let j = {}; try { j = await r.json(); } catch (e) {}
     if (!r.ok && !j.error) j.error = "The server answered with error " + r.status + ".";
+    CRM.noDb = j.code === "no_database";
     return { ...j, status: r.status, ok: r.ok && j.ok !== false };
   } catch (e) {
     return { status: 0, ok: false, error: e.name === "AbortError" ? "The server took too long to answer." : "Could not reach the server. Check your internet connection." };
@@ -9150,7 +9174,29 @@ function crmMatch(c, term) {
   const digits = t.replace(/\D/g, "");
   return [c.name, c.contactPerson, c.email, c.city, c.state, c.gstNo, c.id].some(v => String(v || "").toLowerCase().includes(t)) || (digits.length >= 3 && String(c.mobile || "").replace(/\D/g, "").includes(digits));
 }
-const crmErrorPanel = (msg, retryId) => `<div class="panel empty"><strong>This section could not load</strong>${esc(msg)}<div style="margin-top:12px"><button type="button" class="btn" id="${retryId}">Try again</button></div></div>`;
+const crmCode = t => `<code style="font-family:'JetBrains Mono',monospace;background:rgba(100,116,139,.16);padding:1px 6px;border-radius:5px;font-size:12px">${t}</code>`;
+function crmNoDbSteps() {
+  const ol = "margin:6px 0 0 20px;display:grid;gap:4px;list-style:decimal";
+  return `<p style="margin:0">The server is running <b>without a database connection</b>, so customers, quotation history and email records would have nowhere safe to be saved. The calculator, price lists and Saved Quotes keep working exactly as before.</p>
+    <div><b>If the app is on Render</b><ol style="${ol}"><li>Open your service on Render, then <b>Environment</b>.</li><li>Add a variable named ${crmCode("DATABASE_URL")} and paste your Neon connection string (it starts with ${crmCode("postgresql://")}).</li><li>Save. Render restarts the app by itself.</li></ol></div>
+    <div><b>If you run it on your own computer (VS Code)</b><ol style="${ol}"><li>In the project folder, next to ${crmCode("server.js")}, create a file named ${crmCode(".env")}</li><li>Put one line in it: ${crmCode("DATABASE_URL=postgresql://...your Neon string...")}</li><li>Stop the server (Ctrl + C) and start it again with ${crmCode("npm start")}.</li></ol>
+      <p class="tiny" style="margin:6px 0 0">Never upload the ${crmCode(".env")} file to GitHub; it contains your database password.</p></div>
+    <p class="tiny" style="margin:0">No Neon database yet? Create a free project at neon.tech and copy its connection string (look for the <b>Connect</b> button on the project dashboard). The tables are created automatically the first time the server starts with it.</p>`;
+}
+const crmNoDbPanel = retryId => `<div class="panel pad stack" style="gap:12px;max-width:780px;margin:0 auto"><h3 style="margin:0">Customer features need the Neon database</h3>${crmNoDbSteps()}<div><button type="button" class="btn primary" id="${retryId}">I've done this, check again</button></div></div>`;
+async function crmRecheckDb() { const r = await crmApi("GET", "/config"); if (r.ok) { CRM.cfg = r; CRM.customers = null; return true; } return false; }
+function crmNoDbModal() {
+  const m = crmModal({ title: "Customer features need the Neon database", narrow: true, body: crmNoDbSteps() + `<div id="crm-nodb-msg" class="tiny"></div>`,
+    footer: `<button type="button" class="btn" data-cancel>Close</button><button type="button" class="btn primary" id="crm-nodb-check">I've done this, check again</button>` });
+  m.q("[data-cancel]").onclick = m.close;
+  m.q("#crm-nodb-check").onclick = async () => {
+    const msg = m.q("#crm-nodb-msg"); msg.textContent = "Checking…";
+    if (await crmRecheckDb()) { m.close(); toast("Database connected. You can use Customer Master now."); crmRefreshView(); }
+    else msg.textContent = "Still not connected. On your own computer, stop and start the server again after saving the .env file.";
+  };
+}
+const crmToast = msg => { if (CRM.noDb) crmNoDbModal(); else toast(msg); };
+const crmErrorPanel = (msg, retryId) => CRM.noDb ? crmNoDbPanel(retryId) : `<div class="panel empty"><strong>This section could not load</strong>${esc(msg)}<div style="margin-top:12px"><button type="button" class="btn" id="${retryId}">Try again</button></div></div>`;
 const crmLoading = t => `<div class="panel empty"><strong>${esc(t || "Loading…")}</strong><span class="tiny">One moment</span></div>`;
 
 function crmModal({ title, body, footer = "", narrow = false, onClose }) {
@@ -9218,6 +9264,7 @@ function crmCustomerFormHtml(c) {
 // existing = null to create. onSaved(customer) is called after a successful save.
 async function crmOpenCustomerForm(existing, onSaved) {
   await crmLoadConfig();
+  if (CRM.noDb && !(await crmRecheckDb())) return crmNoDbModal();
   const m = crmModal({ title: existing ? `Edit customer · ${esc(existing.id)}` : "New customer", narrow: true, body: crmCustomerFormHtml(existing),
     footer: `<button type="button" class="btn" data-cancel>Cancel</button><button type="button" class="btn primary" id="crm-cform-save">${existing ? "Save changes" : "Save customer"}</button>` });
   const msg = m.q("#crm-cform-msg"); const val = id => (m.q("#cf-" + id)?.value || "").trim();
@@ -9247,7 +9294,7 @@ async function crmOpenCustomerForm(existing, onSaved) {
 }
 // Pick a customer (search list) or create one on the spot. onPick(customer)
 async function crmOpenCustomerPicker(onPick) {
-  try { await Promise.all([crmLoadConfig(), crmLoadCustomers(true)]); } catch (e) { toast(e.message); return; }
+  try { await Promise.all([crmLoadConfig(), crmLoadCustomers(true)]); } catch (e) { crmToast(e.message); return; }
   const m = crmModal({ title: "Choose customer", narrow: true, body: `<div class="field"><label class="lbl" for="crm-pq">Search the Customer Master</label><input type="search" id="crm-pq" placeholder="Name, mobile, email, city…" autocomplete="off"></div><div id="crm-plist" class="stack" style="gap:6px;max-height:48vh;overflow:auto"></div>`,
     footer: `<button type="button" class="btn" data-cancel>Cancel</button><button type="button" class="btn primary" id="crm-pnew" ${S.canQuote ? "" : "disabled"}>＋ New customer</button>` });
   const paint = () => {
@@ -9586,7 +9633,7 @@ function crmBindBestPanel(box, R) {
   open.onclick = async () => {
     if (!S.canQuote) return;
     let c = crmCustById(UI.q.customerId);
-    if (!CRM.customers) { try { await crmLoadCustomers(); } catch (e) { toast(e.message); return; } c = crmCustById(UI.q.customerId); }
+    if (!CRM.customers) { try { await crmLoadCustomers(); } catch (e) { crmToast(e.message); return; } c = crmCustById(UI.q.customerId); }
     const go = cu => { crmUseCustomerInCalculator(cu); const inp = $("#q-cust"); if (inp) inp.value = cu.name; crmPaintPickRow(); crmOpenSendModal({ mode: "new", R: computeQuote(UI.q), customer: cu }); };
     if (c) go(c); else crmOpenCustomerPicker(go);
   };
@@ -9595,6 +9642,7 @@ function crmBindBestPanel(box, R) {
 /* =================== PREVIEW + SEND (always needs the user's final confirmation) =================== */
 async function crmOpenSendModal(opts) {
   const cfg = await crmLoadConfig(true);
+  if (!cfg.ok && CRM.noDb) return crmNoDbModal();
   const isNew = opts.mode === "new";
   let cust = isNew ? opts.customer : null; let q = isNew ? null : opts.quotation;
   if (!isNew) { const cr = await crmApi("GET", "/customers/" + encodeURIComponent(q.customerId)); if (!cr.ok) { toast(cr.error || "Customer not found."); return; } cust = cr.customer; }

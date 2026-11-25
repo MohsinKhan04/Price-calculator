@@ -383,10 +383,10 @@
           <button id="sidebar-btn-dl-master" type="button" class="py-1.5 px-2 rounded-lg bg-slate-100 hover:bg-indigo-600 hover:text-white text-slate-700 text-[11px] font-bold transition-colors flex items-center justify-center gap-1" title="Download Complete Master Excel (.xlsx)">
             <span>⬇</span><span>Master .xlsx</span>
           </button>
-          <button id="sidebar-btn-up-master" type="button" class="py-1.5 px-2 rounded-lg bg-amber-100 hover:bg-amber-500 text-amber-950 text-[11px] font-bold transition-colors flex items-center justify-center gap-1" title="Upload Master Excel (.xlsx) or Refinery Circular">
-            <span>⬆</span><span>Upload .xlsx</span>
+          <button id="sidebar-btn-up-master" type="button" class="py-1.5 px-2 rounded-lg bg-amber-100 hover:bg-amber-500 text-amber-950 text-[11px] font-bold transition-colors flex items-center justify-center gap-1" title="Upload a price list or master file: Excel, CSV or PDF">
+            <span>⬆</span><span>Upload file</span>
           </button>
-          <input type="file" id="sidebar-master-file-input" accept=".xlsx,.xls" hidden>
+          <input type="file" id="sidebar-master-file-input" accept=".xlsx,.xlsm,.xlsb,.xls,.ods,.csv,.tsv,.txt,.pdf" hidden>
         </div>
 
         <a href="#master-rates" data-nav="master-rates" class="sidebar-link w-full px-3 py-2 rounded-xl text-xs font-semibold transition-all text-slate-700 hover:bg-slate-100 flex items-center justify-between">
@@ -986,6 +986,27 @@ const $$ = (s, root) => Array.from((root || document).querySelectorAll(s));
 const esc = v => String(v ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const norm = s => String(s ?? "").trim().toLowerCase().replace(/\s+/g, " ");
 const key = s => String(s ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+// Price lists often write units/packing in brackets: "FURNACE OIL (MT)", "BIT (BULK) 60/70 (VG 30)".
+// These helpers let such names find the product that is already in the catalog instead of creating a duplicate.
+const PRODUCT_TAG_WORDS = new Set(["MT", "MTS", "KL", "KLS", "BULK", "DRUM", "DRUMS", "BARREL", "PACKED", "LOOSE", "TANKER"]);
+const productBrackets = name => [...String(name || "").matchAll(/\(([^)]+)\)/g)].map(m => key(m[1])).filter(k => k && !PRODUCT_TAG_WORDS.has(k));
+const productCore = name => key(String(name || "").replace(/\([^)]*\)/g, " "));
+function looseProductMatch(products, name) {
+  const list = (products || []).filter(p => (p.name || "").trim());
+  const core = productCore(name);
+  if (core.length >= 3) {
+    const hit = list.filter(p => productCore(p.name) === core);
+    if (hit.length === 1) return hit[0];
+    const byId = list.filter(p => key(p.id) === core);
+    if (byId.length === 1) return byId[0];
+  }
+  for (const code of productBrackets(name).reverse()) {
+    if (code.length < 2) continue;
+    const hit = list.filter(p => key(p.id) === code || productBrackets(p.name).includes(code));
+    if (hit.length === 1) return hit[0];
+  }
+  return null;
+}
 const num = v => {
   if (v === "" || v === null || v === undefined || typeof v === "boolean") return null;
   if (typeof v === "number") return isFinite(v) ? v : null;
@@ -4253,11 +4274,11 @@ function viewCycles() {
      <p class="tiny" style="margin:0 0 12px">${lc0 ? `Current prices are effective <b>${fmtDate(lc0.effectiveDate)}</b> (${curRows.length} prices). Next revision is due around <b>${fmtDate(nextRevision(lc0.effectiveDate))}</b>.` : "No prices saved yet. Upload your first price list below."}</p>
      <label for="xl" id="rates-drop" style="${ro}display:flex;flex-direction:column;align-items:center;gap:6px;padding:26px 16px;border:2px dashed var(--accent);border-radius:14px;cursor:pointer;text-align:center">
        <span style="font-size:30px">📄</span>
-       <b style="font-size:15px">Click here to upload the refinery price list (Excel)</b>
-       <span class="tiny">or drag &amp; drop the file here. The sheet needs: Supply location, Product and Basic price.</span>
-     </label><input type="file" id="xl" accept=".xlsx,.xls,.csv" hidden ${S.canWrite ? "" : "disabled"}>
+       <b style="font-size:15px">Click here to upload the refinery price list (Excel, CSV or PDF)</b>
+       <span class="tiny">or drag &amp; drop the file here. It needs: Supply location, Product and Basic price. PDFs must have selectable text (not a scan).</span>
+     </label><input type="file" id="xl" accept=".xlsx,.xlsm,.xlsb,.xls,.ods,.csv,.tsv,.txt,.pdf" hidden ${S.canWrite ? "" : "disabled"}>
      <div class="actions" style="margin-top:12px;justify-content:center">
-       <span class="tiny">No Excel file?</span>
+       <span class="tiny">No file?</span>
        <button class="btn small" id="newc" type="button" ${S.canWrite ? "" : "disabled"}>✍ Type the prices manually</button>
      </div>
      <div class="tiny" style="margin-top:10px;text-align:center"><b>How it works:</b> ① Upload the file &nbsp;→&nbsp; ② Check the prices shown below &nbsp;→&nbsp; ③ Click “Save these rates”</div>
@@ -4353,7 +4374,7 @@ function viewCycles() {
 }
 
 function matchSource(name) { const k = key(name); return (S.catalog.sources || []).find(s => key(s.id) === k || key(s.name) === k || (s.aliases || []).map(key).includes(k)); }
-function matchProduct(name) { const k = key(name); return (S.catalog.products || []).find(p => key(p.id) === k || key(p.name) === k || (p.aliases || []).map(key).includes(k)); }
+function matchProduct(name) { const k = key(name); return (S.catalog.products || []).find(p => key(p.id) === k || key(p.name) === k || (p.aliases || []).map(key).includes(k)) || looseProductMatch(S.catalog.products, name); }
 
 async function importXlsx(file) {
   if (!file) return;
@@ -4518,7 +4539,7 @@ function viewRoutes() {
      <div class="actions">
        ${S.canWrite ? `<button class="btn small primary" id="btn-load-16-sheet-routes" type="button">📥 Load Jamnagar/Hazira Sheet Rates (16)</button>` : ""}
        ${S.currentUser?.role === "admin" && rows.length ? `<button class="btn small danger" id="del-all-routes" type="button">🗑️ Delete All (${rows.length})</button>` : ""}
-       ${S.canWrite ? `<label class="btn small" for="up-step-routes">⬆ Upload Excel (.xlsx)</label><input type="file" id="up-step-routes" accept=".xlsx,.xls,.csv" hidden>` : ""}
+       ${S.canWrite ? `<label class="btn small" for="up-step-routes">⬆ Upload Excel (.xlsx)</label><input type="file" id="up-step-routes" accept=".xlsx,.xlsm,.xlsb,.xls,.ods,.csv,.tsv,.txt,.pdf" hidden>` : ""}
        <button class="btn small primary" id="addr" type="button" ${dis}>＋ Add Row</button>
      </div>
    </div>
@@ -4844,7 +4865,7 @@ function viewTransporters() {
       </div>
       <div class="flex flex-wrap gap-2">
         ${S.currentUser?.role === "admin" && T.length ? `<button type="button" id="del-all-transporters" class="btn small danger">🗑️ Delete All (${T.length})</button>` : ""}
-        ${canEdit ? `<label class="btn small" for="up-step-transporters" style="cursor:pointer">⬆ Upload Transporters (.xlsx)</label><input type="file" id="up-step-transporters" accept=".xlsx,.xls,.csv" hidden>` : `<span class="badge badge-gray">🔒 View-Only</span>`}
+        ${canEdit ? `<label class="btn small" for="up-step-transporters" style="cursor:pointer">⬆ Upload Transporters (.xlsx)</label><input type="file" id="up-step-transporters" accept=".xlsx,.xlsm,.xlsb,.xls,.ods,.csv,.tsv,.txt,.pdf" hidden>` : `<span class="badge badge-gray">🔒 View-Only</span>`}
       </div>
     </div>`;
 
@@ -5476,7 +5497,7 @@ function masterBar() {
           </div>
           <label class="px-2.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-[11px] text-center cursor-pointer block">
             ⬆ Feed Step 1: Products (.xlsx)
-            <input type="file" data-step-upload="products" accept=".xlsx,.xls,.csv" hidden>
+            <input type="file" data-step-upload="products" accept=".xlsx,.xlsm,.xlsb,.xls,.ods,.csv,.tsv,.txt,.pdf" hidden>
           </label>
         </div>
 
@@ -5490,7 +5511,7 @@ function masterBar() {
           </div>
           <label class="px-2.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-[11px] text-center cursor-pointer block">
             ⬆ Feed Step 2: Refineries (.xlsx)
-            <input type="file" data-step-upload="refineries" accept=".xlsx,.xls,.csv" hidden>
+            <input type="file" data-step-upload="refineries" accept=".xlsx,.xlsm,.xlsb,.xls,.ods,.csv,.tsv,.txt,.pdf" hidden>
           </label>
         </div>
 
@@ -5504,7 +5525,7 @@ function masterBar() {
           </div>
           <label class="px-2.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-[11px] text-center cursor-pointer block">
             ⬆ Feed Step 3: Transporters/Routes
-            <input type="file" data-step-upload="transport" accept=".xlsx,.xls,.csv" hidden>
+            <input type="file" data-step-upload="transport" accept=".xlsx,.xlsm,.xlsb,.xls,.ods,.csv,.tsv,.txt,.pdf" hidden>
           </label>
         </div>
 
@@ -5518,7 +5539,7 @@ function masterBar() {
           </div>
           <label class="px-2.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-[11px] text-center cursor-pointer block">
             ⬆ Feed Step 4: 15-Day Rates (.xlsx)
-            <input type="file" data-step-upload="rates" accept=".xlsx,.xls,.csv" hidden>
+            <input type="file" data-step-upload="rates" accept=".xlsx,.xlsm,.xlsb,.xls,.ods,.csv,.tsv,.txt,.pdf" hidden>
           </label>
         </div>
       </div>
@@ -5531,7 +5552,7 @@ function masterBar() {
       <div class="actions" style="margin-top:10px">
         <button class="btn danger" id="btn-wipe-all-master" type="button" title="Delete all Refineries, Products, Transporters, Routes & Rate Cycles at once">🗑️ Delete All Master Data</button>
         <button class="btn" id="mdl" type="button">⬇ Download master (.xlsx)</button>
-        <label class="btn lime" for="mup">⬆ Smart Upload (.xlsx)</label><input type="file" id="mup" accept=".xlsx,.xls,.csv" hidden>
+        <label class="btn lime" for="mup">⬆ Smart Upload (.xlsx)</label><input type="file" id="mup" accept=".xlsx,.xlsm,.xlsb,.xls,.ods,.csv,.tsv,.txt,.pdf" hidden>
       </div>
       ${stepFeederBar}
     </details>` : "";
@@ -7204,41 +7225,534 @@ function extractSheetDataWithMapping(sheetRows, headerIdx, colMap, defaultDate) 
   return extracted;
 }
 
-/* Added: refuse files that are not spreadsheets (PDF, Word, pictures, zip...) with a clear message, instead of the
-   Excel reader turning their raw bytes into a nonsense "header mapper". Real .xlsx / .xls / .csv files pass straight through. */
-async function uploadFileProblem(file) {
-  const name = String(file.name || "This file"); const ext = (name.includes(".") ? name.split(".").pop() : "").toLowerCase();
-  let head;
-  try { head = new Uint8Array(await file.slice(0, 4096).arrayBuffer()); } catch (e) { return null; }   // cannot look inside: let the normal reader try
-  const how = "Open it, copy the table into Excel, save it as .xlsx (or .csv) and upload that file instead.";
-  if (!head.length) return { title: "This file is empty", msg: `“${name}” has nothing in it.` };
-  const at = i => head[i];
-  if (String.fromCharCode(...head.slice(0, 1024)).includes("%PDF-")) return { title: "This is a PDF, not an Excel file", msg: `“${name}” is a PDF. This screen reads Excel (.xlsx, .xls) or CSV files only. ${how}` };
-  if ((at(0) === 0x89 && at(1) === 0x50 && at(2) === 0x4E) || (at(0) === 0xFF && at(1) === 0xD8 && at(2) === 0xFF) || String.fromCharCode(...head.slice(0, 4)) === "GIF8") return { title: "This is a picture, not an Excel file", msg: `“${name}” is an image. This screen reads Excel (.xlsx, .xls) or CSV files only.` };
-  const isZip = at(0) === 0x50 && at(1) === 0x4B, isOle = at(0) === 0xD0 && at(1) === 0xCF && at(2) === 0x11 && at(3) === 0xE0;
-  if (isZip) return /^(docx?|pptx?|zip|rar|7z|odt|odp|epub|apk|jar)$/.test(ext) ? { title: "This is not an Excel file", msg: `“${name}” is a .${ext} file. This screen reads Excel (.xlsx, .xls) or CSV files only. ${how}` } : null;
-  if (isOle) return /^(doc|ppt|msg|pub|vsd)$/.test(ext) ? { title: "This is not an Excel file", msg: `“${name}” is a .${ext} file. This screen reads Excel (.xlsx, .xls) or CSV files only. ${how}` } : null;
-  const utf16 = (at(0) === 0xFF && at(1) === 0xFE) || (at(0) === 0xFE && at(1) === 0xFF);
-  if (!utf16 && head.includes(0)) return { title: "This does not look like an Excel or CSV file", msg: `“${name}” is not a spreadsheet (it contains binary data that is not an Excel file). Please upload an .xlsx, .xls or .csv file.` };
-  return null;
+/* FR:BEGIN */
+/* ================= UNIVERSAL FILE READER: Excel, CSV / TSV / TXT and PDF (added in v3.2) =================
+   Whatever the person uploads is turned into the same "rows of cells" that an Excel sheet gives, and then goes through the
+   existing reader (circular blocks, header mapper, preview, "Save these rates"). Nothing is saved until the person confirms.
+   PDF: text is read with pdf.js (a copy is shipped in public/vendor/pdfjs); table lines are found on a rendered image of the page so
+   that merged cells (e.g. one "LDO" cell covering eight refinery rows) land on the right row, exactly as they would in Excel. */
+
+/* ---------- small helpers ---------- */
+function rdCoerce(t) {
+  if (t === null || t === undefined) return null;
+  if (typeof t === "number") return isFinite(t) ? t : null;
+  const s = String(t).replace(/ /g, " ").trim();
+  if (!s) return null;
+  if (/^[-+]?(\d{1,3}(,\d{2,3})+|\d+)(\.\d+)?$/.test(s)) {
+    const plain = s.replace(/,/g, "");
+    if (/^[-+]?0\d/.test(plain)) return s;                                     // 007 / 0123: a code, keep as text
+    if (plain.replace(/^[-+]/, "").replace(".", "").length > 15) return s;     // very long digit strings (phone, GST...) stay text
+    const n = Number(plain);
+    return isFinite(n) ? n : s;
+  }
+  if (/^[-+]?\.\d+$/.test(s)) return Number(s);
+  return s;
 }
+function rdDecode(bytes) {
+  let b = bytes;
+  if (b.length >= 2 && b[0] === 0xFF && b[1] === 0xFE) return new TextDecoder("utf-16le").decode(b.subarray(2));
+  if (b.length >= 2 && b[0] === 0xFE && b[1] === 0xFF) return new TextDecoder("utf-16be").decode(b.subarray(2));
+  if (b.length >= 3 && b[0] === 0xEF && b[1] === 0xBB && b[2] === 0xBF) b = b.subarray(3);
+  try { return new TextDecoder("utf-8", { fatal: true }).decode(b); } catch (e) { return new TextDecoder("windows-1252").decode(b); }
+}
+function rdCountOutsideQuotes(line, sep) {
+  let q = false, n = 0;
+  for (let i = 0; i < line.length; i++) { const c = line[i]; if (c === '"') q = !q; else if (!q && c === sep) n++; }
+  return n;
+}
+function rdSplitRecords(text, sep) {
+  const rows = []; let row = [], cell = "", q = false, i = 0; const n = text.length;
+  while (i < n) {
+    const c = text[i];
+    if (q) {
+      if (c === '"') { if (text[i + 1] === '"') { cell += '"'; i += 2; continue; } q = false; i++; continue; }
+      cell += c; i++; continue;
+    }
+    if (c === '"' && cell.trim() === "") { q = true; cell = ""; i++; continue; }
+    if (c === sep) { row.push(cell); cell = ""; i++; continue; }
+    if (c === "\r" || c === "\n") { if (c === "\r" && text[i + 1] === "\n") i++; row.push(cell); rows.push(row); row = []; cell = ""; i++; continue; }
+    cell += c; i++;
+  }
+  if (cell !== "" || row.length) { row.push(cell); rows.push(row); }
+  return rows;
+}
+/* Text table (CSV, TSV, semicolon, pipe, or columns separated by 2+ spaces) -> rows of cells */
+function rdParseDelimited(text) {
+  text = String(text).replace(/^﻿/, "");
+  let sep = null;
+  const sm = /^sep=(.)\r?\n/i.exec(text); if (sm) { sep = sm[1]; text = text.slice(sm[0].length); }
+  const sample = text.split(/\r\n|\n|\r/).filter(l => l.trim()).slice(0, 40);
+  if (!sep) {
+    let bestScore = 0;
+    for (const c of [",", "\t", ";", "|"]) {
+      const counts = sample.map(l => rdCountOutsideQuotes(l, c)).filter(k => k > 0);
+      if (counts.length < Math.max(1, Math.ceil(sample.length * 0.6))) continue;
+      const freq = {}; counts.forEach(k => { freq[k] = (freq[k] || 0) + 1; });
+      const mode = Object.keys(freq).sort((a, b) => freq[b] - freq[a] || Number(b) - Number(a))[0];
+      const score = freq[mode] * 1000 + Number(mode);
+      if (score > bestScore) { bestScore = score; sep = c; }
+    }
+  }
+  let rows;
+  if (sep) rows = rdSplitRecords(text, sep);
+  else if (sample.length > 1 && sample.filter(l => /\S {2,}\S/.test(l)).length >= Math.ceil(sample.length * 0.6))
+    rows = text.split(/\r\n|\n|\r/).map(l => l.trim().split(/ {2,}|\t/));
+  else rows = text.split(/\r\n|\n|\r/).map(l => [l]);
+  rows = rows.map(r => r.map(c => rdCoerce(c)));
+  rows = rows.filter(r => r.some(c => c !== null));
+  const width = rows.reduce((m, r) => Math.max(m, r.length), 0);
+  return rows.map(r => { const o = r.slice(); while (o.length < width) o.push(null); return o; });
+}
+
+/* ---------- what kind of file is it? ---------- */
+const RD_FORMATS_TEXT = "Excel (.xlsx, .xls), CSV or a PDF with selectable text";
+async function rdInspect(file) {
+  const name = String(file.name || "This file");
+  const ext = (name.includes(".") ? name.split(".").pop() : "").toLowerCase();
+  let head;
+  try { head = new Uint8Array(await file.slice(0, 4096).arrayBuffer()); } catch (e) { return { kind: "sheet", ext }; }   // cannot look inside: let the normal reader try
+  const bad = (title, msg) => ({ kind: "bad", ext, problem: { title, msg } });
+  const how = `Please upload ${RD_FORMATS_TEXT}.`;
+  if (!head.length) return bad("This file is empty", `“${name}” has nothing in it.`);
+  const at = i => head[i];
+  const asText = String.fromCharCode(...head.slice(0, 1024));
+  if (asText.includes("%PDF-")) return { kind: "pdf", ext };
+  if ((at(0) === 0x89 && at(1) === 0x50 && at(2) === 0x4E) || (at(0) === 0xFF && at(1) === 0xD8 && at(2) === 0xFF) || asText.slice(0, 4) === "GIF8" ||
+      asText.slice(0, 2) === "BM" || (asText.slice(0, 4) === "RIFF" && asText.slice(8, 12) === "WEBP") || asText.slice(0, 4) === "II*\0" || asText.slice(0, 4) === "MM\0*")
+    return bad("This is a picture, not a price list file", `“${name}” is an image. The app cannot read numbers from a photo or screenshot. ${how}`);
+  const isZip = at(0) === 0x50 && at(1) === 0x4B, isOle = at(0) === 0xD0 && at(1) === 0xCF && at(2) === 0x11 && at(3) === 0xE0;
+  if (isZip) return /^(docx?|pptx?|zip|rar|7z|odt|odp|epub|apk|jar)$/.test(ext) ? bad("This is not a price list file", `“${name}” is a .${ext} file. ${how}`) : { kind: "sheet", ext };
+  if (isOle) return /^(doc|ppt|msg|pub|vsd)$/.test(ext) ? bad("This is not a price list file", `“${name}” is a .${ext} file. ${how}`) : { kind: "sheet", ext };
+  if ((at(0) === 0x52 && at(1) === 0x61 && at(2) === 0x72) || (at(0) === 0x37 && at(1) === 0x7A && at(2) === 0xBC) || (at(0) === 0x1F && at(1) === 0x8B))
+    return bad("This is a compressed archive", `“${name}” is an archive (zip / rar / 7z). Please unzip it and upload the file inside. ${how}`);
+  const utf16 = (at(0) === 0xFF && at(1) === 0xFE) || (at(0) === 0xFE && at(1) === 0xFF);
+  if (!utf16 && head.includes(0)) return bad("This does not look like a price list file", `“${name}” contains binary data that is not an Excel, CSV or PDF file. ${how}`);
+  // plain text from here on
+  if (/^(html?|xml|xls|xlsx|xlsm|xlsb|ods)$/.test(ext)) return { kind: "sheet", ext };    // Excel / HTML tables saved as text: the spreadsheet library reads these
+  return { kind: "text", ext };
+}
+
+/* ---------- PDF: loading the reader ---------- */
+var rdPdfLibPromise = null;
+function rdLoadPdfJs() {
+  if (rdPdfLibPromise) return rdPdfLibPromise;
+  const here = p => new URL(p, location.href).href;
+  const sources = [
+    { lib: here("vendor/pdfjs/pdf.min.js"), worker: here("vendor/pdfjs/pdf.worker.min.js") },
+    { lib: "https://cdn.jsdelivr.net/npm/pdfjs-dist@6.2.108/legacy/build/pdf.min.mjs", worker: "https://cdn.jsdelivr.net/npm/pdfjs-dist@6.2.108/legacy/build/pdf.worker.min.mjs" }
+  ];
+  rdPdfLibPromise = (async () => {
+    let last = null;
+    for (const s of sources) {
+      try {
+        const m = await import(s.lib);
+        const lib = m.getDocument ? m : (m.default || m);
+        if (!lib.getDocument) throw new Error("PDF reader did not start");
+        lib.GlobalWorkerOptions.workerSrc = s.worker;
+        return lib;
+      } catch (e) { last = e; }
+    }
+    throw last || new Error("PDF reader could not be loaded");
+  })();
+  rdPdfLibPromise.catch(() => { rdPdfLibPromise = null; });   // allow a retry next time
+  return rdPdfLibPromise;
+}
+
+/* ---------- PDF: text pieces with positions (pixel coordinates of the rendered page, y grows downwards) ---------- */
+function rdFragments(items, viewport, Util) {
+  const out = [];
+  for (const it of items) {
+    if (it.str === undefined || it.str === null) continue;
+    const s = String(it.str).replace(/[ \s]+/g, " ").trim();
+    if (!s) continue;
+    const m = Util.transform(viewport.transform, it.transform);
+    if (Math.abs(m[0]) < Math.abs(m[1])) continue;                 // sideways text: not part of a normal table
+    const h = Math.hypot(m[2], m[3]);
+    if (!(h > 1.5)) continue;
+    const w = Math.max(0, it.width * viewport.scale);
+    out.push({ s, x0: m[4], x1: m[4] + w, yb: m[5], h, xc: m[4] + w / 2, yc: m[5] - 0.33 * h });
+  }
+  return out;
+}
+/* join the pieces of one cell: lines top to bottom, pieces left to right, a space only where there is a real gap */
+function rdJoin(frs) {
+  if (!frs.length) return "";
+  const hs = frs.map(f => f.h).sort((a, b) => a - b), h = hs[hs.length >> 1] || 10;
+  const sorted = frs.slice().sort((a, b) => a.yb - b.yb || a.x0 - b.x0);
+  const lines = [];
+  for (const f of sorted) {
+    const L = lines[lines.length - 1];
+    if (L && Math.abs(f.yb - L.yb) <= h * 0.45) { L.items.push(f); L.yb = (L.yb * (L.items.length - 1) + f.yb) / L.items.length; }
+    else lines.push({ yb: f.yb, items: [f] });
+  }
+  return lines.map(L => {
+    L.items.sort((a, b) => a.x0 - b.x0);
+    let s = "", px = null;
+    for (const f of L.items) { if (px !== null && f.x0 - px > h * 0.14) s += " "; s += f.s; px = Math.max(px === null ? f.x1 : px, f.x1); }
+    return s;
+  }).join(" ").replace(/\s+/g, " ").trim();
+}
+
+/* ---------- PDF: finding the table lines on the rendered page ---------- */
+function rdScan(gray, W, H, thr, horizontal, minRun, maxGap, maxThick) {
+  const O = horizontal ? H : W, I = horizontal ? W : H, sO = horizontal ? W : 1, sI = horizontal ? 1 : W;
+  let active = []; const done = [];
+  for (let o = 0; o < O; o++) {
+    const runs = []; let start = -1, last = -1;
+    const base = o * sO;
+    for (let i = 0; i < I; i++) {
+      if (gray[base + i * sI] < thr) { if (start < 0) start = i; last = i; }
+      else if (start >= 0 && i - last > maxGap) { if (last - start + 1 >= minRun) runs.push([start, last]); start = -1; }
+    }
+    if (start >= 0 && last - start + 1 >= minRun) runs.push([start, last]);
+    const next = [];
+    for (const r of runs) {
+      let g = null;
+      for (const a of active) {
+        const la = a.la1 - a.la0 + 1, lr = r[1] - r[0] + 1;
+        if (a.o1 === o - 1 && Math.min(a.la1, r[1]) - Math.max(a.la0, r[0]) >= 0.5 * Math.min(la, lr) && Math.min(la, lr) >= 0.5 * Math.max(la, lr)) { g = a; break; }
+      }
+      if (g) { g.o1 = o; g.a0 = Math.min(g.a0, r[0]); g.a1 = Math.max(g.a1, r[1]); g.la0 = r[0]; g.la1 = r[1]; next.push(g); }
+      else next.push({ o0: o, o1: o, a0: r[0], a1: r[1], fa0: r[0], fa1: r[1], la0: r[0], la1: r[1] });
+    }
+    for (const a of active) if (a.o1 < o) done.push(a);
+    active = next;
+  }
+  for (const a of active) done.push(a);
+  const out = [];
+  for (const a of done) {
+    if (a.o1 - a.o0 + 1 <= maxThick) out.push({ p: (a.o0 + a.o1) / 2, a0: a.a0, a1: a.a1 });
+    else if (a.a1 - a.a0 + 1 >= 4 * (a.o1 - a.o0 + 1)) { out.push({ p: a.o0 + 0.5, a0: a.fa0, a1: a.fa1 }); out.push({ p: a.o1 - 0.5, a0: a.la0, a1: a.la1 }); }   // a wide filled block (shaded header row): its top and bottom edges are where the cell borders are
+  }
+  return out;
+}
+function rdMergeSegs(segs, tolP, gapA) {
+  const list = segs.slice().sort((a, b) => a.p - b.p || a.a0 - b.a0), out = [];
+  for (const s of list) {
+    let m = null;
+    for (let k = out.length - 1; k >= 0; k--) {
+      const o = out[k];
+      if (s.p - o.p > tolP + 1) break;
+      if (Math.abs(o.p - s.p) <= tolP && s.a0 <= o.a1 + gapA && s.a1 >= o.a0 - gapA) { m = o; break; }
+    }
+    if (m) { m.p = (m.p * m.n + s.p) / (m.n + 1); m.n++; m.a0 = Math.min(m.a0, s.a0); m.a1 = Math.max(m.a1, s.a1); }
+    else out.push({ p: s.p, a0: s.a0, a1: s.a1, n: 1 });
+  }
+  return out;
+}
+/* Paint over every piece of text with its own background colour, so letters (and white-on-dark header text) cannot be mistaken for table lines */
+function rdEraseText(gray, W, H, frs) {
+  const hist = new Uint32Array(32);
+  for (const f of frs) {
+    const x0 = Math.max(0, Math.floor(f.x0)), x1 = Math.min(W - 1, Math.ceil(f.x1));
+    const y0 = Math.max(0, Math.floor(f.yb - 0.8 * f.h)), y1 = Math.min(H - 1, Math.ceil(f.yb + 0.12 * f.h));
+    if (x1 <= x0 || y1 <= y0) continue;
+    hist.fill(0);
+    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) hist[gray[y * W + x] >> 3]++;
+    let bi = 0; for (let k = 1; k < 32; k++) if (hist[k] > hist[bi]) bi = k;
+    const v = Math.min(255, (bi << 3) + 4);
+    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) gray[y * W + x] = v;
+  }
+}
+function rdFindRules(gray, W, H, scale, thr) {
+  const minH = Math.max(24, Math.round(10 * scale)), minV = Math.max(27, Math.round(11 * scale)), maxThick = Math.max(4, Math.round(2.2 * scale));
+  const hs = rdMergeSegs(rdScan(gray, W, H, thr, true, minH, 2, maxThick), 2.5, 6);
+  const vs = rdMergeSegs(rdScan(gray, W, H, thr, false, minV, 2, maxThick), 2.5, 6);
+  return hs.length >= 2 && vs.length >= 2 ? { hs, vs, thr } : null;
+}
+var RD_RULE_PASSES = [115, 200, 232];      // dark rules first, then grey, then very light grey rules
+function rdClusterValues(vals, tol) {
+  const v = vals.slice().sort((a, b) => a - b), out = [];
+  for (const x of v) { const L = out[out.length - 1]; if (L && x - L.last <= tol) { L.sum += x; L.n++; L.last = x; } else out.push({ sum: x, n: 1, last: x }); }
+  return out.map(c => c.sum / c.n);
+}
+function rdCover(segs, p, lo, hi, tol) {
+  if (!(hi > lo)) return 1;
+  const iv = [];
+  for (const s of segs) if (Math.abs(s.p - p) <= tol) { const a = Math.max(s.a0, lo), b = Math.min(s.a1, hi); if (b > a) iv.push([a, b]); }
+  iv.sort((x, y) => x[0] - y[0]);
+  let cov = 0, cur = lo;
+  for (const [a, b] of iv) { const s0 = Math.max(a, cur); if (b > s0) { cov += b - s0; cur = b; } }
+  return cov / (hi - lo);
+}
+/* The main ruled table on the page: its grid lines, and which neighbouring boxes are really one merged cell */
+function rdBuildGrid(rules) {
+  const segs = [...rules.hs.map(s => ({ ...s, hz: true })), ...rules.vs.map(s => ({ ...s, hz: false }))];
+  const par = segs.map((_, i) => i); const find = i => { while (par[i] !== i) { par[i] = par[par[i]]; i = par[i]; } return i; };
+  const T = 4;
+  for (let i = 0; i < segs.length; i++) for (let j = 0; j < segs.length; j++) {
+    const h = segs[i], v = segs[j];
+    if (!h.hz || v.hz) continue;
+    if (v.p >= h.a0 - T && v.p <= h.a1 + T && h.p >= v.a0 - T && h.p <= v.a1 + T) par[find(i)] = find(j);
+  }
+  const groups = {};
+  segs.forEach((s, i) => { (groups[find(i)] = groups[find(i)] || []).push(s); });
+  let best = null;
+  for (const g of Object.values(groups)) {
+    const nh = g.filter(s => s.hz).length, nv = g.length - nh;
+    if (nh >= 2 && nv >= 2 && (!best || g.length > best.length)) best = g;
+  }
+  if (!best) return null;
+  const hsel = best.filter(s => s.hz), vsel = best.filter(s => !s.hz);
+  const Y = rdClusterValues(hsel.map(s => s.p), 3), X = rdClusterValues(vsel.map(s => s.p), 3);
+  if (Y.length < 2 || X.length < 2) return null;
+  const R = Y.length - 1, C = X.length - 1;
+  const par2 = Array.from({ length: R * C }, (_, i) => i); const f2 = i => { while (par2[i] !== i) { par2[i] = par2[par2[i]]; i = par2[i]; } return i; };
+  const un = (a, b) => { par2[f2(a)] = f2(b); };
+  const PAD = 3, PRESENT = 0.5;
+  for (let i = 0; i < R; i++) for (let j = 0; j < C; j++) {
+    if (j + 1 < C && rdCover(vsel, X[j + 1], Y[i] + PAD, Y[i + 1] - PAD, 3) < PRESENT) un(i * C + j, i * C + j + 1);        // no vertical line between: one cell
+    if (i + 1 < R && rdCover(hsel, Y[i + 1], X[j] + PAD, X[j + 1] - PAD, 3) < PRESENT) un(i * C + j, (i + 1) * C + j);    // no horizontal line between: one cell
+  }
+  const regions = {};
+  for (let i = 0; i < R; i++) for (let j = 0; j < C; j++) {
+    const id = f2(i * C + j), r = regions[id] || (regions[id] = { r0: i, c0: j, r1: i, c1: j });
+    r.r0 = Math.min(r.r0, i); r.c0 = Math.min(r.c0, j); r.r1 = Math.max(r.r1, i); r.c1 = Math.max(r.c1, j);
+  }
+  return { X, Y, R, C, cellRegion: i => f2(i), regions };
+}
+function rdIdx(arr, v) {                 // which interval [arr[k], arr[k+1]) contains v ; -1 if outside
+  if (v < arr[0] - 2 || v > arr[arr.length - 1] + 2) return -1;
+  for (let k = 0; k < arr.length - 1; k++) if (v < arr[k + 1]) return k;
+  return arr.length - 2;
+}
+function rdLines(frs, tolFactor) {      // group text pieces into visual lines
+  const sorted = frs.slice().sort((a, b) => a.yb - b.yb || a.x0 - b.x0), lines = [];
+  for (const f of sorted) {
+    const L = lines[lines.length - 1];
+    if (L && Math.abs(f.yb - L.yb) <= Math.max(f.h, L.h) * (tolFactor || 0.5)) { L.items.push(f); L.yb = (L.yb * (L.items.length - 1) + f.yb) / L.items.length; L.h = Math.max(L.h, f.h); }
+    else lines.push({ yb: f.yb, h: f.h, items: [f] });
+  }
+  lines.forEach(L => L.items.sort((a, b) => a.x0 - b.x0));
+  return lines;
+}
+function rdOutsideRows(frs) {           // text outside the table (titles, notes): one row per visual line, pieces far apart become separate cells
+  return rdLines(frs).map(L => {
+    const cells = []; let cur = [L.items[0]];
+    for (let k = 1; k < L.items.length; k++) { if (L.items[k].x0 - L.items[k - 1].x1 > L.h * 2.5) { cells.push(rdJoin(cur)); cur = []; } cur.push(L.items[k]); }
+    cells.push(rdJoin(cur));
+    return { yb: L.yb, cells: cells.map(rdCoerce) };
+  });
+}
+/* Table with ruled lines -> rows of cells. Merged cells keep their text in the top-left box only (like Excel). */
+function rdLatticeRows(frs, grid) {
+  const { X, Y, R, C, regions } = grid;
+  const byRegion = {}, outside = [];
+  for (const f of frs) {
+    const j = rdIdx(X, f.xc), i = rdIdx(Y, f.yc);
+    if (i < 0 || j < 0) { outside.push(f); continue; }
+    const id = grid.cellRegion(i * C + j);
+    (byRegion[id] = byRegion[id] || []).push(f);
+  }
+  // sanity: a "merged" box that really holds several separate columns of text means the lines were not a full grid
+  let multi = 0, filled = 0;
+  for (const id of Object.keys(byRegion)) {
+    const rg = regions[id], list = byRegion[id]; filled++;
+    if (rg.c1 > rg.c0 && list.length > 1) {
+      const lns = rdLines(list);
+      for (const L of lns) for (let k = 1; k < L.items.length; k++) if (L.items[k].x0 - L.items[k - 1].x1 > L.h * 2.2) { multi++; k = L.items.length; break; }
+    }
+  }
+  if (!filled || multi > Math.max(2, filled * 0.12)) return null;
+  const rows = Array.from({ length: R }, () => Array(C).fill(null));
+  for (const id of Object.keys(byRegion)) {
+    const rg = regions[id], t = rdJoin(byRegion[id]);
+    if (t) rows[rg.r0][rg.c0] = rdCoerce(t);
+  }
+  const above = outside.filter(f => f.yc < Y[0]), below = outside.filter(f => f.yc >= Y[0]);
+  const rowsAbove = rdOutsideRows(above).map(r => r.cells), rowsBelow = rdOutsideRows(below).map(r => r.cells);
+  const body = rows.filter(r => r.some(c => c !== null));
+  if (body.length < 2) return null;
+  const all = [...rowsAbove, ...body, ...rowsBelow];
+  const width = all.reduce((m, r) => Math.max(m, r.length), 0);
+  return all.map(r => { const o = r.slice(); while (o.length < width) o.push(null); return o; });
+}
+/* Table without lines: rows from the text lines, columns from the empty vertical gaps between the text */
+function rdStreamRows(frs) {
+  const lines = rdLines(frs);
+  if (!lines.length) return [];
+  const hs = lines.map(L => L.h).sort((a, b) => a - b), H = hs[hs.length >> 1] || 10;
+  const maxPieces = Math.max(...lines.map(L => L.items.length));
+  const need = Math.max(2, Math.ceil(maxPieces * 0.6));
+  const dense = lines.filter(L => L.items.length >= need);
+  const allX0 = frs.reduce((m, f) => Math.min(m, f.x0), Infinity), allX1 = frs.reduce((m, f) => Math.max(m, f.x1), -Infinity);
+  let cols = [];
+  if (dense.length >= 2) {
+    const iv = dense.flatMap(L => L.items.filter(f => f.x1 - f.x0 < (allX1 - allX0) * 0.5).map(f => [f.x0, f.x1])).sort((a, b) => a[0] - b[0]);
+    for (const [a, b] of iv) { const last = cols[cols.length - 1]; if (last && a <= last[1] + H * 0.6) last[1] = Math.max(last[1], b); else cols.push([a, b]); }
+  }
+  if (cols.length < 2) cols = [[allX0, allX1]];
+  const colOf = f => {
+    let best = -1, bo = 0;
+    cols.forEach((c, k) => { const o = Math.min(f.x1, c[1]) - Math.max(f.x0, c[0]); if (o > bo) { bo = o; best = k; } });
+    if (best >= 0) return best;
+    const xc = (f.x0 + f.x1) / 2; let bd = Infinity; cols.forEach((c, k) => { const d = Math.min(Math.abs(xc - c[0]), Math.abs(xc - c[1])); if (d < bd) { bd = d; best = k; } });
+    return best;
+  };
+  const isNum = c => typeof rdCoerce(c) === "number";
+  let rows = lines.map(L => {
+    const cells = Array.from({ length: cols.length }, () => []);
+    const wide = L.items.length === 1 && (L.items[0].x1 - L.items[0].x0) > (allX1 - allX0) * 0.5;
+    L.items.forEach(f => cells[wide ? 0 : colOf(f)].push(f));
+    return { yb: L.yb, h: L.h, cells: cells.map(c => rdJoin(c)) };
+  });
+  // wrapped text (a heading or a name that wraps onto 2-3 lines) is put back into one row
+  let merged = true, guard = 0;
+  while (merged && guard++ < 200) {
+    merged = false;
+    for (let i = 1; i < rows.length; i++) {
+      const a = rows[i - 1], b = rows[i], gap = b.yb - a.yb, hh = Math.max(a.h, b.h);
+      const occA = a.cells.map(c => !!c), occB = b.cells.map(c => !!c);
+      const complementary = !occA.some((v, k) => v && occB[k]);
+      const aNum = a.cells.some(isNum), bNum = b.cells.some(isNum);
+      let ok = false;
+      if (complementary && gap <= hh * 1.4 && !(aNum && bNum)) ok = true;
+      else if (aNum && !bNum && gap <= hh * 1.28 && b.cells.every((c, k) => !c || !isNum(a.cells[k]))) ok = true;      // rest of the name under a priced line
+      if (ok) {
+        a.cells = a.cells.map((c, k) => [c, b.cells[k]].filter(Boolean).join(" "));
+        a.yb = (a.yb + b.yb) / 2; rows.splice(i, 1); merged = true; break;
+      }
+    }
+  }
+  return rows.map(r => r.cells.map(rdCoerce));
+}
+/* One page -> rows. getRules(threshold) returns the lines found on the rendered page, or null (page could not be drawn). */
+function rdPageRows(frs, getRules) {
+  if (getRules) {
+    for (const thr of RD_RULE_PASSES) {
+      const rules = getRules(thr);
+      if (!rules) continue;
+      const grid = rdBuildGrid(rules);
+      if (!grid) continue;
+      const rows = rdLatticeRows(frs, grid);
+      if (rows) return { rows, method: "lines", cols: grid.C };
+    }
+  }
+  const rows = rdStreamRows(frs);
+  return { rows, method: "text", cols: rows.reduce((m, r) => Math.max(m, r.length), 0) };
+}
+/* a header row repeated on every page of a long table is kept once */
+function rdDropRepeatedHeaders(rows, headerIdx) {
+  const sig = r => (r || []).map(c => String(c ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "")).join("|");
+  const h = sig(rows[headerIdx]);
+  if (!h || h.replace(/\|/g, "").length < 6) return rows;
+  return rows.filter((r, i) => i <= headerIdx || sig(r) !== h);
+}
+
+/* ---------- PDF: read a whole file ---------- */
+async function rdReadPdf(file) {
+  let lib;
+  try { lib = await rdLoadPdfJs(); } catch (e) { throw { title: "The PDF reader could not start", msg: "The PDF reader file did not load. Check the internet connection and the file public/vendor/pdfjs in your project, then try again. (" + (e?.message || e) + ")" }; }
+  const data = new Uint8Array(await file.arrayBuffer());
+  let doc;
+  try { doc = await lib.getDocument({ data, isEvalSupported: false }).promise; }
+  catch (e) {
+    if (e && (e.name === "PasswordException" || /password/i.test(e.message || ""))) throw { title: "This PDF is password protected", msg: "Open it, save a copy without the password (or print it to PDF), and upload that copy." };
+    throw { title: "This PDF could not be opened", msg: "The file looks damaged or is not a normal PDF. (" + (e?.message || e) + ")" };
+  }
+  const MAXP = 30, pages = Math.min(doc.numPages, MAXP);
+  let all = [], textPieces = 0, methods = new Set(), cols = 0;
+  for (let p = 1; p <= pages; p++) {
+    const page = await doc.getPage(p);
+    const base = page.getViewport({ scale: 1 });
+    const scale = Math.max(1.5, Math.min(3, 1800 / Math.max(base.width, 1)));
+    const viewport = page.getViewport({ scale });
+    const tc = await page.getTextContent();
+    const frs = rdFragments(tc.items, viewport, lib.Util);
+    textPieces += frs.length;
+    if (!frs.length) { page.cleanup(); continue; }
+    let getRules = null;
+    try {
+      const W = Math.ceil(viewport.width), H = Math.ceil(viewport.height);
+      const canvas = document.createElement("canvas"); canvas.width = W; canvas.height = H;
+      const ctx = canvas.getContext("2d", { willReadFrequently: true });
+      ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, W, H);
+      await page.render({ canvasContext: ctx, viewport }).promise;
+      const px = ctx.getImageData(0, 0, W, H).data, gray = new Uint8Array(W * H);
+      for (let i = 0, k = 0; i < gray.length; i++, k += 4) gray[i] = (px[k] * 77 + px[k + 1] * 151 + px[k + 2] * 28) >> 8;
+      canvas.width = canvas.height = 0;
+      rdEraseText(gray, W, H, frs);
+      getRules = thr => rdFindRules(gray, W, H, scale, thr);
+    } catch (e) { getRules = null; }
+    const pr = rdPageRows(frs, getRules);
+    methods.add(pr.method); cols = Math.max(cols, pr.cols);
+    if (all.length && pr.rows.length) all.push(null);        // page break marker (removed below)
+    all.push(...pr.rows);
+    page.cleanup();
+  }
+  try { doc.destroy(); } catch (e) { /* ignore */ }
+  if (textPieces < 5) throw { title: "This PDF has no text to read", msg: "It looks like a scan or a photo saved as PDF, so there are no numbers the app can read. Please upload the Excel file, or a PDF created with “Save as PDF” from Excel / Word." };
+  all = all.filter(r => r !== null);
+  const hi = typeof detectHeaderRowIndex === "function" ? detectHeaderRowIndex(all) : 0;
+  if (pages > 1) all = rdDropRepeatedHeaders(all, hi);
+  return {
+    rows: all, pages, truncated: doc.numPages > MAXP, method: methods.has("lines") && !methods.has("text") ? "lines" : (methods.has("lines") ? "mixed" : "text"), cols
+  };
+}
+
+/* ---------- entry point used by uploadMaster ---------- */
+function rdPseudoWorkbook(sheets) {
+  const wb = { SheetNames: [], Sheets: {}, __pseudo: true };
+  sheets.forEach(s => { wb.SheetNames.push(s.name); wb.Sheets[s.name] = { __aoa: s.rows }; });
+  return wb;
+}
+function rdSheetRows(wb, sn) {
+  const ws = wb.Sheets[sn];
+  if (ws && ws.__aoa) return ws.__aoa;
+  return XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null });
+}
+/* returns { wb, note } or { problem:{title,msg} } */
+async function rdReadUpload(file) {
+  const info = await rdInspect(file);
+  if (info.kind === "bad") return { problem: info.problem };
+  try {
+    if (info.kind === "pdf") {
+      const r = await rdReadPdf(file);
+      const how = r.method === "lines" ? "using the table lines in the PDF" : (r.method === "mixed" ? "using table lines on some pages and the text layout on others" : "from the text layout (this PDF has no table lines)");
+      const note = `Read from a PDF (${r.pages} page${r.pages === 1 ? "" : "s"}, ${how}). PDFs are read by layout, so please compare the numbers below with the PDF before you save.` + (r.truncated ? " Only the first 30 pages were read." : "");
+      return { wb: rdPseudoWorkbook([{ name: "PDF", rows: r.rows }]), note, source: "pdf" };
+    }
+    if (info.kind === "text") {
+      const text = rdDecode(new Uint8Array(await file.arrayBuffer()));
+      const rows = rdParseDelimited(text);
+      const width = rows.reduce((m, r) => Math.max(m, r.length), 0);
+      if (rows.length < 2 || width < 2) return { problem: { title: "This does not look like a table", msg: `“${file.name}” is a text file but it does not look like a table (columns separated by commas, semicolons, tabs or 2+ spaces). ${"Please upload " + RD_FORMATS_TEXT + "."}` } };
+      return { wb: rdPseudoWorkbook([{ name: (file.name || "Sheet1").replace(/\.[^.]+$/, "") || "Sheet1", rows }]), note: "", source: "csv" };
+    }
+    if (!window.XLSX) return { problem: { title: "Spreadsheet reader not loaded", msg: "The Excel reader did not load. Please reload the page (check your internet connection)." } };
+    const wb = XLSX.read(await file.arrayBuffer(), { type: "array" });
+    return { wb, note: "", source: "excel" };
+  } catch (e) {
+    if (e && e.title) return { problem: e };
+    return { problem: { title: "This file could not be read", msg: "“" + (file.name || "File") + "” could not be read: " + (e?.message || e) } };
+  }
+}
+/* FR:END */
+
+/* kept for older callers: returns a problem for files that cannot be read at all */
+async function uploadFileProblem(file) { const i = await rdInspect(file); return i.kind === "bad" ? i.problem : null; }
 function showUploadProblem(p) {
   const m = crmModal({ title: "⚠ " + esc(p.title), narrow: true, body: `<p style="margin:0">${esc(p.msg)}</p>`, footer: `<button type="button" class="btn primary" data-ok>OK</button>` });
   m.q("[data-ok]").onclick = m.close;
 }
 async function uploadMaster(file, forcedStepMode = null) {
   if (!file) return;
-  if (!S.canWrite) { toast("Read-only access: Sign in as Admin to upload Excel files."); return; }
-  { const bad = await uploadFileProblem(file); if (bad) { showUploadProblem(bad); return; } }
-  if (!window.XLSX) { toast("Spreadsheet library didn't load. Please reload."); return; }
-  let wb;
-  try { wb = XLSX.read(await file.arrayBuffer(), { type: "array" }); } catch (e) { toast("Couldn't read that file: " + e.message); return; }
+  if (!S.canWrite) { toast("Read-only access: Sign in as Admin to upload price lists."); return; }
+  if (window.__rdBusy) { toast("Still reading the previous file. Please wait a moment."); return; }
+  window.__rdBusy = true;
+  let rd;
+  try {
+    if (/\.pdf$/i.test(file.name || "")) toast("Reading the PDF…");
+    rd = await rdReadUpload(file);
+  } finally { window.__rdBusy = false; }
+  if (rd.problem) { showUploadProblem(rd.problem); return; }
+  const wb = rd.wb;
 
   const sheetsAnalysis = [];
 
   for (const sn of wb.SheetNames) {
     if (/^(how to use|readme|instructions|rate history)$/i.test(sn.trim())) continue;
-    const rows = XLSX.utils.sheet_to_json(wb.Sheets[sn], { header: 1, raw: true, defval: null });
+    const rows = rdSheetRows(wb, sn);
     if (!rows || rows.length < 2) continue;
 
     // Check if this sheet is a multi-block circular ("PRICE REVISED EFF. ON dd-mm-yyyy")
@@ -7262,6 +7776,7 @@ async function uploadMaster(file, forcedStepMode = null) {
           else if (t.includes("DISCOUNT") || t.includes("REBATE")) curCols.disc = i;
           else if (t.includes("PRODUCT") || t.includes("GRADE") || t.includes("ITEM")) curCols.prod = i;
           else if (t.includes("LOCATION") || t.includes("LOADING")) curCols.loc = i;
+          else if (t.includes("UNIT")) curCols.unit = i;
         });
         continue;
       }
@@ -7273,7 +7788,7 @@ async function uploadMaster(file, forcedStepMode = null) {
           refName: String(a).trim(),
           locName: curCols.loc !== undefined ? String(r[curCols.loc] || "").trim() : "",
           prodName: lastProd,
-          unit: "MT",
+          unit: curCols.unit !== undefined && /KL|LTR|LITRE/i.test(String(r[curCols.unit] ?? "")) ? "KL" : "MT",
           cls: "White liquid",
           basic: bVal,
           maxDiscount: num(r[curCols.disc ?? 8]) || 0,
@@ -7378,8 +7893,14 @@ async function uploadMaster(file, forcedStepMode = null) {
     });
   }
 
+  if (!sheetsAnalysis.length) {
+    showUploadProblem({ title: "No prices or table found in this file", msg: `“${file.name}” was read, but the app could not find a price table in it (it needs columns like Supply location / Refinery, Product and Basic price).` + (rd.source === "pdf" ? " If the PDF is a scan or an unusual layout, please upload the Excel version." : "") });
+    return;
+  }
   UI.masterPreview = {
     file: file.name,
+    note: rd.note || "",
+    source: rd.source || "excel",
     forcedStepMode: typeof forcedStepMode === "string" ? forcedStepMode : null,
     defaultTransporterId: "",
     replaceCycles: false,
@@ -7414,7 +7935,7 @@ function renderSimpleRatesPreview(box, pv) {
     </div>`;
   }).join("");
   box.innerHTML = `<div class="panel pad stack" style="gap:12px;margin-bottom:14px;border:2px solid var(--accent)">
-    <div class="sechead"><div><h3>Check these prices</h3><p class="tiny" style="margin:2px 0 0">From <b>${esc(pv.file)}</b>. If they look right, click “Save these rates”. Nothing is saved until you click.</p></div><button class="btn small" id="mpx" type="button">Cancel</button></div>
+    <div class="sechead"><div><h3>Check these prices</h3><p class="tiny" style="margin:2px 0 0">From <b>${esc(pv.file)}</b>. If they look right, click “Save these rates”. Nothing is saved until you click.</p>${pv.note ? `<p class="tiny" style="margin:6px 0 0;padding:6px 9px;border-radius:8px;background:#fffbeb;border:1px solid #fcd34d;color:#78350f">📄 ${esc(pv.note)}</p>` : ""}</div><button class="btn small" id="mpx" type="button">Cancel</button></div>
     <div class="stack" style="gap:10px">${cards}</div>
     <div class="actions" style="justify-content:space-between">
       <button class="btn primary" id="mpa" type="button" ${S.canWrite ? "" : "disabled"}>✅ Save these rates</button>
@@ -7483,7 +8004,7 @@ function renderMasterPreview() {
     <div class="sechead">
       <div>
         <h3 class="flex items-center gap-2"><span>🧠</span><span>Smart ML Excel Header Mapper · ${esc(pv.file)}</span></h3>
-        <p class="tiny" style="margin:2px 0 0">Matched headers are mapped to system fields automatically and extra columns are ignored. If you change any dropdown below, the ML engine learns and remembers that header name for future uploads.</p>
+        <p class="tiny" style="margin:2px 0 0">Matched headers are mapped to system fields automatically and extra columns are ignored. If you change any dropdown below, the ML engine learns and remembers that header name for future uploads.</p>${pv.note ? `<p class="tiny" style="margin:6px 0 0;padding:6px 9px;border-radius:8px;background:#fffbeb;border:1px solid #fcd34d;color:#78350f">📄 ${esc(pv.note)}</p>` : ""}
       </div>
       <div class="actions">${allRates ? '<button class="btn small" id="mp-simple" type="button">← Simple view</button>' : ""}<button class="btn small" id="mpx" type="button">Cancel</button></div>
     </div>
@@ -7544,6 +8065,8 @@ function matchOrDecomposeProduct(C, rawProdStr, rawRefStr = "", rawLocStr = "") 
   // 1. Exact match in existing catalog products
   const exact = (C.products || []).find(p => norm(p.name) === norm(clean) || norm(p.id) === norm(clean) || (p.aliases || []).map(norm).includes(norm(clean)));
   if (exact) return { prodName: exact.name, existingProd: exact, refHint: rawRefStr, locHint: rawLocStr };
+  const loose = looseProductMatch(C.products, clean);
+  if (loose) return { prodName: loose.name, existingProd: loose, refHint: rawRefStr, locHint: rawLocStr };
 
   // 2. Check if clean string contains an existing product name plus refinery/city words (e.g. "MTO BPC Bina", "Nayara LDO", "RIL LDO VIZAG")
   const hasRefOrCityWord = /\b(nayara|ril|reliance|bpc|bpcl|hpc|hpcl|ioc|iocl|cpcl|mrpl|bina|kochi|vizag|visakh|bhatinda|bathinda|vadinar|jamnagar|koyali|mumbai|haldia|mathura|chennai|raipur|imported|importerted)\b/i.test(clean);
@@ -7618,10 +8141,10 @@ function ensureProductInCatalog(C, prodName, unit = "MT", cls = "") {
   if (!cleanProd) return null;
   const resolvedCls = inferProductType(cleanProd, cls);
   const resolvedUnit = inferProductUnit(cleanProd, unit);
-  let p = C.products.find(x => norm(x.id) === norm(cleanProd) || norm(x.name) === norm(cleanProd) || (x.aliases || []).map(norm).includes(norm(cleanProd)));
+  let p = C.products.find(x => norm(x.id) === norm(cleanProd) || norm(x.name) === norm(cleanProd) || (x.aliases || []).map(norm).includes(norm(cleanProd))) || looseProductMatch(C.products, cleanProd);
   if (!p) {
     const emptyP = C.products.find(x => !(x.name || "").trim());
-    const id = productIdFor(cleanProd, "");
+    const id = productIdFor(cleanProd, "", C.products);
     if (emptyP) {
       emptyP.id = id;
       emptyP.name = cleanProd;
@@ -8081,7 +8604,7 @@ function bindAddBar() {
   });
   if (UI.addForm) renderAddForm();
 }
-function productIdFor(name, code) { let base = key(code || name.match(/\(([^)]+)\)/)?.[1] || name).slice(0, 10) || "P"; let id = base, i = 2; const ids = new Set(S.catalog.products.map(p => p.id)); while (ids.has(id)) id = base + i++; return id; }
+function productIdFor(name, code, extraProducts) { const codes = productBrackets(name); let base = key(code || codes[codes.length - 1] || name).slice(0, 10) || "P"; let id = base, i = 2; const ids = new Set([...S.catalog.products, ...(extraProducts || [])].map(p => p.id)); while (ids.has(id)) id = base + i++; return id; }
 function sourceIdFor(name) { let base = String(name).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "src"; let id = base, i = 2; const ids = new Set(S.catalog.sources.map(s => s.id)); while (ids.has(id)) id = base + "-" + i++; return id; }
 const loadingPoints = () => [...new Set([...(S.catalog?.sources || []).flatMap(s => getRefineryLocations(s)), ...(S.routes?.rows || []).map(r => r.loading)].filter(Boolean))].sort();
 const companies = () => [...new Set(S.catalog.sources.map(s => s.company).filter(Boolean))].sort();
@@ -8820,7 +9343,7 @@ async function boot() {
   // Sidebar Quick Master Download / Upload
   $("#sidebar-btn-dl-master")?.addEventListener("click", downloadMaster);
   $("#sidebar-btn-up-master")?.addEventListener("click", () => {
-    if (!S.canWrite) { toast("Sign in as Admin to upload Master Excel files."); return; }
+    if (!S.canWrite) { toast("Sign in as Admin to upload price lists."); return; }
     $("#sidebar-master-file-input")?.click();
   });
   $("#sidebar-master-file-input")?.addEventListener("change", e => {

@@ -1,7 +1,7 @@
 {
   "name": "refinecalc-pro",
-  "version": "1.1.0",
-  "description": "Internal Refinery & Transport Price Optimizer for Render & Neon DB (with Customer Master and emailed quotations)",
+  "version": "1.2.0",
+  "description": "Internal Refinery & Transport Price Optimizer for Render & Neon DB (with Customer Master, emailed quotations and Excel / CSV / PDF price-list upload)",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",

@@ -1,3 +1,19 @@
+# Version 3.2: price lists can be Excel, CSV or PDF (and a bitumen / product-matching fix)
+
+1. **One upload that reads whatever you give it.** Every upload button (Upload file, Smart Upload, drag and drop on the rates box, Transport and Transporters uploads) now accepts `.xlsx`, `.xls`, `.csv`, `.tsv`, `.txt` and `.pdf`. The file is turned into rows of cells first, then goes through the same "Check these prices / Save these rates" screen as before. Nothing is saved until you click Save, and only an Admin can upload.
+   - **PDF:** the page is read by layout with pdf.js (included in `public/vendor/pdfjs/`, no internet needed). Table lines are detected, merged cells (for example one *LDO* cell covering 8 refineries) are filled down the way Excel does it, multi-page tables are joined and repeated headers are removed. Your `PRICE_LIST_FUELS_new_1.pdf` reads as 18 priced rows with *Prices effective 16 Nov 2026*; the "0.00" rows are left out, like in the Excel flow.
+   - **CSV / TSV / TXT:** comma, semicolon, tab, `|` or 2+ spaces are detected automatically; Excel's `sep=;` line, quotes, UTF-8 / UTF-16 / Windows-1252 text and numbers like `1,07,720.50` are understood.
+   - **What it will not read:** scanned PDFs and photos (they contain no text; the app says so and imports nothing), password-protected PDFs, Word/PowerPoint files. A short message explains each case.
+   - **Always compare before saving.** PDFs are read by layout, so the preview shows an amber note asking you to check the numbers. PDFs without table lines work too, but merged cells can then land on the wrong row, so check those twice.
+2. **Product-matching fix (found while testing the PDF).** Names like `BIT (BULK) 80/100 (VG 10)`, `BIT (BULK) 60/70 (VG 30)` and `BIT (BULK) (VG 40)` all got the same internal id (`BULK`), so only one of the three prices survived the save. Same for `FURNACE OIL (MT)` and `RIL FURNACE OIL (MT)` (id `MT`). Fixed in two ways: new products always get an id that is unique inside the import, and a name now finds the product already in your list when the bracketed code matches (`(VG 10)` finds *Bitumen VG-10 (VG10)*) or when it differs only by a unit tag (`FURNACE OIL (MT)` finds *Furnace Oil (FO)*). If a name matches nothing, a new product is added as before.
+3. **Units from the price list.** A `UNIT` column (for example `RS/KL`) is now used when a new product is created, so LDO and MTO are created as KL, not MT.
+
+Checked: 43 browser checks (real PDF, 5 other PDF layouts, 3-page PDF, 6 CSV/TXT variants, 7 refusal cases, save and re-upload, no console errors) plus the earlier server and screen checks. The real `.xlsx` binary reader (SheetJS) was not changed, but it could not be run in the test sandbox, so please try one Excel file after you deploy.
+
+**Deploy note:** commit the new folder `public/vendor/pdfjs/` (3 files, 1.8 MB) with the rest. If those files are missing the page falls back to loading pdf.js from jsDelivr, which needs internet.
+
+---
+
 # Version 3.1: two fixes (upload of the wrong file type, no-database message)
 
 1. **Uploading a PDF (or Word file, picture, empty file) as a price list.** The Excel importer used to read a PDF's raw bytes as if it were a table, which produced a "header mapper" with one column called `%PDF-1.5` and everything else ignored. Now every upload path (Smart Upload, sidebar *Upload .xlsx*, drag and drop on the rates box, Transport and Transporters uploads) first looks at what the file really is. A PDF, picture, Word/PowerPoint/zip file, binary junk or an empty file gets a clear message and nothing is imported. Real `.xlsx`, `.xls` and `.csv` files go to the normal reader exactly as before. Only the start of `uploadMaster` changed (one added line plus the new checking function next to it).

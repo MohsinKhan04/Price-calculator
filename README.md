@@ -76,6 +76,14 @@ Tip: a company-domain sender (with the service's SPF/DKIM setup) reaches inboxes
 5. **Rate History / Analysis**: pick a customer and product to see lowest / highest / latest rates, changes since the last quotation, and a chart. Reference only; it never changes how prices are calculated.
 6. **Activity Logs** (admin): who created, edited, emailed or revised what. Entries cannot be changed or deleted from the app.
 
+## Uploading a price list (Excel, CSV or PDF)
+
+Master File → **Upload file** (or drag a file onto the rates box). Accepted: `.xlsx`, `.xls`, `.csv`, `.tsv`, `.txt`, `.pdf`. You get the **Check these prices** screen first; nothing is saved until you click **Save these rates**. Admin only.
+
+- PDFs must contain real text (a PDF saved from Excel or Word does; a scan or phone photo does not). Compare the numbers with the PDF before saving; the amber note reminds you.
+- The reader files for PDFs are in `public/vendor/pdfjs/`. Commit that folder to GitHub with the rest of the app.
+- A price list written as a circular (a line saying *EFF. 16.11.2026*, then a table with refinery, product, basic, discount) is understood directly. Other layouts go through the advanced column mapper under **Show advanced options**.
+
 ## Optional settings (added in the security update)
 
 Add these under **Environment Variables** in Render. None of them is required; the app works as before without them.

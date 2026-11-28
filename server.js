@@ -21,7 +21,7 @@ const sha = s => crypto.createHash('sha256').update(String(s)).digest();
 const safeEqual = (a, b) => crypto.timingSafeEqual(sha(a), sha(b)); // constant-time compare
 const gateFailures = new Map(); // ip -> { n, first, until }
 app.use((req, res, next) => {
-  if (!SITE_PASSWORD || req.path === '/health') return next();
+  if (!SITE_PASSWORD || req.path === '/health' || req.path === '/api/health') return next();
   const ip = req.ip || 'unknown';
   const rec = gateFailures.get(ip);
   if (rec && rec.until > Date.now()) return res.status(429).send('Too many wrong passwords. Try again in a few minutes.');
@@ -89,6 +89,18 @@ app.use(express.static(path.join(__dirname, 'public'), { etag: false, lastModifi
 const memoryStore = Object.create(null); // no prototype, so a key such as "__proto__" cannot corrupt it
 let latestServerMs = 0;
 let dbReady = false;
+// Why the database is not ready, in plain words (no passwords, no connection string). Shown by /health and by the page.
+let dbHint = '';
+function describeDbProblem(err) {
+  const msg = String((err && err.message) || '');
+  const code = String((err && err.code) || '');
+  if (code === '28P01' || /password authentication failed|authentication failed/i.test(msg)) return 'Neon rejected the database password. In Neon click Connect, copy a fresh connection string, paste it into Render > Environment > DATABASE_URL and save.';
+  if (code === '3D000' || /database .* does not exist/i.test(msg)) return 'The database name in DATABASE_URL does not exist in Neon. Copy the connection string again from Neon (Connect button).';
+  if (code === 'ENOTFOUND' || code === 'EAI_AGAIN' || /getaddrinfo/i.test(msg)) return 'The database address in DATABASE_URL could not be found. Copy the connection string again from Neon (Connect button).';
+  if (code === 'ETIMEDOUT' || code === 'ECONNREFUSED' || /timeout|timed out/i.test(msg)) return 'The server could not reach Neon in time. Check that the Neon project exists and is not paused, and that DATABASE_URL is correct.';
+  if (/ssl|certificate/i.test(msg)) return 'Secure connection to Neon failed. Make sure the connection string ends with ?sslmode=require (and DB_SSL_STRICT is not set to true).';
+  return 'The database connection failed' + (code ? ' (' + code + ')' : '') + '. See the Render Logs tab for details.';
+}
 
 // Only these storage keys are accepted. They are exactly the keys the page saves.
 // To let a future version of the page save another key, add it here or list it in the EXTRA_STORAGE_KEYS variable.
@@ -263,10 +275,12 @@ async function initDatabase() {
       }
     }
     dbReady = true;
+    dbHint = '';
     console.log('Neon PostgreSQL hydrated and ready. Keys loaded:', Object.keys(memoryStore).length);
     startCrm();
   } catch (err) {
     // The API answers 503 until this succeeds (see requireDb), so keep trying instead of serving an empty store
+    dbHint = describeDbProblem(err);
     console.error('Database initialization failed, retrying in 5 seconds:', err.message);
     setTimeout(initDatabase, 5000);
   }
@@ -274,10 +288,11 @@ async function initDatabase() {
 initDatabase();
 
 // Health check (kept short: it is public even when SITE_PASSWORD is set)
-app.get('/health', (req, res) => res.json({
+app.get(['/health', '/api/health'], (req, res) => res.json({
   status: 'ok',
   service: 'RefineCalc Quote Desk',
-  dbReady
+  dbReady,
+  ...(dbReady || !pool ? {} : { dbHint: dbHint || 'The database is still connecting.' })
 }));
 
 // Real-Time Server-Sent Events (SSE) stream so all open devices update within milliseconds of any save
